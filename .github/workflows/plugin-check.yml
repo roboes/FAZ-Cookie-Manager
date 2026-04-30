@@ -1,0 +1,29 @@
+name: "Plugin Check"
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  plugin-check:
+    name: Plugin Check (wp.org shape)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # Build a wp.org-shape copy (mirrors the dual-ZIP flow in release.md).
+      # Excludes run-scan.php because Plugin Check cannot parse its CLI
+      # ABSPATH guard, and the file is excluded from the wp.org ZIP anyway.
+      - name: Build wp.org-shape plugin copy
+        run: rsync -a --exclude-from=.distignore . /tmp/faz-cookie-manager/
+
+      - name: Run Plugin Check
+        uses: wordpress/plugin-check-action@v1
+        with:
+          build-dir: /tmp/faz-cookie-manager
+          categories: plugin_repo

@@ -177,25 +177,51 @@ class WP_CLI_Commands {
 		$file           = '';
 		if ( '' === $requested_path ) {
 			$file = trailingslashit( $exports_base ) . $default_name;
-		} elseif ( false === strpos( $requested_path, '/' ) && false === strpos( $requested_path, DIRECTORY_SEPARATOR ) ) {
+		} elseif ( false === strpos( $requested_path, '/' ) && false === strpos( $requested_path, DIRECTORY_SEPARATOR ) && false === strpos( $requested_path, "\0" ) ) {
 			// Bare filename — append to the default exports directory.
 			$file = trailingslashit( $exports_base ) . sanitize_file_name( $requested_path );
 		} else {
 			// Caller passed a (possibly relative) path. Resolve it and
-			// confirm the result lives inside `wp_upload_dir()`.
+			// confirm the result lives inside `wp_upload_dir()`. We must
+			// reject ANY path that contains `..` segments or null bytes,
+			// since `wp_normalize_path()` does NOT resolve those — and
+			// `realpath()` resolves only existing paths, not the target
+			// file itself (which doesn't exist yet).
+			if ( false !== strpos( $requested_path, "\0" ) ) {
+				WP_CLI::error( 'Refusing path with null byte.' );
+				return;
+			}
 			$resolved      = wp_normalize_path( $requested_path );
 			$abs_target    = '/' === substr( $resolved, 0, 1 ) || preg_match( '#^[A-Za-z]:[/\\\\]#', $resolved )
 				? $resolved
 				: trailingslashit( $exports_base ) . $resolved;
 			$abs_target    = wp_normalize_path( $abs_target );
+			// Reject any `..` segment — wp_normalize_path doesn't collapse them
+			// and the OS will resolve them at write time, escaping uploads.
+			if ( preg_match( '#(?:^|/)\.\.(?:/|$)#', $abs_target ) ) {
+				WP_CLI::error( 'Refusing path containing ".." segments. Pass a bare filename or a clean absolute path inside wp_upload_dir().' );
+				return;
+			}
 			$uploads_root  = wp_normalize_path( trailingslashit( $upload['basedir'] ) );
 			if ( 0 !== strpos( $abs_target, $uploads_root ) ) {
 				WP_CLI::error( 'Refusing to write outside wp_upload_dir() (' . $uploads_root . '). Pass a bare filename to use the default exports/ directory, or an absolute path inside uploads.' );
 				return;
 			}
-			// Ensure parent directory exists.
+			// Defense in depth: if the parent directory exists, resolve it
+			// via realpath() to catch symlinks pointing outside uploads.
 			$parent_dir = dirname( $abs_target );
-			if ( ! is_dir( $parent_dir ) ) {
+			if ( is_dir( $parent_dir ) ) {
+				$real_parent = realpath( $parent_dir );
+				$real_root   = realpath( trailingslashit( $upload['basedir'] ) );
+				if ( false !== $real_parent && false !== $real_root ) {
+					$real_parent = wp_normalize_path( trailingslashit( $real_parent ) );
+					$real_root   = wp_normalize_path( trailingslashit( $real_root ) );
+					if ( 0 !== strpos( $real_parent, $real_root ) ) {
+						WP_CLI::error( 'Resolved parent directory escapes wp_upload_dir() (symlink?). Refusing.' );
+						return;
+					}
+				}
+			} else {
 				wp_mkdir_p( $parent_dir );
 			}
 			$file = $abs_target;

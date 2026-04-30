@@ -1081,12 +1081,22 @@ class Frontend {
 		if ( ! empty( $excluded ) && is_array( $excluded ) ) {
 			$current_id  = get_the_ID();
 			$current_url = isset( $_SERVER['REQUEST_URI'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REQUEST_URI'] ) ) : '';
+			// Strip query string + fragment so `/privacy/*` matches
+			// `/privacy/?utm=foo` and `/privacy/`. Normalise empty path to
+			// `/` so root exclusion (`/`) works.
+			$current_path = strtok( (string) $current_url, '?' );
+			$current_path = strtok( (string) $current_path, '#' );
+			if ( '' === (string) $current_path ) {
+				$current_path = '/';
+			}
 			foreach ( $excluded as $exclusion ) {
 				if ( is_numeric( $exclusion ) && absint( $exclusion ) === absint( $current_id ) ) {
 					return true;
 				}
-				if ( is_string( $exclusion ) && ! empty( $exclusion ) && fnmatch( $exclusion, $current_url ) ) {
-					return true;
+				if ( is_string( $exclusion ) && '' !== trim( $exclusion ) ) {
+					if ( faz_path_matches_pattern( trim( $exclusion ), $current_path ) ) {
+						return true;
+					}
 				}
 			}
 		}
@@ -1134,7 +1144,12 @@ class Frontend {
 		if ( empty( $excluded ) || ! is_array( $excluded ) ) {
 			return false;
 		}
-		$current_url = isset( $_SERVER['REQUEST_URI'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REQUEST_URI'] ) ) : '';
+		$current_url  = isset( $_SERVER['REQUEST_URI'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REQUEST_URI'] ) ) : '';
+		$current_path = strtok( (string) $current_url, '?' );
+		$current_path = strtok( (string) $current_path, '#' );
+		if ( '' === (string) $current_path ) {
+			$current_path = '/';
+		}
 		foreach ( $excluded as $pattern ) {
 			if ( ! is_string( $pattern ) ) {
 				continue;
@@ -1143,7 +1158,7 @@ class Frontend {
 			if ( empty( $pattern ) ) {
 				continue;
 			}
-			if ( fnmatch( $pattern, $current_url ) ) {
+			if ( faz_path_matches_pattern( $pattern, $current_path ) ) {
 				return true;
 			}
 		}

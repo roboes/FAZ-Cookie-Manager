@@ -347,7 +347,6 @@ class Activator {
 		// 1.11.x) keep a stale cached template that may lack CSS for new
 		// elements like the inline SVG revisit icon.
 		faz_clear_banner_template_cache();
-		update_option( 'faz_version', FAZ_VERSION );
 		// Invalidate page caches so visitors immediately see the new
 		// `_fazConfig`/banner-template payload — without this step the
 		// cached HTML keeps embedding the previous version's localized
@@ -356,6 +355,12 @@ class Activator {
 		// for the matrix of supported cache plugins.
 		self::purge_page_caches();
 		do_action( 'faz_after_activate', FAZ_VERSION );
+		// Bump `faz_version` LAST so a fatal in any of the steps above
+		// (table create, migration, purge) leaves the version flag at the
+		// previous value — the next admin request will re-enter `install()`
+		// via `check_version()` and retry the failed step instead of
+		// silently skipping the migration forever.
+		update_option( 'faz_version', FAZ_VERSION );
 		self::update_db_version();
 	}
 
@@ -375,56 +380,85 @@ class Activator {
 	 * @return void
 	 */
 	public static function purge_page_caches() {
-		// LiteSpeed Cache.
-		if ( defined( 'LSCWP_V' ) ) {
-			do_action( 'litespeed_purge_all', 'FAZ Cookie Manager upgrade' );
-		}
-		// WP Rocket.
-		if ( function_exists( 'rocket_clean_domain' ) ) {
-			rocket_clean_domain();
-		}
-		// W3 Total Cache.
-		if ( function_exists( 'w3tc_flush_all' ) ) {
-			w3tc_flush_all();
-		}
-		// WP Super Cache.
-		if ( function_exists( 'wp_cache_clear_cache' ) ) {
-			wp_cache_clear_cache();
-		}
-		// Cache Enabler.
-		if ( has_action( 'cache_enabler_clear_complete_cache' ) ) {
-			do_action( 'cache_enabler_clear_complete_cache' );
-		}
-		// SG Optimizer.
-		if ( function_exists( 'sg_cachepress_purge_cache' ) ) {
-			sg_cachepress_purge_cache();
-		}
-		// Hummingbird (Cache module).
-		if ( has_action( 'wphb_clear_page_cache' ) ) {
-			do_action( 'wphb_clear_page_cache' );
-		}
-		// Breeze (Cloudways).
-		if ( class_exists( 'Breeze_PurgeCache' ) ) {
-			\Breeze_PurgeCache::breeze_cache_flush();
-		}
-		// Autoptimize (CSS/JS cache, not page cache, but still relevant).
-		if ( class_exists( 'autoptimizeCache' ) && method_exists( 'autoptimizeCache', 'clearall' ) ) {
-			\autoptimizeCache::clearall();
-		}
-		// WP-Optimize.
-		if ( class_exists( 'WP_Optimize' ) && function_exists( 'wpo_cache_flush' ) ) {
-			wpo_cache_flush();
-		}
-		// Comet Cache.
-		if ( class_exists( '\\WebSharks\\CometCache\\Classes\\Plugin' ) ) {
-			$comet = \WebSharks\CometCache\Classes\Plugin::class;
-			if ( method_exists( $comet, 'wipeCache' ) ) {
-				$comet::wipeCache();
+		// Each best-effort purge call is wrapped in try/catch so a single
+		// misbehaving cache plugin (corrupted state, partial install,
+		// permissions issue) cannot abort the upgrade flow midway and
+		// leave `faz_version` un-bumped. Throwables are logged via
+		// `error_log` for forensics but do not propagate.
+		$purgers = array(
+			array( 'LiteSpeed Cache', function () {
+				if ( defined( 'LSCWP_V' ) ) {
+					do_action( 'litespeed_purge_all', 'FAZ Cookie Manager upgrade' );
+				}
+			} ),
+			array( 'WP Rocket', function () {
+				if ( function_exists( 'rocket_clean_domain' ) ) {
+					rocket_clean_domain();
+				}
+			} ),
+			array( 'W3 Total Cache', function () {
+				if ( function_exists( 'w3tc_flush_all' ) ) {
+					w3tc_flush_all();
+				}
+			} ),
+			array( 'WP Super Cache', function () {
+				if ( function_exists( 'wp_cache_clear_cache' ) ) {
+					wp_cache_clear_cache();
+				}
+			} ),
+			array( 'Cache Enabler', function () {
+				if ( has_action( 'cache_enabler_clear_complete_cache' ) ) {
+					do_action( 'cache_enabler_clear_complete_cache' );
+				}
+			} ),
+			array( 'SG Optimizer', function () {
+				if ( function_exists( 'sg_cachepress_purge_cache' ) ) {
+					sg_cachepress_purge_cache();
+				}
+			} ),
+			array( 'Hummingbird', function () {
+				if ( has_action( 'wphb_clear_page_cache' ) ) {
+					do_action( 'wphb_clear_page_cache' );
+				}
+			} ),
+			array( 'Breeze', function () {
+				if ( class_exists( 'Breeze_PurgeCache' ) ) {
+					\Breeze_PurgeCache::breeze_cache_flush();
+				}
+			} ),
+			array( 'Autoptimize', function () {
+				if ( class_exists( 'autoptimizeCache' ) && method_exists( 'autoptimizeCache', 'clearall' ) ) {
+					\autoptimizeCache::clearall();
+				}
+			} ),
+			array( 'WP-Optimize', function () {
+				if ( class_exists( 'WP_Optimize' ) && function_exists( 'wpo_cache_flush' ) ) {
+					wpo_cache_flush();
+				}
+			} ),
+			array( 'Comet Cache', function () {
+				if ( class_exists( '\\WebSharks\\CometCache\\Classes\\Plugin' ) ) {
+					$comet = \WebSharks\CometCache\Classes\Plugin::class;
+					if ( method_exists( $comet, 'wipeCache' ) ) {
+						$comet::wipeCache();
+					}
+				}
+			} ),
+			array( 'WP Object Cache', function () {
+				// Generic WP object cache (Memcached, Redis via the drop-in).
+				if ( function_exists( 'wp_cache_flush' ) ) {
+					wp_cache_flush();
+				}
+			} ),
+		);
+
+		foreach ( $purgers as $entry ) {
+			list( $label, $callable ) = $entry;
+			try {
+				$callable();
+			} catch ( \Throwable $e ) {
+				error_log( 'FAZ purge_page_caches: ' . $label . ' failed — ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
 			}
-		}
-		// Generic WP object cache (Memcached, Redis via the drop-in).
-		if ( function_exists( 'wp_cache_flush' ) ) {
-			wp_cache_flush();
 		}
 	}
 
@@ -470,16 +504,23 @@ class Activator {
 	 * @return void
 	 */
 	public static function check_for_upgrade() {
+		// 30 minutes is enough for the post-activation redirect flow to
+		// run (admin lands on the welcome screen, dismisses the notice,
+		// browses around). 30 SECONDS — the previous value — was a typo:
+		// the flag would expire before the activation_redirect itself
+		// fires on a slow-bootstrapping host.
+		$ttl = 30 * MINUTE_IN_SECONDS;
+
 		// Migration: copy legacy transient onto the new name and delete it.
 		$legacy = get_site_transient( '_faz_first_time_install' );
 		if ( false !== $legacy ) {
-			set_site_transient( 'faz_first_time_install', $legacy, 30 );
+			set_site_transient( 'faz_first_time_install', $legacy, $ttl );
 			delete_site_transient( '_faz_first_time_install' );
 		}
 
 		if ( false === get_option( 'faz_settings', false ) ) {
 			if ( false === get_site_transient( 'faz_first_time_install' ) ) {
-				set_site_transient( 'faz_first_time_install', true, 30 );
+				set_site_transient( 'faz_first_time_install', true, $ttl );
 			}
 		}
 	}

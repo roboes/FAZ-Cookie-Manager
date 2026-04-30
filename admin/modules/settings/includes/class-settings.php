@@ -299,8 +299,24 @@ class Settings extends Store {
 				break;
 			case 'consent_revision':
 				// Revision counter: always >= 1. Bounded upper limit to avoid
-				// accidental huge values from corrupted input.
-				$value = max( 1, min( 999999, absint( $value ) ) );
+				// accidental huge values from corrupted input. The
+				// "Invalidate all consents" button is meant to be one-way,
+				// so we also refuse to LOWER the persisted revision —
+				// otherwise a power user editing the readonly input via
+				// DevTools could downgrade the counter and re-validate
+				// already-revoked consents.
+				$incoming  = max( 1, min( 999999, absint( $value ) ) );
+				$persisted = isset( self::$cached_settings['general']['consent_revision'] )
+					? absint( self::$cached_settings['general']['consent_revision'] )
+					: 0;
+				if ( 0 === $persisted ) {
+					// First read — pull from DB to avoid bootstrapping issues.
+					$db_settings = get_option( 'faz_settings', array() );
+					$persisted   = isset( $db_settings['general']['consent_revision'] )
+						? absint( $db_settings['general']['consent_revision'] )
+						: 1;
+				}
+				$value = max( $incoming, $persisted );
 				break;
 			case 'retention':
 				$value = max( 1, min( 120, absint( $value ) ) );
@@ -311,9 +327,33 @@ class Settings extends Store {
 			case 'cmp_id':
 				$value = min( 4095, absint( $value ) );
 				break;
+			case 'target_domains':
+				// Cross-domain consent forwarding receivers MUST be HTTP(S)
+				// URLs — anything else (`javascript:`, `data:`, malformed
+				// strings) is rejected. We use `esc_url_raw()` to produce
+				// a safe stored value and parse the host to enforce schemes.
+				if ( ! is_array( $value ) ) {
+					$value = array();
+					break;
+				}
+				$value = array_values( array_filter( array_map( function ( $item ) {
+					$raw = trim( (string) $item );
+					if ( '' === $raw ) {
+						return '';
+					}
+					$url    = esc_url_raw( $raw );
+					$scheme = wp_parse_url( $url, PHP_URL_SCHEME );
+					$host   = wp_parse_url( $url, PHP_URL_HOST );
+					if ( ! in_array( $scheme, array( 'http', 'https' ), true ) || empty( $host ) ) {
+						return '';
+					}
+					return $url;
+				}, $value ), function ( $item ) {
+					return '' !== $item;
+				} ) );
+				break;
 			case 'excluded_pages':
 			case 'sites':
-			case 'target_domains':
 			case 'whitelist_patterns':
 				if ( ! is_array( $value ) ) {
 					$value = array();
@@ -339,7 +379,16 @@ class Settings extends Store {
 				$value = array_values( array_unique( array_filter( array_map( 'absint', $value ) ) ) );
 				break;
 			case 'custom_rules':
-				$allowed_categories = array( 'analytics', 'marketing', 'functional', 'performance' );
+				// Allowed categories must include all built-in non-removable
+				// slugs (`necessary`, `uncategorized`) plus the user-facing
+				// runtime categories. Without `necessary`, the 8 blocker
+				// templates (Cloudflare Turnstile, Gravatar, reCAPTCHA,
+				// hCaptcha, Wordfence, WPForms, Ninja Forms reCAPTCHA,
+				// WooCommerce Attribution) silently lose their custom_rule
+				// rows on save — admin sees the green toast, DB stays empty.
+				// `performance` retained for backward compat with v1.13.x
+				// installs even though no real category currently uses it.
+				$allowed_categories = array( 'necessary', 'uncategorized', 'analytics', 'marketing', 'functional', 'performance' );
 				if ( ! is_array( $value ) ) {
 					$value = array();
 				}
@@ -354,6 +403,17 @@ class Settings extends Store {
 					}
 					return array( 'pattern' => $pattern, 'category' => $category );
 				}, $value ) ) );
+				// Deduplicate by pattern+category to prevent the admin click-
+				// the-same-template-twice failure mode.
+				$seen  = array();
+				$value = array_values( array_filter( $value, function ( $rule ) use ( &$seen ) {
+					$key = $rule['pattern'] . '|' . $rule['category'];
+					if ( isset( $seen[ $key ] ) ) {
+						return false;
+					}
+					$seen[ $key ] = true;
+					return true;
+				} ) );
 				break;
 			case 'default_behavior':
 				$allowed = array( 'show_banner', 'no_banner' );

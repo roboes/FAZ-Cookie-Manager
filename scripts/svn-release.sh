@@ -189,7 +189,9 @@ cyan "═══ Apply: copy screenshots/banner/icon into assets/ ═══"
 mkdir -p assets
 cp "${PLUGIN_SRC}/.wordpress-org/"screenshot-*.png assets/ 2>/dev/null || true
 cp "${PLUGIN_SRC}/.wordpress-org/"banner-*.png assets/ 2>/dev/null || true
+cp "${PLUGIN_SRC}/.wordpress-org/"banner-*.jpg assets/ 2>/dev/null || true
 cp "${PLUGIN_SRC}/.wordpress-org/"icon-*.png assets/ 2>/dev/null || true
+cp "${PLUGIN_SRC}/.wordpress-org/"icon-*.jpg assets/ 2>/dev/null || true
 
 if [[ "${NO_TAG}" == "0" ]]; then
     cyan "═══ Apply: svn cp trunk → tags/${VERSION} ═══"

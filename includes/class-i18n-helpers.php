@@ -459,7 +459,7 @@ if ( ! function_exists( 'faz_wp_locale' ) ) {
 			'hu'    => 'hu_HU',
 			'ro'    => 'ro_RO',
 			'bg'    => 'bg_BG',
-			'hr'    => 'hr',
+			'hr'    => 'hr_HR',
 			'el'    => 'el',
 			'tr'    => 'tr_TR',
 			'sv'    => 'sv_SE',

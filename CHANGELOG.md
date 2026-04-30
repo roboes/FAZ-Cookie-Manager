@@ -2,6 +2,31 @@
 
 All notable changes to FAZ Cookie Manager are documented in this file.
 
+## [1.13.12] — 2026-04-30
+
+### Security / hardening
+
+- **`consent_revision` cannot be lowered via DevTools manipulation.** `Settings::sanitize_one()` now reads the persisted revision from DB/cache and enforces `max($incoming, $persisted)` — a power user editing the readonly field via DevTools cannot submit a lower number and silently re-validate already-revoked consents. The Settings UI field now also carries `disabled` so it is excluded from form submission entirely on modern browsers.
+- **`target_domains` URL validation.** Each entry in the cross-domain consent forwarding list is validated via `esc_url_raw()` + `wp_parse_url()` — only `http`/`https` scheme and non-empty host are accepted. `javascript:`, `data:`, and malformed strings are dropped at the REST sanitise layer.
+- **`necessary` and `uncategorized` categories are protected from deletion.** `Category_Controller` now refuses DELETE requests for these two slugs at the controller layer, throwing a `RuntimeException` before the DB DELETE runs. Deleting either silently breaks scanner auto-categorisation and the necessary-toggle non-disableable invariant on the frontend.
+- **Pageview tracking REST endpoint gated on the `pageview_tracking` setting.** If tracking is disabled the public POST endpoint is not registered at all — removing the attack surface for token harvest and per-IP throttle bypass attempts on installs that don't use dashboard analytics.
+- **WP-CLI export path traversal hardening.** `wp faz export` now explicitly rejects paths containing null bytes and `..` segments (which `wp_normalize_path()` does not collapse). Already-existing parent directories are resolved via `realpath()` to catch symlinks pointing outside `wp_upload_dir()`.
+
+### Fixed
+
+- **`purge_page_caches()` wrapped in try/catch per plugin.** A single misbehaving cache plugin can no longer abort the upgrade flow midway and leave `faz_version` un-bumped. Each best-effort purge call is now isolated; failures are logged via `error_log` but do not propagate.
+- **`faz_version` bumped LAST in `Activator::install()`.** Previously the flag was written before cache purges ran — a fatal in any step left it already bumped, so `check_version()` never re-entered `install()` and the failed migration was silently skipped forever. Now the flag is written only after all steps complete.
+- **Excluded-pages and whitelist patterns now match on path only.** `fnmatch($pattern, $current_url)` was matching the full `REQUEST_URI` including query string and fragment, so `/privacy/*` never matched `/privacy/?utm=foo`. The request URI is now stripped to path-only before matching.
+- **`faz_path_matches_pattern()` replaces bare `fnmatch()`.** The new helper adds (a) a portable fallback for Windows PHP builds where `fnmatch()` is absent (uses `preg_*`); (b) case-insensitive matching via `FNM_CASEFOLD` / `i` flag — admins typing `/Privacy/*` now match `/privacy/foo`.
+- **WCA.js `performance` category mapped to `statistics` (was `functional`).** The WP Consent API mapping was incorrect — admins gating on `performance` expected analytics behaviour, not preferences. Also added `advertisement` → `marketing` back-compat for consent cookies stored before the 1.13.5 slug rename.
+- **Croatian locale `hr` → `hr_HR`** in `class-i18n-helpers.php` locale table.
+- **`alwaysActive` toggle now has a distinct blue colour** in gdpr.json and ccpa.json default configs. The "Always Active" badge for the Necessary category was visually indistinguishable from the inactive state.
+
+### Added
+
+- **"Share consent across subdomains" toggle** in Settings. When enabled, the consent cookie is scoped to the registrable domain (e.g. `.example.com`) so it is shared across `www`, `shop`, `app`, etc. Public-suffix-aware for multi-level TLDs. Recommended only when all subdomains are covered by the same privacy policy.
+- **GitHub Actions: Plugin Check workflow** (`.github/workflows/plugin-check.yml`). Runs `wordpress/plugin-check-action@v1` on every push and PR to `main` using the wp.org-shape build — Plugin Check errors appear as annotations on the commit/PR, catching compliance drift in real time.
+
 ## [1.13.11] — 2026-04-29
 
 ### Removed (breaking for one feature)

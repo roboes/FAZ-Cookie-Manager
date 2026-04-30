@@ -56,6 +56,16 @@ class Api extends Rest_Controller {
 	 * @return void
 	 */
 	public function register_routes() {
+		// Gate the public POST endpoint behind the admin's
+		// `pageview_tracking` toggle. When tracking is off, the route is
+		// not registered at all — defense-in-depth against token harvest
+		// and per-IP throttle bypass attempts on installs that don't use
+		// the dashboard analytics. The admin chart endpoints below are
+		// always registered (they need to render even with empty data).
+		$settings           = get_option( 'faz_settings', array() );
+		$pageview_tracking  = isset( $settings['pageview_tracking'] ) ? (bool) $settings['pageview_tracking'] : false;
+
+		if ( $pageview_tracking ) {
 		// Public: record a pageview or banner event.
 		// `permission_callback => __return_true` is intentional. This endpoint
 		// is consumed by anonymous frontend visitors (the only audience for
@@ -102,6 +112,7 @@ class Api extends Rest_Controller {
 				),
 			)
 		);
+		} // end if ( $pageview_tracking ).
 
 		// Admin: get pageview chart data.
 		register_rest_route(

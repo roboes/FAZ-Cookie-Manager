@@ -293,6 +293,22 @@ class Category_Controller extends Base_Controller {
 		if ( ! $category_id ) {
 			return;
 		}
+
+		// Protect built-in non-removable categories. The `necessary` and
+		// `uncategorized` slugs are referenced by the consent flow and the
+		// scanner respectively; deleting either silently breaks the
+		// scanner's auto-categorisation pipeline and the necessary-toggle
+		// non-disableable invariant on the frontend banner. Refuse at
+		// the controller layer — REST callers receive a clear error
+		// instead of a 200 with stale state.
+		$slug = (string) $object->get_slug();
+		if ( in_array( $slug, array( 'necessary', 'uncategorized' ), true ) ) {
+			$wpdb->query( 'ROLLBACK' ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery -- defensive no-op if no transaction is open.
+			throw new \RuntimeException(
+				sprintf( 'Refusing to delete protected built-in category "%s".', esc_html( $slug ) )
+			);
+		}
+
 		$fallback_id = $this->get_fallback_category_id( $category_id );
 		if ( null === $fallback_id ) {
 			return;

@@ -486,6 +486,12 @@ Value format: `consentid:{base64},consent:yes,action:yes,necessary:yes,functiona
 
 ## Changelog
 
+### 1.13.12
+- **Security**: `consent_revision` cannot be lowered via DevTools manipulation; `target_domains` validates http/https scheme + non-empty host; `necessary`/`uncategorized` categories protected from REST deletion; pageview tracking endpoint only registered when tracking is on; WP-CLI export hardened against null bytes, `..` traversal, and symlink escape.
+- **Fix**: `purge_page_caches()` now isolates each cache plugin in try/catch — a failing backend can no longer abort the upgrade and leave `faz_version` un-bumped. `faz_version` is now bumped LAST in `install()` so failed migrations retry on the next admin request. Excluded-pages patterns now strip query string and fragment before matching. `faz_path_matches_pattern()` replaces bare `fnmatch()` for portability and case-insensitivity.
+- **Fix**: WCA.js `performance` maps to `statistics` (was incorrectly `functional`); `advertisement` back-compat alias for pre-1.13.5 consent cookies. Croatian locale corrected `hr` → `hr_HR`. `alwaysActive` toggle has a distinct blue colour in default gdpr/ccpa configs.
+- **Added**: "Share consent across subdomains" toggle — scopes consent cookie to registrable domain. GitHub Actions Plugin Check workflow on every push/PR.
+
 ### 1.13.11
 - **Removed (breaking for one feature)**: Banner → **Custom CSS** textarea field. Plugin Review Team flagged free-form CSS injection as "arbitrary code insertion" not permitted on wp.org. The textarea is gone from the admin UI, the REST preview no longer renders `meta.customCSS`, and the public frontend no longer injects it. Existing values stay in `wp_faz_banners` for downgrade safety but are inert. Migration path for users who used this: copy your CSS over to **Customizer → Additional CSS** (built-in WordPress) and target `.faz-consent-container`, `.faz-modal`, `.faz-preference-wrapper` directly.
 - **Security**: `$_SERVER['HTTP_USER_AGENT']` in `faz_is_bot()` now wrapped with `sanitize_text_field( wp_unslash( … ) )` at the access line — visible to static analysers and the value is also clean before being passed to the public `apply_filters('faz_is_bot', …)` hook.

@@ -377,6 +377,57 @@ if ( ! function_exists( 'faz_throttle_request' ) ) {
 
 if ( ! function_exists( 'faz_is_bot' ) ) {
 	/**
+	 * Match a URL path against a glob-like pattern with case-folding and
+	 * portable fallback when `fnmatch()` is unavailable.
+	 *
+	 * Handles three failure modes that the previous `fnmatch($pattern,
+	 * $current_url)` call exhibited:
+	 *   1. `fnmatch()` is not always available on Windows builds of PHP
+	 *      without the POSIX extension — sites using `script_blocking.
+	 *      excluded_pages` would fatal there. The fallback converts the
+	 *      glob to a regex using only `preg_*` (always available).
+	 *   2. `fnmatch()` defaults to case-sensitive on POSIX. URL paths are
+	 *      case-insensitive in practice (admins typing `/Privacy/*` expect
+	 *      `/privacy/foo` to match). We pass `FNM_CASEFOLD` when the
+	 *      constant exists, and use `i` flag in the regex fallback.
+	 *   3. Trailing-slash mismatch (`/privacy` vs `/privacy/`) — caller
+	 *      should pre-normalise (this helper does not).
+	 *
+	 * @since 1.13.12
+	 * @param string $pattern Glob pattern (e.g. `/privacy/*`).
+	 * @param string $path    Request path (already query-/fragment-stripped).
+	 * @return bool
+	 */
+	function faz_path_matches_pattern( $pattern, $path ) {
+		$pattern = (string) $pattern;
+		$path    = (string) $path;
+		if ( '' === $pattern ) {
+			return false;
+		}
+		if ( function_exists( 'fnmatch' ) ) {
+			$flags = defined( 'FNM_CASEFOLD' ) ? FNM_CASEFOLD : 0;
+			return fnmatch( $pattern, $path, $flags );
+		}
+		// Portable fallback: glob → regex. Quote everything but `*` and `?`,
+		// then expand them. Anchor to full-string match. Case-insensitive.
+		$regex = '';
+		$len   = strlen( $pattern );
+		for ( $i = 0; $i < $len; $i++ ) {
+			$c = $pattern[ $i ];
+			if ( '*' === $c ) {
+				$regex .= '.*';
+			} elseif ( '?' === $c ) {
+				$regex .= '.';
+			} else {
+				$regex .= preg_quote( $c, '#' );
+			}
+		}
+		return 1 === preg_match( '#^' . $regex . '$#i', $path );
+	}
+}
+
+if ( ! function_exists( 'faz_is_bot' ) ) {
+	/**
 	 * Detect search engine bots and crawlers by user agent.
 	 *
 	 * Returns true for known bot user agents so the cookie banner

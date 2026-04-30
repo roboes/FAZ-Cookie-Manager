@@ -59,6 +59,14 @@ defined( 'ABSPATH' ) || exit;
 				</label>
 				<div class="faz-help"><?php esc_html_e( 'When enabled, visitors can accept or reject individual services (e.g., Google Analytics, YouTube) instead of entire categories. This provides more granular privacy control but makes the preference center more complex.', 'faz-cookie-manager' ); ?></div>
 			</div>
+			<div class="faz-form-group">
+				<label class="faz-toggle">
+					<input type="checkbox" data-path="banner_control.subdomain_sharing">
+					<span class="faz-toggle-track"></span>
+					<span class="faz-toggle-label"><?php esc_html_e( 'Share consent across subdomains', 'faz-cookie-manager' ); ?></span>
+				</label>
+				<div class="faz-help"><?php esc_html_e( 'Scope the consent cookie to your registrable domain (e.g. .example.com) so it is shared across www, shop, app, etc. Recommended only when all subdomains belong to you and are covered by the same privacy policy. Public-suffix-aware for multi-level TLDs (.co.uk, .com.au).', 'faz-cookie-manager' ); ?></div>
+			</div>
 		</div>
 	</div>
 
@@ -393,7 +401,7 @@ defined( 'ABSPATH' ) || exit;
 			<div class="faz-form-group">
 				<label><?php esc_html_e( 'Current consent revision', 'faz-cookie-manager' ); ?></label>
 				<div style="display:flex;align-items:center;gap:12px;">
-					<input type="number" class="faz-input faz-input-sm" data-path="general.consent_revision" readonly style="width:100px;background:var(--faz-bg-secondary);">
+					<input type="number" class="faz-input faz-input-sm" data-path="general.consent_revision" readonly disabled style="width:100px;background:var(--faz-bg-secondary);">
 					<button class="faz-btn faz-btn-secondary" id="faz-invalidate-consents" type="button">
 						<?php esc_html_e( 'Invalidate all consents', 'faz-cookie-manager' ); ?>
 					</button>

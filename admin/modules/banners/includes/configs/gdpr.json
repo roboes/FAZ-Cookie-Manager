@@ -190,6 +190,11 @@
                             "styles": {
                                 "background-color": "#D0D5D2"
                             }
+                        },
+                        "alwaysActive": {
+                            "styles": {
+                                "background-color": "#1863DC"
+                            }
                         }
                     }
                 },
@@ -276,6 +281,11 @@
                                 "inactive": {
                                     "styles": {
                                         "background-color": "#D0D5D2"
+                                    }
+                                },
+                                "alwaysActive": {
+                                    "styles": {
+                                        "background-color": "#1863DC"
                                     }
                                 }
                             }
