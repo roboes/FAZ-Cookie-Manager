@@ -57,9 +57,18 @@ class Controller {
 
 	/**
 	 * Constructor - ensure table exists.
+	 *
+	 * Deferred to plugins_loaded so wp_salt() (pluggable.php) is guaranteed
+	 * to be available before the migration query runs. Running it synchronously
+	 * in the constructor crashes WordPress Playground where the loading order
+	 * differs from a standard installation.
 	 */
 	private function __construct() {
-		$this->maybe_create_table();
+		if ( did_action( 'plugins_loaded' ) ) {
+			$this->maybe_create_table();
+		} else {
+			add_action( 'plugins_loaded', array( $this, 'maybe_create_table' ), 20 );
+		}
 	}
 
 	/**
@@ -110,21 +119,25 @@ class Controller {
 		// Migrate legacy plaintext user_agent values to hashed form.
 		$migration_ok = true;
 		if ( version_compare( $installed_version, '1.1', '<' ) ) {
-			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- one-shot data migration in the activation/upgrade path; $table_name is $wpdb->prefix + literal "faz_consent_logs"; the salt and regex are bound via prepare(%s).
-			$result = $wpdb->query(
-				$wpdb->prepare(
-					"UPDATE {$table_name}
-					 SET user_agent = LOWER(SHA2(CONCAT(user_agent, %s), 256))
-					 WHERE user_agent <> ''
-					 AND user_agent NOT REGEXP %s",
-					\wp_salt( 'auth' ),
-					'^[0-9a-f]{64}$'
-				)
-			);
-			// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter
-			if ( false === $result ) {
-				$migration_ok = false;
+			if ( function_exists( 'wp_salt' ) ) {
+				// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- one-shot data migration in the activation/upgrade path; $table_name is $wpdb->prefix + literal "faz_consent_logs"; the salt and regex are bound via prepare(%s).
+				$result = $wpdb->query(
+					$wpdb->prepare(
+						"UPDATE {$table_name}
+						 SET user_agent = LOWER(SHA2(CONCAT(user_agent, %s), 256))
+						 WHERE user_agent <> ''
+						 AND user_agent NOT REGEXP %s",
+						\wp_salt( 'auth' ),
+						'^[0-9a-f]{64}$'
+					)
+				);
+				// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter
+				if ( false === $result ) {
+					$migration_ok = false;
+				}
 			}
+			// If wp_salt() is not yet available, skip migration silently.
+			// Fresh installs have no rows to migrate; upgrades will retry next request.
 		}
 
 		if ( $migration_ok ) {

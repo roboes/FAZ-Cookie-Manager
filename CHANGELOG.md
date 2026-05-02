@@ -2,6 +2,12 @@
 
 All notable changes to FAZ Cookie Manager are documented in this file.
 
+## [1.13.14] — 2026-05-02
+
+### Fixed
+
+- **Fatal error on WordPress Playground.** `maybe_create_table()` was invoked synchronously from the `ConsentLogs\Includes\Controller` constructor at plugin-load time. In Playground's WASM environment the WordPress bootstrap order differs from a standard installation: `pluggable.php` (which defines `wp_salt()`) is not yet in scope when plugins are loaded, so every visit to the FAZ admin page crashed with *"Call to undefined function wp_salt()"*. The `\` namespace fix from 1.13.13 was insufficient — the root cause was the *timing*, not just the prefix. Fix: constructor now hooks `maybe_create_table()` to `plugins_loaded` (priority 20) via `add_action`; `function_exists('wp_salt')` guard added around the migration query as a belt-and-suspenders safety net.
+
 ## [1.13.13] — 2026-05-02
 
 ### Fixed

@@ -4,7 +4,7 @@ Donate link: https://buymeacoffee.com/fabiodalez
 Tags: cookie, gdpr, ccpa, consent, privacy
 Requires at least: 5.0
 Tested up to: 6.9
-Stable tag: 1.13.13
+Stable tag: 1.13.14
 Requires PHP: 7.4
 License: GPL-3.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -207,6 +207,9 @@ By default, no — your consent logs, banner configuration and categories stay i
 10. **Settings** -- Global controls: enable/disable the banner, exclude specific pages, cross-domain consent forwarding, hide from bots, GTM dataLayer events, consent log retention and scanner limits.
 
 == Changelog ==
+
+= 1.13.14 =
+* Fix: Fatal error on WordPress Playground — `maybe_create_table()` was called synchronously from the `ConsentLogs\Includes\Controller` constructor during plugin loading. In Playground's WASM environment the WordPress loading order differs and `wp_salt()` (from `pluggable.php`) is not yet available at that point, causing a fatal "Call to undefined function wp_salt()". Fixed by deferring table-creation to the `plugins_loaded` hook and guarding the `wp_salt()` call with `function_exists()`.
 
 = 1.13.13 =
 * Fix: Fatal error on fresh install — `wp_salt()` called without `\` prefix inside the `FazCookie\Admin\Modules\Consentlogs\Includes` namespace caused PHP to look for a non-existent namespaced function instead of the global WordPress `wp_salt()`. Crashed Playground, staging, and any first-time activation where `maybe_create_table()` runs the user-agent migration query. Three callsites fixed.

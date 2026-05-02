@@ -494,6 +494,9 @@ Value format: `consentid:{base64},consent:yes,action:yes,necessary:yes,functiona
 
 ## Changelog
 
+### 1.13.14
+- **Fix**: Fatal error on WordPress Playground — `maybe_create_table()` called synchronously from the constructor during plugin loading, before `wp_salt()` is available in Playground's WASM bootstrap. Deferred to `plugins_loaded` hook + `function_exists` guard.
+
 ### 1.13.13
 - **Fix**: Fatal error on fresh install — `wp_salt()` called without `\` prefix inside `ConsentLogs` namespace crashed Playground, staging, and any first-time activation where the migration query runs.
 - **Added**: WordPress Playground Live Preview on wp.org plugin page.
