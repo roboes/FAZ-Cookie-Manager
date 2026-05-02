@@ -6,6 +6,7 @@
 [![Rating](https://img.shields.io/wordpress/plugin/rating/faz-cookie-manager?color=0073aa)](https://wordpress.org/plugins/faz-cookie-manager/reviews/)
 [![Tested up to](https://img.shields.io/wordpress/plugin/tested/faz-cookie-manager?color=0073aa)](https://wordpress.org/plugins/faz-cookie-manager/)
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
+[![Try in Playground](https://img.shields.io/badge/Try%20in-Playground-3858e9)](https://playground.wordpress.net/?plugin=faz-cookie-manager)
 
 Available on the [WordPress.org plugin directory](https://wordpress.org/plugins/faz-cookie-manager/) — install and update directly from your WordPress dashboard (**Plugins > Add New > search "FAZ Cookie Manager"**).
 

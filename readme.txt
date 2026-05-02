@@ -46,6 +46,10 @@ This plugin assists consent and privacy workflows. It does not itself create, pr
 * **LGPD** (Brazil General Data Protection Law) -- Consent-based model
 * **POPIA** (South Africa Protection of Personal Information Act) -- Opt-in consent
 
+= Try it Live =
+
+**[Try FAZ Cookie Manager in WordPress Playground](https://playground.wordpress.net/?plugin=faz-cookie-manager)** -- no account, no install, runs entirely in your browser.
+
 = How it works =
 
 1. Install and activate -- the cookie banner appears immediately with sensible defaults
