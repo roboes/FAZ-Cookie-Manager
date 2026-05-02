@@ -117,7 +117,7 @@ class Controller {
 					 SET user_agent = LOWER(SHA2(CONCAT(user_agent, %s), 256))
 					 WHERE user_agent <> ''
 					 AND user_agent NOT REGEXP %s",
-					wp_salt( 'auth' ),
+					\wp_salt( 'auth' ),
 					'^[0-9a-f]{64}$'
 				)
 			);
@@ -142,7 +142,7 @@ class Controller {
 		if ( empty( $ip ) ) {
 			return '';
 		}
-		return hash( 'sha256', $ip . wp_salt() );
+		return hash( 'sha256', $ip . \wp_salt() );
 	}
 
 	/**
@@ -156,7 +156,7 @@ class Controller {
 			return '';
 		}
 
-		return hash( 'sha256', $user_agent . wp_salt( 'auth' ) );
+		return hash( 'sha256', $user_agent . \wp_salt( 'auth' ) );
 	}
 
 	/**
