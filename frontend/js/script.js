@@ -2711,7 +2711,10 @@ function _fazAddPlaceholder(htmlElm, uniqueID) {
     );
     if (innerTextElement) innerTextElement.classList.add('faz-hidden');
     var youtubeID = _fazGetYoutubeID(htmlElm.src || '');
-    if (!youtubeID) return;
+    if (!youtubeID) {
+        _fazSetPlaceHolder();
+        return;
+    }
     addedNode.classList.replace(
         "video-placeholder-normal",
         "video-placeholder-youtube"

@@ -160,6 +160,56 @@ test.describe('PR #92 — TinyMCE restore + REST DELETE + video placeholder', ()
     ).toContain('_fazSetPlaceHolder()');
   });
 
+  test('dynamically-injected Vimeo iframe shows visible placeholder text (non-YouTube provider)', async ({ browser }) => {
+    // Regression for P2 CodeRabbit finding: _fazSetPlaceHolder() was only called
+    // in the YouTube branch, leaving faz-hidden on non-YouTube placeholders.
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+
+    try {
+      await page.goto(`${WP_BASE}/`, { waitUntil: 'domcontentloaded' });
+
+      const fazLoaded = await page
+        .waitForFunction(() => typeof (window as any)._fazAddPlaceholder === 'function', { timeout: 5_000 })
+        .then(() => true)
+        .catch(() => false);
+
+      if (!fazLoaded) {
+        test.skip();
+        return;
+      }
+
+      await page.evaluate(() => {
+        const iframe = document.createElement('iframe');
+        iframe.src = 'https://player.vimeo.com/video/123456789';
+        iframe.width = '640';
+        iframe.height = '360';
+        document.body.appendChild(iframe);
+      });
+
+      await page.waitForTimeout(1_500);
+
+      const placeholderCount = await page.locator('[data-faz-tag="video-placeholder"]').count();
+
+      if (placeholderCount === 0) {
+        test.skip();
+        return;
+      }
+
+      // THE KEY ASSERTION — without the fix, non-YouTube providers returned
+      // before _fazSetPlaceHolder(), leaving faz-hidden on the title element.
+      const hiddenTitles = await page.locator('[data-faz-tag="placeholder-title"].faz-hidden').count();
+      expect(hiddenTitles, 'Vimeo placeholder title must not have faz-hidden class').toBe(0);
+
+      await expect(
+        page.locator('[data-faz-tag="placeholder-title"]').first(),
+        'Vimeo placeholder title must be visible',
+      ).toBeVisible();
+    } finally {
+      await ctx.close();
+    }
+  });
+
   test('dynamically-injected YouTube iframe shows visible placeholder text', async ({ browser }) => {
     // Fresh context: no consent cookie → all non-necessary categories blocked.
     const ctx = await browser.newContext();
