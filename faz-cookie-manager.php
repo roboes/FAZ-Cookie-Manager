@@ -138,6 +138,13 @@ function faz_get_cookie_domain() {
 	$domain = '';
 	$parsed = wp_parse_url( home_url() );
 	$host   = isset( $parsed['host'] ) ? (string) $parsed['host'] : '';
+
+	// RFC 6265 §4.1.2.3 — the Domain attribute MUST NOT be an IP address.
+	// Browsers silently reject domain=<ip>, so skip the root-domain logic entirely.
+	if ( filter_var( $host, FILTER_VALIDATE_IP ) ) {
+		return apply_filters( 'faz_cookie_domain', '' );
+	}
+
 	$parts  = explode( '.', $host );
 	$count  = count( $parts );
 
