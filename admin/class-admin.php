@@ -89,6 +89,7 @@ class Admin {
 		add_action( 'wp_ajax_faz_dismiss_unmatched', array( $this, 'ajax_dismiss_unmatched_vendors' ) );
 		add_filter( 'plugin_action_links_' . FAZ_PLUGIN_BASENAME, array( $this, 'plugin_action_links' ) );
 		add_action( 'wp_dashboard_setup', array( $this, 'register_dashboard_widget' ) );
+		add_action( 'rest_api_init', array( $this, 'add_rest_nocache_headers' ) );
 	}
 
 	/**
@@ -1289,6 +1290,28 @@ class Admin {
 			do_action( 'faz_after_first_time_install' );
 			delete_option( 'faz_first_time_activated_plugin' );
 		}
+	}
+
+	/**
+	 * Send no-cache headers for all faz/v1 REST responses so HTTP caches
+	 * (LiteSpeed, Nginx proxy, CDNs) never serve stale cookie/category data.
+	 *
+	 * @return void
+	 */
+	public function add_rest_nocache_headers() {
+		add_filter(
+			'rest_pre_serve_request',
+			function ( $served, $result, $request ) {
+				if ( 0 === strpos( $request->get_route(), '/faz/v1' ) ) {
+					header( 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0' );
+					header( 'Pragma: no-cache' );
+					header( 'X-LiteSpeed-Cache-Control: no-cache' );
+				}
+				return $served;
+			},
+			10,
+			3
+		);
 	}
 
 	/**
