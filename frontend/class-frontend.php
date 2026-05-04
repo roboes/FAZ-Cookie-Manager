@@ -2375,14 +2375,28 @@ class Frontend {
 	 */
 	private function match_script_to_provider( $attrs, $content, $providers ) {
 		$match_context = $this->get_provider_match_context( $attrs, $content );
-		$haystack      = $match_context['haystack'];
+		$url           = $match_context['url'];
+		$inline        = $match_context['content'];
 
 		foreach ( $providers as $pattern => $category ) {
 			if ( empty( $pattern ) ) {
 				continue;
 			}
-			if ( false !== stripos( $haystack, $pattern ) ) {
-				return $category;
+			// Patterns that look like URL fragments (contain '.' or '/') are designed
+			// to match tracker domains in src/href attributes.  Applying them to the
+			// inline text body causes false positives: config scripts that merely
+			// reference a tracker domain in their data (e.g. Rank Math's rankMath.links
+			// object contains youtu.be, facebook.com, etc.) would be incorrectly blocked.
+			$is_url_pattern = false !== strpos( $pattern, '.' ) || false !== strpos( $pattern, '/' );
+			if ( $is_url_pattern ) {
+				if ( '' !== $url && false !== stripos( $url, $pattern ) ) {
+					return $category;
+				}
+			} else {
+				// Code-signature patterns (fbq(, gtag, _ga …) match inline content.
+				if ( false !== stripos( $inline, $pattern ) ) {
+					return $category;
+				}
 			}
 		}
 		return false;
@@ -3479,40 +3493,55 @@ class Frontend {
 			if ( empty( $pattern ) ) {
 				continue;
 			}
-			// Match against handle, id, tag attributes, and inline content.
-			if (
+			// URL-fragment patterns (containing '.' or '/') are designed to match tracker
+			// domains in external script src attributes.  Inline scripts have no src, so
+			// applying URL patterns to their text body causes false positives when a config
+			// script contains data with URLs mentioning known domains (e.g. Rank Math's
+			// rankMath.links object contains youtu.be, facebook.com, etc.).
+			// Handle and id are still checked against all patterns (a handle like
+			// 'google-analytics.js' legitimately identifies an analytics script).
+			$is_url_pattern = false !== strpos( $pattern, '.' ) || false !== strpos( $pattern, '/' );
+			$matched        = (
 				( '' !== $handle && false !== stripos( $handle, $pattern ) ) ||
-				( '' !== $id && false !== stripos( $id, $pattern ) ) ||
-				false !== stripos( $tag, $pattern ) ||
-				false !== stripos( $content, $pattern )
-			) {
-				$blocked = $this->get_blocked_categories();
-				$should_block = in_array( $category, $blocked, true );
-
-				// Per-service consent override.
-				$svc_blocked = $this->check_per_service_blocking( $tag, $content );
-				if ( false === $svc_blocked ) {
-					$should_block = false;
-				} elseif ( true === $svc_blocked ) {
-					$should_block = true;
+				( '' !== $id && false !== stripos( $id, $pattern ) )
+			);
+			if ( ! $matched ) {
+				if ( $is_url_pattern ) {
+					// URL-fragment pattern with no src context — skip to avoid false positives.
+					continue;
 				}
-
-				if ( $should_block ) {
-					$tag = preg_replace_callback(
-						'/<script\b([^>]*)>/i',
-						function ( $mm ) use ( $category ) {
-							$new_attrs = $this->set_script_type_plain( $mm[1] );
-							if ( false === strpos( $new_attrs, 'data-faz-category' ) ) {
-								$new_attrs .= ' data-faz-category="' . esc_attr( $category ) . '"';
-							}
-							return '<script' . $new_attrs . '>';
-						},
-						$tag,
-						1
-					);
-				}
-				break;
+				$matched = false !== stripos( $content, $pattern );
 			}
+			if ( ! $matched ) {
+				continue;
+			}
+
+			$blocked      = $this->get_blocked_categories();
+			$should_block = in_array( $category, $blocked, true );
+
+			// Per-service consent override.
+			$svc_blocked = $this->check_per_service_blocking( $tag, $content );
+			if ( false === $svc_blocked ) {
+				$should_block = false;
+			} elseif ( true === $svc_blocked ) {
+				$should_block = true;
+			}
+
+			if ( $should_block ) {
+				$tag = preg_replace_callback(
+					'/<script\b([^>]*)>/i',
+					function ( $mm ) use ( $category ) {
+						$new_attrs = $this->set_script_type_plain( $mm[1] );
+						if ( false === strpos( $new_attrs, 'data-faz-category' ) ) {
+							$new_attrs .= ' data-faz-category="' . esc_attr( $category ) . '"';
+						}
+						return '<script' . $new_attrs . '>';
+					},
+					$tag,
+					1
+				);
+			}
+			break;
 		}
 		return $tag;
 	}
