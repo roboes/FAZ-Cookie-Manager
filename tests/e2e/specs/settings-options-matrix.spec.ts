@@ -90,14 +90,19 @@ function getPath(source: SettingsTree, path: string): any {
 }
 
 function setPath(path: string, value: unknown): SettingsTree {
+  const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
   const parts = path.split('.');
   const clone: SettingsTree = {};
   let cursor = clone;
   for (let index = 0; index < parts.length - 1; index += 1) {
-    cursor[parts[index]] = {};
-    cursor = cursor[parts[index]];
+    const key = parts[index];
+    if (UNSAFE_KEYS.has(key)) throw new Error(`Unsafe path key: ${key}`);
+    cursor[key] = {};
+    cursor = cursor[key];
   }
-  cursor[parts[parts.length - 1]] = value;
+  const last = parts[parts.length - 1];
+  if (UNSAFE_KEYS.has(last)) throw new Error(`Unsafe path key: ${last}`);
+  cursor[last] = value;
   return clone;
 }
 
