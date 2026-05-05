@@ -40,7 +40,8 @@ release.md
 report.md
 README.md
 scripts/
-social-preview.png
+/*.png
+/*.jpg
 test-results/
 tests/
 tsconfig.json

@@ -164,4 +164,72 @@ test.describe('Settings reflection and secure script blocking', () => {
     expect(restoredState.executed).toBe(1);
     expect(restoredState.restoredScripts).toBeGreaterThan(0);
   });
+
+  test('inline scripts containing tracker URLs in data are not false-positively blocked', async ({ page }) => {
+    // Regression test for the false-positive where an inline config script that merely
+    // references a tracker domain inside its JSON data (e.g. Rank Math's rankMath.links
+    // containing youtu.be, facebook.com) was incorrectly blocked as a marketing script.
+    // URL-fragment provider patterns should only match src attributes, not inline content.
+    await page.context().clearCookies();
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+
+    const result = await page.evaluate(() => {
+      // Inject an inline script whose body contains tracker-domain URLs in data,
+      // but has no code-level tracking signatures (fbq(, gtag, etc.).
+      const script = document.createElement('script');
+      script.id = 'faz-fp-regression-probe';
+      script.textContent = JSON.stringify({
+        links: {
+          tutorial: 'https://www.youtube.com/watch?v=test&feature=youtu.be',
+          fb_group: 'https://www.facebook.com/groups/example/',
+          tracking_url: 'https://connect.facebook.net/en_US/fbevents.js',
+        },
+        productId: 42,
+        sku: 'TEST-123',
+      });
+      document.head.appendChild(script);
+
+      const probe = document.getElementById('faz-fp-regression-probe');
+      return {
+        exists: !!probe,
+        type: probe ? probe.getAttribute('type') : null,
+        category: probe ? probe.getAttribute('data-faz-category') : null,
+      };
+    });
+
+    expect(result.exists).toBe(true);
+    // Must NOT be blocked: the script content has no code-level tracker signatures,
+    // only URL references in data — URL patterns should not match inline content.
+    expect(result.type, 'inline config script with tracker URLs in data must not be blocked').not.toBe('text/plain');
+    expect(result.category, 'data-faz-category must not be set on a non-tracker inline script').toBeNull();
+  });
+
+  test('scripts with class="faz-skip" are never blocked regardless of content', async ({ page }) => {
+    await page.context().clearCookies();
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+
+    const result = await page.evaluate(() => {
+      // Inject a script with faz-skip + data-fazcookie="fazcookie-analytics".
+      // Without faz-skip, data-fazcookie alone would cause the JS intercept to block it.
+      // With faz-skip, the script must execute unconditionally.
+      window.__fazSkipProbeExecuted = false;
+      const script = document.createElement('script');
+      script.id = 'faz-skip-probe';
+      script.className = 'faz-skip';
+      script.setAttribute('data-fazcookie', 'fazcookie-analytics');
+      script.textContent = 'window.__fazSkipProbeExecuted = true;';
+      document.head.appendChild(script);
+
+      const probe = document.getElementById('faz-skip-probe');
+      return {
+        exists: !!probe,
+        type: probe ? probe.getAttribute('type') : null,
+        executed: window.__fazSkipProbeExecuted,
+      };
+    });
+
+    expect(result.exists).toBe(true);
+    expect(result.type, 'faz-skip overrides data-fazcookie — script must not be blocked').not.toBe('javascript/blocked');
+    expect(result.executed, 'faz-skip script must execute immediately').toBe(true);
+  });
 });

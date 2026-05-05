@@ -34,13 +34,30 @@ add_action('wp_enqueue_scripts', function() {
         return;
     }
     // Register a dummy handle and attach an inline script that contains
-    // a known provider pattern (googletagmanager.com). The FAZ inline
+    // a known inline code signature (gtag('config')). The FAZ inline
     // script filter should detect the pattern and block it.
     wp_register_script('faz-e2e-inline-test', false, array(), '1.0', false);
     wp_enqueue_script('faz-e2e-inline-test');
     wp_add_inline_script('faz-e2e-inline-test', '
-        /* googletagmanager.com/gtag/js */
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag(\\'config\\', \\'G-FAZ-E2E\\');
         window.__fazE2EInlineExecuted = true;
+    ');
+
+    // This script only contains tracker URLs as data. It must remain executable
+    // because URL-fragment provider patterns are for script src/href matching,
+    // not arbitrary inline configuration values.
+    wp_register_script('faz-e2e-inline-config-data', false, array(), '1.0', false);
+    wp_enqueue_script('faz-e2e-inline-config-data');
+    wp_add_inline_script('faz-e2e-inline-config-data', '
+        window.__fazE2EInlineConfigData = {
+            links: {
+                tutorial: "https://www.youtube.com/watch?v=test&feature=youtu.be",
+                fb_group: "https://www.facebook.com/groups/example/",
+                tracking_url: "https://connect.facebook.net/en_US/fbevents.js"
+            }
+        };
     ');
 }, 20);
 `;
@@ -128,6 +145,29 @@ test.describe.serial('WP 5.7+ inline script blocking', () => {
 			// The marker must NOT be set (script didn't execute).
 			const executed = await page.evaluate(() => (window as any).__fazE2EInlineExecuted);
 			expect(executed, 'Blocked inline script must not execute before consent').toBeFalsy();
+		} finally {
+			await ctx.close();
+		}
+	});
+
+	test('inline config data containing tracker URLs is not blocked before consent', async ({ browser }) => {
+		const ctx = await browser.newContext({ baseURL: WP_BASE });
+		try {
+			const page = await ctx.newPage();
+			await page.goto(INLINE_TEST_URL, { waitUntil: 'domcontentloaded' });
+
+			const configScriptState = await page.locator('script').evaluateAll((scripts) => {
+				const script = scripts.find((s) => s.textContent?.includes('__fazE2EInlineConfigData'));
+				return {
+					found: !!script,
+					type: script?.getAttribute('type') || null,
+					category: script?.getAttribute('data-faz-category') || null,
+				};
+			});
+
+			expect(configScriptState.found, 'Injected inline config data script must render').toBe(true);
+			expect(configScriptState.type, 'Inline config data with tracker URLs must not be blocked').not.toBe('text/plain');
+			expect(configScriptState.category, 'Non-tracker inline config data must not receive a FAZ category').toBeNull();
 		} finally {
 			await ctx.close();
 		}

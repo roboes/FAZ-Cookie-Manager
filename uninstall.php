@@ -33,9 +33,9 @@ function faz_should_remove_on_uninstall( $site_id = null ) {
 	return ! empty( $faz_settings['general']['remove_data_on_uninstall'] );
 }
 
-$force_remove_all = defined( 'FAZ_REMOVE_ALL_DATA' ) && true === FAZ_REMOVE_ALL_DATA;
+$faz_force_remove_all = defined( 'FAZ_REMOVE_ALL_DATA' ) && true === FAZ_REMOVE_ALL_DATA;
 
-if ( $force_remove_all || faz_should_remove_on_uninstall() || is_multisite() ) {
+if ( $faz_force_remove_all || faz_should_remove_on_uninstall() || is_multisite() ) {
 
 	/**
 	 * Remove an empty directory using WP_Filesystem when available.
@@ -182,24 +182,24 @@ if ( $force_remove_all || faz_should_remove_on_uninstall() || is_multisite() ) {
 	}
 
 	if ( is_multisite() ) {
-		$offset = 0;
-		$batch  = 100;
+		$faz_offset = 0;
+		$faz_batch  = 100;
 		do {
-			$site_ids = get_sites( array(
+			$faz_site_ids = get_sites( array(
 				'fields' => 'ids',
-				'number' => $batch,
-				'offset' => $offset,
+				'number' => $faz_batch,
+				'offset' => $faz_offset,
 			) );
-			foreach ( $site_ids as $site_id ) {
-				if ( ! faz_should_remove_on_uninstall( $site_id ) ) {
+			foreach ( $faz_site_ids as $faz_site_id ) {
+				if ( ! faz_should_remove_on_uninstall( $faz_site_id ) ) {
 					continue;
 				}
-				switch_to_blog( $site_id );
+				switch_to_blog( $faz_site_id );
 				faz_cleanup_site_data();
 				restore_current_blog();
 			}
-			$offset += $batch;
-		} while ( count( $site_ids ) === $batch );
+			$faz_offset += $faz_batch;
+		} while ( count( $faz_site_ids ) === $faz_batch );
 	} elseif ( faz_should_remove_on_uninstall() ) {
 		faz_cleanup_site_data();
 	}
