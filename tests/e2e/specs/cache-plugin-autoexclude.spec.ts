@@ -22,6 +22,34 @@ import { wpEval } from '../utils/wp-env';
 const WP_BASE = process.env.WP_BASE_URL ?? 'http://localhost:9998';
 
 test.describe('Cache-plugin auto-exclude (#83 + 1.13.2 post-review)', () => {
+  // Ensure `alternative_asset_path` is OFF so scripts use the `faz-cookie-manager`
+  // handle family; alt-asset mode is verified via PHP reflection in test 2 to
+  // avoid mutating WordPress state across the suite (see file-level comment).
+  let altAssetWasEnabled = false;
+
+  test.beforeAll(async () => {
+    const result = wpEval(`
+      $s = get_option( 'faz_settings', array() );
+      $was = ! empty( $s['banner_control']['alternative_asset_path'] );
+      if ( $was ) {
+        $s['banner_control']['alternative_asset_path'] = false;
+        update_option( 'faz_settings', $s );
+      }
+      echo $was ? '1' : '0';
+    `).trim();
+    altAssetWasEnabled = result === '1';
+  });
+
+  test.afterAll(async () => {
+    if ( altAssetWasEnabled ) {
+      wpEval(`
+        $s = get_option( 'faz_settings', array() );
+        $s['banner_control']['alternative_asset_path'] = true;
+        update_option( 'faz_settings', $s );
+      `);
+    }
+  });
+
   test('frontend <script> tags for own handles carry all 5 opt-out attributes', async ({ page }) => {
     // Hit any public URL that enqueues the FAZ frontend scripts; we
     // don't need a specific page — the root homepage enqueues them by

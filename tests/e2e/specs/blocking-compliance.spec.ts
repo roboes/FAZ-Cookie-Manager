@@ -3,11 +3,13 @@ import { expect, test } from '../fixtures/wp-fixture';
 import { clickFirstVisible } from '../utils/ui';
 import { fazApiGet, fazApiPost, openSettingsPage } from '../utils/faz-api';
 import {
+  activatePlugins,
   deactivatePluginsExcept,
   enableProviderMatrixCustomScenario,
   ensureFixturePlugin,
   ensureProviderMatrixPage,
   ensureScanLabPages,
+  listActivePlugins,
   readProviderMatrixHits,
   readProviderMatrixUrl,
   resetProviderMatrixState,
@@ -252,8 +254,11 @@ test.describe('Blocking compliance coverage', () => {
   let matrixPageId = 0;
   let matrixPagePattern = '';
   let iframeLabUrl = '';
+  let deactivatedPlugins: string[] = [];
 
   test.beforeAll(async () => {
+    const allowed = new Set(['faz-cookie-manager', 'faz-e2e-provider-matrix', 'faz-e2e-scan-lab']);
+    deactivatedPlugins = listActivePlugins().filter((slug) => !allowed.has(slug));
     deactivatePluginsExcept([
       'faz-cookie-manager',
       'faz-e2e-provider-matrix',
@@ -275,6 +280,12 @@ test.describe('Blocking compliance coverage', () => {
     }
 
     matrixPagePattern = `${new URL(matrixUrl).pathname.replace(/\/$/, '')}*`;
+  });
+
+  test.afterAll(async () => {
+    if (deactivatedPlugins.length > 0) {
+      activatePlugins(deactivatedPlugins);
+    }
   });
 
   test.beforeEach(async () => {
@@ -491,8 +502,13 @@ test.describe('Blocking compliance coverage', () => {
         },
       });
 
+      await page.context().clearCookies();
       await gotoFrontend(page, matrixUrl);
       await expect(page.locator('[data-faz-tag="notice"]')).toBeVisible();
+
+      // Verify per-service consent is active on the frontend.
+      const perServiceActive = await page.evaluate(() => !!(window as any)._fazConfig?._perServiceConsent);
+      expect(perServiceActive).toBe(true);
 
       await openPreferenceCenter(page);
       const renderedCategories = await page.locator('input[id^="fazSwitch"], input[id^="fazCategoryDirect"]').evaluateAll((inputs) =>
@@ -505,21 +521,46 @@ test.describe('Blocking compliance coverage', () => {
         ),
       );
 
+      // Force-dispatch change events so the category→service sync listener fires
+      // even when the toggle is already in the desired state.
+      const forceToggle = async (slug: string, checked: boolean) => {
+        await page.evaluate(
+          ({ slug: s, checked: c }) => {
+            ['fazSwitch', 'fazCategoryDirect'].forEach((prefix) => {
+              const el = document.getElementById(`${prefix}${s}`) as HTMLInputElement | null;
+              if (!el) return;
+              el.checked = c;
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+          },
+          { slug, checked },
+        );
+      };
+
       if (renderedCategories.includes('analytics')) {
-        await setCategoryToggle(page, 'analytics', true);
+        await forceToggle('analytics', true);
       }
       if (renderedCategories.includes('marketing')) {
-        await setCategoryToggle(page, 'marketing', false);
+        await forceToggle('marketing', false);
       }
       if (renderedCategories.includes('functional')) {
-        await setCategoryToggle(page, 'functional', false);
+        await forceToggle('functional', false);
       }
 
       await page.locator('#fazDetailCategoryanalytics .faz-accordion-header-wrapper').click();
-      await page.locator('.faz-service-toggle[data-service="google-analytics"]').waitFor({ state: 'attached' });
+      await page.locator('.faz-service-toggle[data-service="google-analytics"]').waitFor({ state: 'visible' });
 
       await setServiceToggle(page, 'google-analytics', true);
-      await setServiceToggle(page, 'clarity', false);
+      // Force-uncheck clarity via evaluate to guarantee the change event fires
+      // even if the toggle is already unchecked (Playwright's setChecked is a
+      // no-op when the current state already matches, so no event is dispatched).
+      await page.evaluate(() => {
+        const el = document.querySelector('.faz-service-toggle[data-service="clarity"]') as HTMLInputElement | null;
+        if (el) {
+          el.checked = false;
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      });
       await savePreferences(page);
 
       await waitForCookie(page, '_ga');

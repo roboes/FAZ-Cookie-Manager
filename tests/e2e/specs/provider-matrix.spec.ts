@@ -12,12 +12,14 @@ import {
   openSettingsPage,
 } from '../utils/faz-api';
 import {
+  activatePlugins,
   deactivatePluginsExcept,
   enableProviderMatrixCustomScenario,
   enableProviderMatrixWooScenario,
   ensureFixturePlugin,
   ensureProviderMatrixPage,
   ensureWooCommerceLabData,
+  listActivePlugins,
   readProviderMatrixHits,
   readProviderMatrixUrl,
   readWooUrls,
@@ -293,8 +295,11 @@ test.describe('Provider matrix scan and blocking', () => {
   test.setTimeout(300_000);
 
   let matrixUrl = '';
+  let deactivatedPlugins: string[] = [];
 
   test.beforeAll(async () => {
+    const allowed = new Set(['faz-cookie-manager', 'faz-e2e-provider-matrix', 'faz-e2e-scan-lab', 'faz-e2e-woo-lab', 'woocommerce']);
+    deactivatedPlugins = listActivePlugins().filter((slug) => !allowed.has(slug));
     deactivatePluginsExcept([
       'faz-cookie-manager',
       'faz-e2e-provider-matrix',
@@ -307,6 +312,12 @@ test.describe('Provider matrix scan and blocking', () => {
     matrixUrl = readProviderMatrixUrl();
     if (!matrixUrl) {
       throw new Error('Provider matrix page URL could not be resolved.');
+    }
+  });
+
+  test.afterAll(async () => {
+    if (deactivatedPlugins.length > 0) {
+      activatePlugins(deactivatedPlugins);
     }
   });
 
@@ -566,6 +577,7 @@ test.describe('Provider matrix scan and blocking', () => {
   });
 
   test('10. fetch requests to provider-like endpoints are dropped before consent and allowed after accept', async ({ page }) => {
+    await page.context().clearCookies();
     await gotoFrontend(page, matrixUrl);
     const target = directCollectUrl('googletagmanager.com/gtag/js');
 

@@ -32,6 +32,7 @@ async function updateSettings(page: any, nonce: string, data: Record<string, unk
 /* ─── Tests ────────────────────────────────────── */
 
 test.describe('v1.7.0 features', () => {
+  test.describe.configure({ mode: 'serial' });
 
   // 1. Scheduled Cookie Scanning
   test('F01: auto_scan and scan_frequency settings persist', async ({ page, loginAsAdmin }) => {
@@ -408,7 +409,8 @@ test.describe('v1.7.0 features', () => {
     await page.goto(`${WP_BASE}/wp-admin/admin.php?page=faz-cookie-manager-settings`, { waitUntil: 'domcontentloaded' });
     const nonce = await getAdminNonce(page);
 
-    // Default should be off
+    // Ensure we start from a known state (another test may have left it true)
+    await updateSettings(page, nonce, { pageview_tracking: false });
     const before = await getSettings(page, nonce);
     expect(before.pageview_tracking).toBe(false);
 
