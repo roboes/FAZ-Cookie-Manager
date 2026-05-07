@@ -341,8 +341,50 @@ add_filter( 'faz_send_vary_header', '__return_false' );
 |-----------|-------------|
 | `[faz_cookie_table]` | Responsive cookie table grouped by category for policy pages |
 | `[cookie_audit]` | Backward-compatible alias |
+| `[faz_do_not_sell]` | CCPA "Do Not Sell My Personal Information" opt-out form |
+| `[faz_dsar_form]` | GDPR Data Subject Access Request (DSAR) form |
 
-**Attributes:** `columns`, `category`, `heading`
+**`[faz_cookie_table]` attributes:** `columns`, `category`, `heading`
+
+#### `[faz_do_not_sell]` — CCPA Opt-Out
+
+Renders a CCPA opt-out form for California residents. On submission:
+
+- Logs the opt-out to the `wp_faz_consent_logs` table with `status = 'dnsmpi_optout'` and a hashed IP address
+- Sets a `fazcookie-dnsmpi` cookie (365 days) so returning visitors see a confirmation instead of the form
+- Sends a notification email to the site admin
+
+If the visitor already has the opt-out cookie, the form is replaced with a confirmation message automatically.
+
+| Attribute | Default | Description |
+|-----------|---------|-------------|
+| `title` | `Do Not Sell My Personal Information` | Heading above the form |
+| `button` | `Submit Opt-Out Request` | Submit button label |
+
+```
+[faz_do_not_sell title="Opt Out" button="Submit Request"]
+```
+
+#### `[faz_dsar_form]` — GDPR DSAR Form
+
+Renders a GDPR-compliant Data Subject Access Request form covering Articles 15–21. On submission:
+
+- Stores the request as a private WordPress post (post type `faz_dsar`) so requests survive email delivery failures
+- Sends a notification email to the admin with a direct link to the stored request (Reply-To set to the requester's address)
+- Sends a confirmation email to the requester
+
+Includes a honeypot field for bot protection and nonce verification.
+
+Supported request types: Right of Access (Art. 15), Right to Erasure (Art. 17), Right to Data Portability (Art. 20), Right to Rectification (Art. 16), Right to Restrict Processing (Art. 18), Right to Object (Art. 21).
+
+| Attribute | Default | Description |
+|-----------|---------|-------------|
+| `button` | `Send Request` | Submit button label |
+| `admin_email` | site admin email | Override the recipient address |
+
+```
+[faz_dsar_form button="Send Request" admin_email="dpo@example.com"]
+```
 
 ---
 
