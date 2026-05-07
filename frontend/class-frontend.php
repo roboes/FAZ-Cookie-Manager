@@ -965,6 +965,7 @@ class Frontend {
 
 		// Per-cookie opt-in/opt-out scripts grouped by category slug.
 		// Only populated when at least one cookie has a script defined.
+		global $wpdb;
 		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- both tables are $wpdb->prefix + plugin-literal; LIKE filter limits the result set to rows with scripts; result is used only for inline JS config, not rendered as HTML.
 		$script_rows = $wpdb->get_results(
 			"SELECT c.meta, cat.slug AS category_slug
