@@ -127,12 +127,22 @@ Playwright tests verify consent behavior and policy-oriented safeguards at runti
 
 ## Installation
 
-1. Download the latest release from [GitHub Releases](https://github.com/fabiodalez-dev/FAZ-Cookie-Manager/releases)
-2. Upload the `faz-cookie-manager` folder to `/wp-content/plugins/`
-3. Activate in WordPress admin > Plugins
+### From the WordPress.org plugin directory (recommended)
+
+1. In your WordPress dashboard go to **Plugins > Add New Plugin**
+2. Search for **FAZ Cookie Manager**
+3. Click **Install Now**, then **Activate**
 4. Go to **FAZ Cookie** in the admin sidebar
 5. Click **Scan Site** on the Cookies page to detect cookies
 6. Customize banner design, text, and regulation type
+
+Automatic updates are handled by WordPress — no manual steps needed.
+
+### From GitHub (developers)
+
+1. Download the latest release from [GitHub Releases](https://github.com/fabiodalez-dev/FAZ-Cookie-Manager/releases)
+2. Upload the `faz-cookie-manager` folder to `/wp-content/plugins/`
+3. Activate in **WordPress admin > Plugins**
 
 ### Requirements
 

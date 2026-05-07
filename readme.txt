@@ -133,11 +133,19 @@ The only outbound HTTP requests this plugin makes are the four documented above 
 
 == Installation ==
 
-1. Upload the `faz-cookie-manager` folder to `/wp-content/plugins/`
-2. Activate the plugin through the **Plugins** menu in WordPress
-3. Go to **FAZ Cookie** in the admin sidebar to configure your banner
-4. Click **Scan Site** on the Cookies page to detect cookies automatically
-5. Customize the banner design, text, and regulation type on the Cookie Banner page
+= From the WordPress.org plugin directory (recommended) =
+
+1. In your WordPress dashboard go to **Plugins > Add New Plugin**
+2. Search for **FAZ Cookie Manager**
+3. Click **Install Now**, then **Activate**
+4. Go to **FAZ Cookie** in the admin sidebar to configure your banner
+
+= Manual installation =
+
+1. Download the ZIP from [wordpress.org/plugins/faz-cookie-manager](https://wordpress.org/plugins/faz-cookie-manager/)
+2. In your WordPress dashboard go to **Plugins > Add New Plugin > Upload Plugin**
+3. Upload the ZIP and click **Install Now**, then **Activate**
+4. Go to **FAZ Cookie** in the admin sidebar to configure your banner
 
 == Frequently Asked Questions ==
 
