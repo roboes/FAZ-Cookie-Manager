@@ -48,15 +48,14 @@ test.describe('GCM and IAB TCF behavior', () => {
           : '') || 'dataLayer';
       const dl = (window as Record<string, unknown>)[dlName];
 
-      // Check multiple indicators: gtag function, dataLayer (standard or custom), or google_tag_data.
-      const hasGtag = typeof window.gtag === 'function';
-      const hasDataLayer = Array.isArray(dl);
-      const hasGoogleTagData =
-        typeof window.google_tag_data === 'object' &&
-        window.google_tag_data !== null &&
-        typeof window.google_tag_data.ics === 'object';
-
-      const active = hasGtag || hasDataLayer || hasGoogleTagData;
+      // Use _fazGcm as the authoritative FAZ-specific GCM indicator.
+      // Generic signals (gtag, dataLayer, google_tag_data) are unreliable
+      // because other plugins (e.g. GTM4WP) create window.dataLayer
+      // independently, causing false-positive active detection even when
+      // FAZ's GCM module is disabled.
+      const active =
+        typeof (window as Record<string, unknown>)._fazGcm === 'object' &&
+        (window as Record<string, unknown>)._fazGcm !== null;
       if (!active) {
         return { active: false };
       }
@@ -112,17 +111,18 @@ test.describe('GCM and IAB TCF behavior', () => {
   });
 
   test('TCF preserves timestamps on getTCData and clears euconsent-v2 after reject', async ({ page, browser }) => {
-    const originalSettings = JSON.parse(
-      wpEval(`echo wp_json_encode( get_option( 'faz_settings', array() ) );`)
-    ) as Record<string, unknown>;
-    const originalBannerTemplate = JSON.parse(
-      wpEval(`
-        echo wp_json_encode( array(
-          'exists' => false !== get_option( 'faz_banner_template', false ),
-          'value'  => get_option( 'faz_banner_template', null ),
-        ) );
-      `)
-    ) as { exists: boolean; value: unknown };
+    const rawSettings = wpEval(`echo wp_json_encode( get_option( 'faz_settings', array() ) );`);
+    const originalSettings = JSON.parse(rawSettings) as Record<string, unknown>;
+    const settingsB64 = Buffer.from(rawSettings, 'utf8').toString('base64');
+
+    const rawBannerTemplate = wpEval(`
+      echo wp_json_encode( array(
+        'exists' => false !== get_option( 'faz_banner_template', false ),
+        'value'  => get_option( 'faz_banner_template', null ),
+      ) );
+    `);
+    const originalBannerTemplate = JSON.parse(rawBannerTemplate) as { exists: boolean; value: unknown };
+    const bannerTemplateB64 = Buffer.from(rawBannerTemplate, 'utf8').toString('base64');
 
     // Use a fresh browser context so consent cookies from prior serial tests
     // cannot leak into this test's consent state.
@@ -231,12 +231,13 @@ test.describe('GCM and IAB TCF behavior', () => {
     } finally {
       await freshContext.clearCookies();
       await freshContext.close();
-      const encodedSettings = JSON.stringify(originalSettings);
-      const encodedBannerTemplate = JSON.stringify(originalBannerTemplate);
       wpEval(`
-        $restored = json_decode( wp_unslash( ${JSON.stringify(encodedSettings)} ), true );
+        $restored = json_decode( base64_decode( '${settingsB64}' ), true );
         update_option( 'faz_settings', is_array( $restored ) ? $restored : array() );
-        $banner_snapshot = json_decode( wp_unslash( ${JSON.stringify(encodedBannerTemplate)} ), true );
+        if ( class_exists( '\\FazCookie\\Includes\\Cache' ) ) {
+          \\FazCookie\\Includes\\Cache::invalidate_cache_group( 'settings' );
+        }
+        $banner_snapshot = json_decode( base64_decode( '${bannerTemplateB64}' ), true );
         if ( is_array( $banner_snapshot ) && ! empty( $banner_snapshot['exists'] ) ) {
           update_option( 'faz_banner_template', $banner_snapshot['value'] );
         } else {

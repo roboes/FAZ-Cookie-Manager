@@ -150,6 +150,11 @@ test.describe('Settings option behavior interactions', () => {
     adminPage = page;
     baseURL = await loginAsAdminForBehaviorSpec(adminPage, wpBaseURL, adminUser, adminPass);
     await adminPage.goto(`${baseURL}/wp-admin/admin.php?page=faz-cookie-manager-settings`, { waitUntil: 'domcontentloaded' });
+    await adminPage.waitForFunction(
+      () => typeof (window as any).fazConfig?.api?.nonce === 'string' && (window as any).fazConfig.api.nonce.length > 0,
+      undefined,
+      { timeout: 15_000 },
+    );
     nonce = await adminPage.evaluate(() => (window as any).fazConfig?.api?.nonce ?? '');
     expect(nonce.length).toBeGreaterThan(0);
     if (!originalSettings) {

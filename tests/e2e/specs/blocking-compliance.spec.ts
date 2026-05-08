@@ -71,6 +71,7 @@ function withCustomRules(scriptBlocking: SettingsPayload | undefined): SettingsP
   return {
     ...(scriptBlocking ?? {}),
     custom_rules: merged,
+    whitelist_patterns: [],
   };
 }
 
@@ -240,8 +241,10 @@ async function runDirectBeacon(page: Page, url: string): Promise<boolean> {
 }
 
 function readPageUrl(slug: string): string {
+  const slugB64 = Buffer.from(slug, 'utf8').toString('base64');
   return wpEval(`
-    $page = get_page_by_path( ${JSON.stringify(slug)}, OBJECT, 'page' );
+    $slug = base64_decode( '${slugB64}' );
+    $page = get_page_by_path( $slug, OBJECT, 'page' );
     echo $page ? get_permalink( $page->ID ) : '';
   `);
 }

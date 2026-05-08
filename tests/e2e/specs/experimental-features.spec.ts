@@ -348,11 +348,13 @@ test.describe('[faz_dsar_form] GDPR DSAR form', () => {
       page.waitForResponse('**/admin-ajax.php'),
       page.locator('button.faz-dsar-btn').click(),
     ]);
+    const emailB64 = Buffer.from(email, 'utf8').toString('base64');
     const found = wpEval(`
+      $email = base64_decode( '${emailB64}' );
       $posts = get_posts( array( 'post_type' => 'faz_dsar', 'numberposts' => 5, 'post_status' => 'private', 'orderby' => 'date', 'order' => 'DESC' ) );
       $found = false;
       foreach ( $posts as $p ) {
-        if ( get_post_meta( $p->ID, '_dsar_email', true ) === ${JSON.stringify(email)} ) {
+        if ( get_post_meta( $p->ID, '_dsar_email', true ) === $email ) {
           $found = true; break;
         }
       }
