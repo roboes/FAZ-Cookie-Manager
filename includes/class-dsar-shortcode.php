@@ -20,8 +20,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class DSAR_Shortcode {
 
+	use IP_Hasher;
+
 	const AJAX_ACTION = 'faz_dsar_submit';
 	const POST_TYPE   = 'faz_dsar';
+
+	/** Maximum allowed length for the free-text message field. */
+	const MESSAGE_MAX_LENGTH = 5000;
 
 	public function __construct() {
 		add_shortcode( 'faz_dsar_form', array( $this, 'render' ) );
@@ -65,6 +70,9 @@ class DSAR_Shortcode {
 			'faz_dsar_form'
 		);
 
+		// Normalise the admin_email attribute: fall back to site admin if invalid.
+		$admin_email = is_email( $atts['admin_email'] ) ? sanitize_email( $atts['admin_email'] ) : get_option( 'admin_email' );
+
 		wp_register_style( 'faz-dsar', false, array(), FAZ_VERSION );
 		wp_enqueue_style( 'faz-dsar' );
 		wp_add_inline_style( 'faz-dsar', '
@@ -102,10 +110,11 @@ class DSAR_Shortcode {
 			<form class="faz-dsar-form" novalidate>
 				<input type="hidden" name="action" value="<?php echo esc_attr( self::AJAX_ACTION ); ?>">
 				<input type="hidden" name="nonce"  value="<?php echo esc_attr( $nonce ); ?>">
+				<input type="hidden" name="dsar_admin_email" value="<?php echo esc_attr( $admin_email ); ?>">
 
 				<!-- Honeypot field — bots fill it, humans don't -->
 				<div class="faz-dsar-honeypot" aria-hidden="true">
-					<input type="text" name="faz_hp_name" tabindex="-1" autocomplete="off">
+					<input type="text" name="faz_hp_name" tabindex="-1" autocomplete="off" aria-hidden="true">
 				</div>
 
 				<div class="faz-dsar-field">
@@ -130,7 +139,7 @@ class DSAR_Shortcode {
 
 				<div class="faz-dsar-field">
 					<label for="<?php echo esc_attr( $id ); ?>-msg"><?php esc_html_e( 'Additional Information', 'faz-cookie-manager' ); ?></label>
-					<textarea id="<?php echo esc_attr( $id ); ?>-msg" name="dsar_message" placeholder="<?php esc_attr_e( 'Optional: provide any additional context to help us identify your data.', 'faz-cookie-manager' ); ?>"></textarea>
+					<textarea id="<?php echo esc_attr( $id ); ?>-msg" name="dsar_message" maxlength="<?php echo esc_attr( self::MESSAGE_MAX_LENGTH ); ?>" placeholder="<?php esc_attr_e( 'Optional: provide any additional context to help us identify your data.', 'faz-cookie-manager' ); ?>"></textarea>
 				</div>
 
 				<button type="submit" class="faz-dsar-btn"><?php echo esc_html( $atts['button'] ); ?></button>
@@ -209,8 +218,10 @@ class DSAR_Shortcode {
 		}
 
 		// Rate limiting: one submission per IP per 60 seconds.
+		// wp_cache_add is atomic on persistent object caches (Redis/Memcached);
+		// the transient provides durability across PHP workers on non-cached installs.
 		$rl_key = 'faz_dsar_rl_' . substr( $this->hash_ip(), 0, 16 );
-		if ( false !== get_transient( $rl_key ) ) {
+		if ( false !== get_transient( $rl_key ) || ! wp_cache_add( $rl_key, 1, 'faz_rate_limit', 60 ) ) {
 			wp_send_json_error( __( 'Too many requests. Please wait before submitting again.', 'faz-cookie-manager' ) );
 		}
 		set_transient( $rl_key, 1, 60 );
@@ -220,14 +231,30 @@ class DSAR_Shortcode {
 		$type    = isset( $_POST['dsar_type'] ) ? sanitize_key( wp_unslash( $_POST['dsar_type'] ) ) : '';
 		$message = isset( $_POST['dsar_message'] ) ? sanitize_textarea_field( wp_unslash( $_POST['dsar_message'] ) ) : '';
 
+		// Resolve admin_email from the hidden form field; fall back to site admin.
+		$admin_email_raw = isset( $_POST['dsar_admin_email'] ) ? sanitize_email( wp_unslash( $_POST['dsar_admin_email'] ) ) : '';
+		$admin_email     = is_email( $admin_email_raw ) ? $admin_email_raw : get_option( 'admin_email' );
+
 		$valid_types = array( 'access', 'erasure', 'portability', 'rectify', 'restrict', 'object' );
 
-		if ( empty( $name ) || ! is_email( $email ) || ! in_array( $type, $valid_types, true ) ) {
-			wp_send_json_error( __( 'Please fill in all required fields with valid values.', 'faz-cookie-manager' ) );
+		if ( empty( $name ) ) {
+			wp_send_json_error( __( 'Please enter your full name.', 'faz-cookie-manager' ) );
+		}
+
+		if ( ! is_email( $email ) ) {
+			wp_send_json_error( __( 'Please enter a valid email address.', 'faz-cookie-manager' ) );
+		}
+
+		if ( ! in_array( $type, $valid_types, true ) ) {
+			wp_send_json_error( __( 'Please select a valid request type.', 'faz-cookie-manager' ) );
+		}
+
+		if ( mb_strlen( $message ) > self::MESSAGE_MAX_LENGTH ) {
+			wp_send_json_error( __( 'Your message is too long. Please limit it to 5,000 characters.', 'faz-cookie-manager' ) );
 		}
 
 		$post_id = $this->store_request( $name, $email, $type, $message );
-		$this->notify_admin( $name, $email, $type, $message, $post_id );
+		$this->notify_admin( $name, $email, $type, $message, $post_id, $admin_email );
 		$this->send_confirmation( $name, $email, $type );
 
 		wp_send_json_success(
@@ -273,11 +300,21 @@ class DSAR_Shortcode {
 	}
 
 	/**
-	 * Send notification email to the site admin (or the address set in the shortcode).
+	 * Send notification email to the configured admin address.
+	 *
+	 * @param string $name        Requester's name (already sanitized).
+	 * @param string $email       Requester's email.
+	 * @param string $type        Request type key.
+	 * @param string $message     Optional free-text message.
+	 * @param int    $post_id     ID of the stored DSAR post (0 on failure).
+	 * @param string $admin_email Destination address; falls back to site admin.
 	 */
-	private function notify_admin( $name, $email, $type, $message, $post_id ) {
-		$admin_email = get_option( 'admin_email' );
-		$site_name   = get_bloginfo( 'name' );
+	private function notify_admin( $name, $email, $type, $message, $post_id, $admin_email = '' ) {
+		if ( empty( $admin_email ) || ! is_email( $admin_email ) ) {
+			$admin_email = get_option( 'admin_email' );
+		}
+
+		$site_name = get_bloginfo( 'name' );
 
 		$type_labels = array(
 			'access'      => __( 'Right of Access (Art. 15 GDPR)', 'faz-cookie-manager' ),
@@ -308,8 +345,8 @@ class DSAR_Shortcode {
 			);
 		}
 
-		// Strip CR/LF to prevent SMTP header injection via the name field.
-		$safe_name = str_replace( array( "\r", "\n" ), '', $name );
+		// Strip CRLF and angle brackets to prevent SMTP header injection.
+		$safe_name = str_replace( array( "\r", "\n", '<', '>', '"' ), '', $name );
 
 		wp_mail(
 			$admin_email,
@@ -318,16 +355,6 @@ class DSAR_Shortcode {
 			$body,
 			array( 'Reply-To: ' . $safe_name . ' <' . $email . '>' )
 		);
-	}
-
-	/**
-	 * Return a salted hash of the visitor's IP address.
-	 *
-	 * @return string
-	 */
-	private function hash_ip() {
-		$ip = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '';
-		return hash_hmac( 'sha256', $ip, wp_salt( 'auth' ) );
 	}
 
 	/**

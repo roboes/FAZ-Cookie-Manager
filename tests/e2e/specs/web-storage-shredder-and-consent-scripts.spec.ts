@@ -1,5 +1,6 @@
 import { expect, test } from '../fixtures/wp-fixture';
 import type { Page } from '@playwright/test';
+import { wpEval } from '../utils/wp-env';
 
 /**
  * E2E tests for two features implemented in feat/experimental-features:
@@ -58,17 +59,27 @@ async function updateCookie(
 /** Accept all consent on the current page. */
 async function acceptAll(page: Page): Promise<void> {
   const acceptBtn = page.locator('[data-faz-tag="accept-button"]');
-  if (await acceptBtn.isVisible()) {
-    await acceptBtn.click();
-  }
+  await acceptBtn.waitFor({ state: 'visible', timeout: 10_000 });
+  await acceptBtn.click();
 }
 
 /** Reject all consent on the current page. */
 async function rejectAll(page: Page): Promise<void> {
   const rejectBtn = page.locator('[data-faz-tag="reject-button"]');
-  if (await rejectBtn.isVisible()) {
-    await rejectBtn.click();
-  }
+  await rejectBtn.waitFor({ state: 'visible', timeout: 10_000 });
+  await rejectBtn.click();
+}
+
+/**
+ * Wait for the fazcookie-consent cookie to appear as a signal that _fazAfterConsent
+ * has completed (and therefore the Web Storage shredder has run).
+ * Use after clearCookies() + a consent action; resolves as soon as the cookie is set.
+ */
+async function waitForConsentCookie(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => document.cookie.includes('fazcookie-consent='),
+    { timeout: 5_000 },
+  );
 }
 
 /** Pre-seed a consent cookie so the banner does not block interactions. */
@@ -85,6 +96,14 @@ async function setConsentCookie(page: Page, wpBaseURL: string): Promise<void> {
 // ── Web Storage Shredder tests ─────────────────────────────────────────────
 
 test.describe('Web Storage cookie shredder', () => {
+
+  // Ensure each test starts with clean storage regardless of assertion failures.
+  test.afterEach(async ({ page }) => {
+    await page.evaluate(() => {
+      localStorage.clear();
+      sessionStorage.clear();
+    });
+  });
 
   test('localStorage key matching a blocked category pattern is removed on reject', async ({
     page, wpBaseURL,
@@ -108,7 +127,7 @@ test.describe('Web Storage cookie shredder', () => {
     await page.goto(wpBaseURL, { waitUntil: 'domcontentloaded' });
 
     await rejectAll(page);
-    await page.waitForTimeout(300);
+    await waitForConsentCookie(page);
 
     const gaAfter = await page.evaluate(() => localStorage.getItem('_ga'));
     expect(gaAfter, '_ga should be removed after rejecting analytics').toBeNull();
@@ -122,7 +141,7 @@ test.describe('Web Storage cookie shredder', () => {
     await page.evaluate(() => { sessionStorage.setItem('_ga', 'GA1.2.sess'); });
 
     await rejectAll(page);
-    await page.waitForTimeout(300);
+    await waitForConsentCookie(page);
 
     const after = await page.evaluate(() => sessionStorage.getItem('_ga'));
     expect(after, '_ga in sessionStorage should be removed on reject').toBeNull();
@@ -136,7 +155,7 @@ test.describe('Web Storage cookie shredder', () => {
     await page.evaluate(() => { localStorage.setItem('my_app_theme', 'dark'); });
 
     await rejectAll(page);
-    await page.waitForTimeout(300);
+    await waitForConsentCookie(page);
 
     const after = await page.evaluate(() => localStorage.getItem('my_app_theme'));
     expect(after, 'non-tracking localStorage key must survive reject').toBe('dark');
@@ -151,7 +170,7 @@ test.describe('Web Storage cookie shredder', () => {
     await page.evaluate(() => { localStorage.setItem('fazcookie-consent', 'test-value'); });
 
     await rejectAll(page);
-    await page.waitForTimeout(300);
+    await waitForConsentCookie(page);
 
     const after = await page.evaluate(() => localStorage.getItem('fazcookie-consent'));
     expect(after, 'fazcookie-consent must never be deleted').toBe('test-value');
@@ -171,7 +190,7 @@ test.describe('Web Storage cookie shredder', () => {
     });
 
     await rejectAll(page);
-    await page.waitForTimeout(300);
+    await waitForConsentCookie(page);
 
     const val1 = await page.evaluate(() => localStorage.getItem('_ga_ABCDEF123'));
     const val2 = await page.evaluate(() => localStorage.getItem('_ga_ZYXWVUT987'));
@@ -191,7 +210,7 @@ test.describe('Web Storage cookie shredder', () => {
     });
 
     await rejectAll(page);
-    await page.waitForTimeout(300);
+    await waitForConsentCookie(page);
 
     const ga  = await page.evaluate(() => localStorage.getItem('_ga'));
     const gid = await page.evaluate(() => localStorage.getItem('_gid'));
@@ -209,7 +228,7 @@ test.describe('Web Storage cookie shredder', () => {
     await page.evaluate(() => { localStorage.setItem('_ga', 'GA1.2.keep'); });
 
     await acceptAll(page);
-    await page.waitForTimeout(300);
+    await waitForConsentCookie(page);
 
     const after = await page.evaluate(() => localStorage.getItem('_ga'));
     expect(after, '_ga should NOT be removed when analytics is accepted').toBe('GA1.2.keep');
@@ -224,7 +243,7 @@ test.describe('Web Storage cookie shredder', () => {
 
     // Should not throw — reject should complete normally.
     await rejectAll(page);
-    await page.waitForTimeout(300);
+    await waitForConsentCookie(page);
     await expect(page.locator('#fazBannerTemplate')).toBeAttached();
   });
 
@@ -236,7 +255,7 @@ test.describe('Web Storage cookie shredder', () => {
     await page.evaluate(() => { sessionStorage.setItem('_ga', 'keep-me'); });
 
     await acceptAll(page);
-    await page.waitForTimeout(300);
+    await waitForConsentCookie(page);
 
     const after = await page.evaluate(() => sessionStorage.getItem('_ga'));
     expect(after, '_ga stays in sessionStorage when analytics accepted').toBe('keep-me');
@@ -250,7 +269,7 @@ test.describe('Web Storage cookie shredder', () => {
     await page.evaluate(() => { sessionStorage.setItem('totally_custom_key_xyz', '123'); });
 
     await rejectAll(page);
-    await page.waitForTimeout(300);
+    await waitForConsentCookie(page);
 
     const after = await page.evaluate(() => sessionStorage.getItem('totally_custom_key_xyz'));
     expect(after, 'unrelated sessionStorage key preserved').toBe('123');
@@ -269,7 +288,7 @@ test.describe('Web Storage cookie shredder', () => {
     });
 
     await rejectAll(page);
-    await page.waitForTimeout(300);
+    await waitForConsentCookie(page);
 
     const ls = await page.evaluate(() => localStorage.getItem('_ga'));
     const ss = await page.evaluate(() => sessionStorage.getItem('_ga'));
@@ -303,8 +322,20 @@ test.describe('Per-cookie opt-in/out consent scripts', () => {
     nonce = await getAdminNonce(adminPage);
     expect(nonce.length, 'nonce must be non-empty').toBeGreaterThan(0);
 
-    // analytics category is always ID 3 on the test site (seeded on install).
-    const analyticsCategoryId = 3;
+    // Resolve the analytics category ID dynamically to avoid hardcoding.
+    const analyticsCategoryId = parseInt(
+      wpEval(`
+        global $wpdb;
+        echo (int) $wpdb->get_var(
+          $wpdb->prepare(
+            "SELECT category_id FROM {$wpdb->prefix}faz_cookie_categories WHERE slug = %s",
+            'analytics'
+          )
+        );
+      `).trim(),
+      10,
+    );
+    expect(analyticsCategoryId, 'analytics category must exist in DB').toBeGreaterThan(0);
 
     testCookieId = await createCookie(adminPage, nonce, wpBaseURL, {
       name:            '_faz_e2e_script_test',
@@ -484,7 +515,10 @@ test.describe('Per-cookie opt-in/out consent scripts', () => {
     await page.evaluate(() => { delete (window as Record<string, unknown>)._fazE2EOptIn; });
 
     await acceptAll(page);
-    await page.waitForTimeout(400);
+    await page.waitForFunction(
+      () => typeof (window as Record<string, unknown>)._fazE2EOptIn === 'number',
+      { timeout: 5_000 },
+    );
 
     const counter = await page.evaluate(
       () => (window as Record<string, unknown>)._fazE2EOptIn,
@@ -507,12 +541,13 @@ test.describe('Per-cookie opt-in/out consent scripts', () => {
       await page.goto(wpBaseURL, { waitUntil: 'domcontentloaded' });
       await page.evaluate(() => localStorage.removeItem('_fazE2EOptOutFired'));
       await acceptAll(page);
-      await page.waitForTimeout(300);
+      await waitForConsentCookie(page);
 
       // Step 2: reload WITH the consent cookie so _fazCategoriesBeforeConsent
       // includes 'analytics' when the next consent action fires.
       await page.goto(wpBaseURL, { waitUntil: 'domcontentloaded' });
-      await page.waitForTimeout(500);
+      // Wait for the revisit widget to be ready (confirms script.js has initialised).
+      await page.locator('[data-faz-tag="revisit-consent"] button, .faz-btn-revisit').first().waitFor({ state: 'visible', timeout: 5_000 });
 
       // Step 3: re-open the banner via the revisit widget, wait for it to appear,
       // then click "Reject All".
@@ -526,7 +561,11 @@ test.describe('Per-cookie opt-in/out consent scripts', () => {
       const navPromise = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10_000 }).catch(() => null);
       await rejectBtn.click();
       await navPromise;
-      await page.waitForTimeout(300);
+      // Wait for the localStorage evidence to be written (opt_out_script runs before reload).
+      await page.waitForFunction(
+        () => localStorage.getItem('_fazE2EOptOutFired') !== null,
+        { timeout: 5_000 },
+      );
 
       // Step 4: verify the localStorage evidence.
       const fired = await page.evaluate(() => localStorage.getItem('_fazE2EOptOutFired'));
@@ -547,7 +586,7 @@ test.describe('Per-cookie opt-in/out consent scripts', () => {
     await page.evaluate(() => { delete (window as Record<string, unknown>)._fazE2EOptIn; });
 
     await rejectAll(page);
-    await page.waitForTimeout(400);
+    await waitForConsentCookie(page);
 
     const counter = await page.evaluate(
       () => (window as Record<string, unknown>)._fazE2EOptIn,
@@ -567,7 +606,10 @@ test.describe('Per-cookie opt-in/out consent scripts', () => {
     });
 
     await acceptAll(page);
-    await page.waitForTimeout(400);
+    await page.waitForFunction(
+      () => (window as Record<string, unknown>)._fazE2EOptIn2 === true,
+      { timeout: 5_000 },
+    );
 
     const fired = await page.evaluate(
       () => (window as Record<string, unknown>)._fazE2EOptIn2,
@@ -588,7 +630,7 @@ test.describe('Per-cookie opt-in/out consent scripts', () => {
 
     // Should not throw — consent should complete normally.
     await acceptAll(page);
-    await page.waitForTimeout(400);
+    await waitForConsentCookie(page);
 
     // Banner should be gone (consent was recorded despite script error).
     const banner = page.locator('[data-faz-tag="notice"]');

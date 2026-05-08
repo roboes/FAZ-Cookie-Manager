@@ -28,7 +28,7 @@ class Cookie extends Store {
 	 *
 	 * @var array|null
 	 */
-	private $_decoded_meta = null;
+	private $decoded_meta = null;
 
 	/**
 	 * Data array, with defaults.

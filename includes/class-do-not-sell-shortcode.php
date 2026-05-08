@@ -20,6 +20,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class Do_Not_Sell_Shortcode {
 
+	use IP_Hasher;
+
 	const AJAX_ACTION  = 'faz_dnsmpi_optout';
 	const COOKIE_NAME  = 'fazcookie-dnsmpi';
 	const COOKIE_DAYS  = 365;
@@ -134,9 +136,19 @@ class Do_Not_Sell_Shortcode {
 			wp_send_json_error( __( 'Invalid security token. Please refresh the page and try again.', 'faz-cookie-manager' ) );
 		}
 
+		// Idempotency: if the browser already carries the opt-out cookie, skip
+		// creating a duplicate log entry and re-sending the admin notification.
+		if ( isset( $_COOKIE[ self::COOKIE_NAME ] ) && '1' === $_COOKIE[ self::COOKIE_NAME ] ) {
+			wp_send_json_success(
+				array( 'message' => __( 'You have already opted out. We will not sell your personal information.', 'faz-cookie-manager' ) )
+			);
+		}
+
 		// Rate limiting: one submission per IP per 60 seconds.
+		// wp_cache_add is atomic on persistent object caches (Redis/Memcached);
+		// the transient provides durability across PHP workers on non-cached installs.
 		$rl_key = 'faz_dnsmpi_rl_' . substr( $this->hash_ip(), 0, 16 );
-		if ( false !== get_transient( $rl_key ) ) {
+		if ( false !== get_transient( $rl_key ) || ! wp_cache_add( $rl_key, 1, 'faz_rate_limit', 60 ) ) {
 			wp_send_json_error( __( 'Too many requests. Please wait before submitting again.', 'faz-cookie-manager' ) );
 		}
 		set_transient( $rl_key, 1, 60 );
@@ -215,14 +227,6 @@ class Do_Not_Sell_Shortcode {
 				$ip_hash
 			)
 		);
-	}
-
-	/**
-	 * Return a salted hash of the visitor's IP address.
-	 */
-	private function hash_ip() {
-		$ip = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '';
-		return hash_hmac( 'sha256', $ip, wp_salt( 'auth' ) );
 	}
 
 	/**

@@ -357,6 +357,21 @@ test.describe('_cookieScripts transient cache invalidation', () => {
     });
     nonce = await getAdminNonce(adminPage);
 
+    // Resolve the analytics category ID dynamically to avoid hardcoding.
+    const analyticsCatId = parseInt(
+      wpEval(`
+        global $wpdb;
+        echo (int) $wpdb->get_var(
+          $wpdb->prepare(
+            "SELECT category_id FROM {$wpdb->prefix}faz_cookie_categories WHERE slug = %s",
+            'analytics'
+          )
+        );
+      `).trim(),
+      10,
+    );
+    expect(analyticsCatId, 'analytics category must exist in the DB').toBeGreaterThan(0);
+
     // Create a cookie with an opt_in_script so _cookieScripts is non-empty.
     const res = await adminPage.request.post(`${baseURL}/?rest_route=/faz/v1/cookies`, {
       headers: { 'X-WP-Nonce': nonce, 'Content-Type': 'application/json' },
@@ -364,7 +379,7 @@ test.describe('_cookieScripts transient cache invalidation', () => {
         name:           '_faz_cache_test',
         slug:           '_faz_cache_test',
         domain:         '127.0.0.1',
-        category:       3, // analytics — always present on the test site
+        category:       analyticsCatId,
         duration:       { en: 'session' },
         description:    { en: 'cache test cookie' },
         opt_in_script:  "window._fazCacheE2E = true;",

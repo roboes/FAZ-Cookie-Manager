@@ -39,6 +39,13 @@ function clearOptoutLogs(): void {
   `);
 }
 
+function clearRateLimitTransients(): void {
+  wpEval(`
+    global $wpdb;
+    $wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_faz_dsar_rl_%' OR option_name LIKE '_transient_faz_dnsmpi_rl_%'" );
+  `);
+}
+
 let ccpaUrl = '';
 let dsarUrl = '';
 
@@ -65,7 +72,9 @@ test.afterAll(() => {
 test.describe('[faz_do_not_sell] CCPA opt-out form', () => {
 
   // Pre-accept the consent banner so it does not cover the form or trap Tab focus.
+  // Also clear any stale rate-limit transients so submission tests don't block each other.
   test.beforeEach(async ({ page }) => {
+    clearRateLimitTransients();
     await page.context().addCookies([{
       name:     'fazcookie-consent',
       value:    'consentid%3Ae2e-ccpa-test%2Cconsent%3Ayes%2Caction%3Ayes%2Cnecessary%3Ayes%2Cfunctional%3Ayes%2Canalytics%3Ayes%2Cperformance%3Ayes%2Cuncategorized%3Ayes%2Cmarketing%3Ayes%2Crev%3A5',
@@ -203,7 +212,9 @@ test.describe('[faz_dsar_form] GDPR DSAR form', () => {
   // intercepts clicks on the DSAR submit button which lands at ~Y=513 in a
   // 1280x720 viewport.  Setting the fazcookie-consent cookie before each
   // navigation keeps the banner out of the DOM for all DSAR tests.
+  // Also clear any stale rate-limit transients so submission tests don't block each other.
   test.beforeEach(async ({ page }) => {
+    clearRateLimitTransients();
     await page.context().addCookies([{
       name:     'fazcookie-consent',
       value:    'consentid%3Ae2e-dsar-test%2Cconsent%3Ayes%2Caction%3Ayes%2Cnecessary%3Ayes%2Cfunctional%3Ayes%2Canalytics%3Ayes%2Cperformance%3Ayes%2Cuncategorized%3Ayes%2Cmarketing%3Ayes%2Crev%3A5',
@@ -435,6 +446,8 @@ test.describe('[faz_dsar_form] GDPR DSAR form', () => {
   test('DSAR-19: each of the 6 request types submits successfully', async ({ page }) => {
     const types = ['access', 'erasure', 'portability', 'rectify', 'restrict', 'object'];
     for (const type of types) {
+      // Clear per-IP rate-limit transient before each iteration so every type can succeed.
+      clearRateLimitTransients();
       await page.goto(dsarUrl, { waitUntil: 'domcontentloaded' });
       await page.locator('input[name="dsar_name"]').fill('Loop Tester');
       await page.locator('input[name="dsar_email"]').fill(`loop-${type}@example.com`);

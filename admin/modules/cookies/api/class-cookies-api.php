@@ -248,6 +248,7 @@ class Cookies_API extends API_Controller {
 					'description'       => __( 'JavaScript executed when this cookie\'s category is accepted.', 'faz-cookie-manager' ),
 					'type'              => 'string',
 					'context'           => array( 'view', 'edit' ),
+					// strval prevents WordPress's default sanitize_text_field which strips JS syntax.
 					'sanitize_callback' => 'strval',
 					'maxLength'         => 10000,
 				),
@@ -255,6 +256,7 @@ class Cookies_API extends API_Controller {
 					'description'       => __( 'JavaScript executed when this cookie\'s category is rejected or revoked.', 'faz-cookie-manager' ),
 					'type'              => 'string',
 					'context'           => array( 'view', 'edit' ),
+					// strval prevents WordPress's default sanitize_text_field which strips JS syntax.
 					'sanitize_callback' => 'strval',
 					'maxLength'         => 10000,
 				),

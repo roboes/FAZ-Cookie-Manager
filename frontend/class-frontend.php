@@ -979,7 +979,8 @@ class Frontend {
 				"SELECT c.meta, cat.slug AS category_slug
 				 FROM {$wpdb->prefix}faz_cookies c
 				 INNER JOIN {$wpdb->prefix}faz_cookie_categories cat ON c.category = cat.category_id
-				 WHERE c.meta LIKE '%opt_in_script%' OR c.meta LIKE '%opt_out_script%'"
+				 WHERE c.meta LIKE '%opt_in_script%' OR c.meta LIKE '%opt_out_script%'
+				 LIMIT 500"
 			);
 			// phpcs:enable
 			$cookie_scripts = array();

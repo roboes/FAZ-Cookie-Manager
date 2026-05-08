@@ -580,6 +580,12 @@
 			if (f.placeholder) input.placeholder = f.placeholder;
 			if (isEdit && cookie[f.path]) input.value = textVal(cookie[f.path]);
 			group.appendChild(input);
+			if (f.path === 'opt_in_script' || f.path === 'opt_out_script') {
+				var scriptNotice = document.createElement('p');
+				scriptNotice.style.cssText = 'font-size:11px;color:#888;margin:4px 0 0;';
+				scriptNotice.textContent = 'Note: code entered here is included in the page source and visible to all visitors.';
+				group.appendChild(scriptNotice);
+			}
 			form.appendChild(group);
 		});
 

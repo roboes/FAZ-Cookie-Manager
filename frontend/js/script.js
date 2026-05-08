@@ -2648,8 +2648,8 @@ function _fazRunScript(code) {
         var el = document.createElement('script');
         el.textContent = code;
         document.head.appendChild(el);
-        // Remove immediately after execution — script is one-shot; keeping it in the
-        // DOM would expose admin-authored code to browser DevTools inspection.
+        // Remove immediately after execution — one-shot scripts should not
+        // accumulate in the DOM across repeated consent changes.
         document.head.removeChild(el);
     } catch (e) {
         // CSP note: sites with script-src without 'unsafe-inline' will block this
