@@ -93,6 +93,14 @@ class DSAR_Shortcode {
 		' );
 
 		$nonce = wp_create_nonce( self::AJAX_ACTION );
+		// Store recipient server-side so the client never controls where the
+		// DSAR notification is sent.  Key is an HMAC of the nonce to prevent
+		// transient enumeration; TTL matches the WordPress nonce window (24 h).
+		set_transient(
+			'faz_dsar_email_' . substr( hash_hmac( 'sha256', $nonce, wp_salt( 'nonce' ) ), 0, 32 ),
+			$admin_email,
+			DAY_IN_SECONDS
+		);
 		$id    = 'faz-dsar-' . wp_rand( 1000, 9999 );
 
 		$request_types = array(
@@ -110,7 +118,6 @@ class DSAR_Shortcode {
 			<form class="faz-dsar-form" novalidate>
 				<input type="hidden" name="action" value="<?php echo esc_attr( self::AJAX_ACTION ); ?>">
 				<input type="hidden" name="nonce"  value="<?php echo esc_attr( $nonce ); ?>">
-				<input type="hidden" name="dsar_admin_email" value="<?php echo esc_attr( $admin_email ); ?>">
 
 				<!-- Honeypot field — bots fill it, humans don't -->
 				<div class="faz-dsar-honeypot" aria-hidden="true">
@@ -231,9 +238,11 @@ class DSAR_Shortcode {
 		$type    = isset( $_POST['dsar_type'] ) ? sanitize_key( wp_unslash( $_POST['dsar_type'] ) ) : '';
 		$message = isset( $_POST['dsar_message'] ) ? sanitize_textarea_field( wp_unslash( $_POST['dsar_message'] ) ) : '';
 
-		// Resolve admin_email from the hidden form field; fall back to site admin.
-		$admin_email_raw = isset( $_POST['dsar_admin_email'] ) ? sanitize_email( wp_unslash( $_POST['dsar_admin_email'] ) ) : '';
-		$admin_email     = is_email( $admin_email_raw ) ? $admin_email_raw : get_option( 'admin_email' );
+		// Resolve recipient from the server-side transient — never trust client input.
+		$raw_nonce   = isset( $_POST['nonce'] ) ? sanitize_text_field( wp_unslash( $_POST['nonce'] ) ) : '';
+		$token_key   = 'faz_dsar_email_' . substr( hash_hmac( 'sha256', $raw_nonce, wp_salt( 'nonce' ) ), 0, 32 );
+		$stored      = get_transient( $token_key );
+		$admin_email = ( false !== $stored && is_email( $stored ) ) ? $stored : get_option( 'admin_email' );
 
 		$valid_types = array( 'access', 'erasure', 'portability', 'rectify', 'restrict', 'object' );
 
@@ -249,7 +258,8 @@ class DSAR_Shortcode {
 			wp_send_json_error( __( 'Please select a valid request type.', 'faz-cookie-manager' ) );
 		}
 
-		if ( mb_strlen( $message ) > self::MESSAGE_MAX_LENGTH ) {
+		$msg_len = function_exists( 'mb_strlen' ) ? mb_strlen( $message ) : strlen( $message );
+		if ( $msg_len > self::MESSAGE_MAX_LENGTH ) {
 			wp_send_json_error( __( 'Your message is too long. Please limit it to 5,000 characters.', 'faz-cookie-manager' ) );
 		}
 

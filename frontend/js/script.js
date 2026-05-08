@@ -2578,31 +2578,35 @@ function _fazCleanupRevokedCookies() {
 
     // Web Storage shredding: localStorage and sessionStorage.
     // Keys are collected before deletion to avoid index-shift bugs during removal.
+    // Wrapped per-storage in try/catch: accessing storage throws SecurityError in
+    // some embedded/privacy contexts (storage blocked, sandboxed iframes, etc.).
     ['localStorage', 'sessionStorage'].forEach(function (storageType) {
-        var storage = window[storageType];
-        if (!storage) return;
-        var keysToDelete = [];
-        for (var si = 0; si < storage.length; si++) {
-            var key = storage.key(si);
-            if (!key) continue;
-            if (_fazIsCookieWhitelisted(key)) continue;
-            var del = false;
-            if (hasCategoryMap) {
-                for (var kPat in cookieMap) {
-                    if (!cookieMap.hasOwnProperty(kPat)) continue;
-                    if (!_fazIsCategoryToBeBlocked(cookieMap[kPat])) continue;
-                    if (_fazCookieNameMatches(key, kPat)) { del = true; break; }
+        try {
+            var storage = window[storageType];
+            if (!storage) return;
+            var keysToDelete = [];
+            for (var si = 0; si < storage.length; si++) {
+                var key = storage.key(si);
+                if (!key) continue;
+                if (_fazIsCookieWhitelisted(key)) continue;
+                var del = false;
+                if (hasCategoryMap) {
+                    for (var kPat in cookieMap) {
+                        if (!cookieMap.hasOwnProperty(kPat)) continue;
+                        if (!_fazIsCategoryToBeBlocked(cookieMap[kPat])) continue;
+                        if (_fazCookieNameMatches(key, kPat)) { del = true; break; }
+                    }
                 }
-            }
-            if (!del && hasSvcMap) {
-                for (var kSvc in svcCookieMap) {
-                    if (!svcCookieMap.hasOwnProperty(kSvc)) continue;
-                    if (_fazCookieNameMatches(key, kSvc)) { del = true; break; }
+                if (!del && hasSvcMap) {
+                    for (var kSvc in svcCookieMap) {
+                        if (!svcCookieMap.hasOwnProperty(kSvc)) continue;
+                        if (_fazCookieNameMatches(key, kSvc)) { del = true; break; }
+                    }
                 }
+                if (del) keysToDelete.push(key);
             }
-            if (del) keysToDelete.push(key);
-        }
-        keysToDelete.forEach(function (k) { storage.removeItem(k); });
+            keysToDelete.forEach(function (k) { storage.removeItem(k); });
+        } catch (e) { /* SecurityError: storage blocked in this context */ }
     });
 
     return svcRevoked;
@@ -2627,8 +2631,10 @@ function _fazExecuteConsentScripts(prevAccepted) {
         var wasAccepted = Array.isArray(prevAccepted) && prevAccepted.indexOf(slug) !== -1;
         var isAccepted  = ref._fazGetFromStore(slug) === 'yes';
         var toRun = null;
-        if (!wasAccepted && isAccepted && entry.opt_in  && entry.opt_in.length)  toRun = entry.opt_in;
-        if (wasAccepted  && !isAccepted && entry.opt_out && entry.opt_out.length) toRun = entry.opt_out;
+        if (!wasAccepted && isAccepted  && entry.opt_in  && entry.opt_in.length)  toRun = entry.opt_in;
+        // Run opt_out on any rejection — including first-visit Reject All where
+        // wasAccepted is false. Opt-out scripts are cleanup routines (idempotent).
+        if (!isAccepted && entry.opt_out && entry.opt_out.length) toRun = entry.opt_out;
         if (toRun) {
             toRun.forEach(function (code) { _fazRunScript(code); });
         }

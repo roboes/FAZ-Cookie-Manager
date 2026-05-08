@@ -255,15 +255,15 @@ class Cookie extends Store {
 	 * @return array
 	 */
 	public function get_meta() {
-		if ( null !== $this->_decoded_meta ) {
-			return $this->_decoded_meta;
+		if ( null !== $this->decoded_meta ) {
+			return $this->decoded_meta;
 		}
 		$meta        = array();
 		$raw         = $this->get_object_data( 'meta' );
 		$data        = is_string( $raw ) ? json_decode( $raw, true ) : ( is_array( $raw ) ? $raw : array() );
 		$script_keys = array( 'opt_in_script', 'opt_out_script' );
 		if ( ! is_array( $data ) ) {
-			$this->_decoded_meta = $meta;
+			$this->decoded_meta = $meta;
 			return $meta;
 		}
 		foreach ( $data as $key => $item ) {
@@ -271,7 +271,7 @@ class Cookie extends Store {
 				? (string) $item
 				: sanitize_textarea_field( $item );
 		}
-		$this->_decoded_meta = $meta;
+		$this->decoded_meta = $meta;
 		return $meta;
 	}
 
@@ -305,7 +305,7 @@ class Cookie extends Store {
 		$meta                   = $this->get_meta();
 		$meta['opt_in_script']  = (string) $script;
 		$this->set_object_data( 'meta', wp_json_encode( $meta ) );
-		$this->_decoded_meta = null;
+		$this->decoded_meta = null;
 	}
 
 	/**
@@ -318,7 +318,7 @@ class Cookie extends Store {
 		$meta                    = $this->get_meta();
 		$meta['opt_out_script']  = (string) $script;
 		$this->set_object_data( 'meta', wp_json_encode( $meta ) );
-		$this->_decoded_meta = null;
+		$this->decoded_meta = null;
 	}
 
 	/**
