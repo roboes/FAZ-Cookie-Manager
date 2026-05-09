@@ -13,7 +13,7 @@ import { expect } from '@playwright/test';
 import { test } from '../fixtures/wp-fixture';
 import { upsertPage, wp, wpEval } from '../utils/wp-env';
 
-const WP_BASE = process.env.WP_BASE_URL ?? 'http://localhost:9998';
+const WP_BASE = process.env.WP_BASE_URL ?? 'http://127.0.0.1:9998';
 
 const CCPA_SLUG = 'faz-e2e-do-not-sell';
 const DSAR_SLUG = 'faz-e2e-dsar-form';

@@ -197,10 +197,14 @@ class Frontend {
 		add_filter( 'widget_block_content', array( $this, 'filter_content_blocking' ), 1000 );
 		add_filter( 'embed_oembed_html', array( $this, 'filter_oembed_blocking' ), 1000, 2 );
 
-		// Invalidate the cookie-scripts transient whenever a cookie is saved or deleted.
-		add_action( 'faz_after_update_cookie', function() {
+		// Invalidate the cookie-scripts transient whenever a cookie or category is
+		// saved or deleted. Category changes affect slug lookups in _cookieScripts,
+		// so a rename / delete must also clear the map.
+		$invalidate_scripts_map = function() {
 			delete_transient( 'faz_cookie_scripts_map' );
-		} );
+		};
+		add_action( 'faz_after_update_cookie', $invalidate_scripts_map );
+		add_action( 'faz_after_update_cookie_category', $invalidate_scripts_map );
 	}
 
 	/**
@@ -3545,10 +3549,9 @@ class Frontend {
 		// whose content includes category slugs like "analytics" — which would otherwise
 		// be matched by the provider pattern and blocked, preventing window._fazConfig
 		// from being defined and crashing the entire banner.
-		if (
-			( '' !== $handle && ( 0 === strpos( $handle, 'faz-cookie-manager' ) || 0 === strpos( $handle, 'faz-fw' ) ) ) ||
-			( '' !== $id && ( 0 === strpos( $id, 'faz-cookie-manager' ) || 0 === strpos( $id, 'faz-fw' ) ) )
-		) {
+		// is_own_script_handle() covers the base handle and all -* suffixes (including
+		// the -js-extra suffix that wp_localize_script() appends) plus the faz-fw family.
+		if ( $this->is_own_script_handle( $handle ) || $this->is_own_script_handle( $id ) ) {
 			return $tag;
 		}
 		// Extract attributes and inline content separately so the whitelist

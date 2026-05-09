@@ -409,6 +409,9 @@ test.describe('v1.7.0 features', () => {
     await page.goto(`${WP_BASE}/wp-admin/admin.php?page=faz-cookie-manager-settings`, { waitUntil: 'domcontentloaded' });
     const nonce = await getAdminNonce(page);
 
+    // Capture the real pre-test value before touching anything.
+    const original = await getSettings(page, nonce);
+
     // Ensure we start from a known state (another test may have left it true)
     await updateSettings(page, nonce, { pageview_tracking: false });
     const before = await getSettings(page, nonce);
@@ -428,8 +431,8 @@ test.describe('v1.7.0 features', () => {
         await ctx.close();
       }
     } finally {
-      // Restore
-      await updateSettings(page, nonce, { pageview_tracking: before.pageview_tracking });
+      // Bring back the disabled state for the negative assertion below.
+      await updateSettings(page, nonce, { pageview_tracking: false });
     }
 
     // Verify disabled state (should match original)
@@ -442,6 +445,9 @@ test.describe('v1.7.0 features', () => {
     } finally {
       await ctx2.close();
     }
+
+    // Final restore to the real pre-test value (cross-suite safety).
+    await updateSettings(page, nonce, { pageview_tracking: original.pageview_tracking });
   });
 
   // 20. System Status Page

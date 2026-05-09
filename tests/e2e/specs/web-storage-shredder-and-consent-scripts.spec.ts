@@ -310,6 +310,8 @@ test.describe('Per-cookie opt-in/out consent scripts', () => {
   let testCookieId = 0;
   /** ID of a second analytics cookie for multi-cookie tests. */
   let testCookieId2 = 0;
+  /** Resolved analytics category_id (dynamic to handle category recreations). */
+  let analyticsCategoryId = 0;
 
   test.beforeAll(async ({ browser, wpBaseURL, loginAsAdmin }) => {
     baseURL = wpBaseURL;
@@ -323,7 +325,7 @@ test.describe('Per-cookie opt-in/out consent scripts', () => {
     expect(nonce.length, 'nonce must be non-empty').toBeGreaterThan(0);
 
     // Resolve the analytics category ID dynamically to avoid hardcoding.
-    const analyticsCategoryId = parseInt(
+    analyticsCategoryId = parseInt(
       wpEval(`
         global $wpdb;
         echo (int) $wpdb->get_var(
@@ -448,19 +450,26 @@ test.describe('Per-cookie opt-in/out consent scripts', () => {
   test('new cookie without scripts defaults opt_in_script and opt_out_script to empty string', async ({
     wpBaseURL,
   }) => {
-    const res = await adminPage.request.get(
-      `${wpBaseURL}/?rest_route=/faz/v1/cookies`,
-      { headers: { 'X-WP-Nonce': nonce } },
-    );
-    const all = await res.json() as Record<number, Record<string, unknown>>;
-    const without = Object.values(all).find(
-      (c) => !c.opt_in_script && c.name !== '_faz_e2e_script_test',
-    );
-    if (without) {
-      expect(without.opt_in_script  ?? '').toBe('');
-      expect(without.opt_out_script ?? '').toBe('');
+    // Create a cookie that intentionally omits both script fields.
+    const tmpId = await createCookie(adminPage, nonce, wpBaseURL, {
+      name:        '_faz_e2e_no_scripts',
+      slug:        '_faz_e2e_no_scripts',
+      domain:      '127.0.0.1',
+      category:    analyticsCategoryId,
+      duration:    { en: 'session' },
+      description: { en: 'cookie without scripts' },
+    });
+    try {
+      const res = await adminPage.request.get(
+        `${wpBaseURL}/?rest_route=/faz/v1/cookies/${tmpId}`,
+        { headers: { 'X-WP-Nonce': nonce } },
+      );
+      const body = await res.json() as Record<string, unknown>;
+      expect(body.opt_in_script  ?? '').toBe('');
+      expect(body.opt_out_script ?? '').toBe('');
+    } finally {
+      await deleteCookie(adminPage, nonce, wpBaseURL, tmpId);
     }
-    // If all cookies have scripts, this test is vacuously satisfied.
   });
 
   // ── Frontend store ─────────────────────────────────────────────────────
@@ -558,9 +567,12 @@ test.describe('Per-cookie opt-in/out consent scripts', () => {
       await rejectBtn.waitFor({ state: 'visible', timeout: 5_000 });
 
       // Clicking reject triggers opt_out → localStorage → page reload.
-      const navPromise = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10_000 }).catch(() => null);
-      await rejectBtn.click();
-      await navPromise;
+      // Promise.all is the Playwright-recommended pattern: starting waitForNavigation
+      // BEFORE the click avoids the race condition of a separation between the two.
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10_000 }),
+        rejectBtn.click(),
+      ]);
       // Wait for the localStorage evidence to be written (opt_out_script runs before reload).
       await page.waitForFunction(
         () => localStorage.getItem('_fazE2EOptOutFired') !== null,

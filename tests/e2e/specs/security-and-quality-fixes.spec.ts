@@ -280,6 +280,7 @@ test.describe('REST API — opt_in/opt_out_script maxLength enforcement', () => 
   let adminPage: Page;
   let nonce: string;
   let baseURL = '';
+  let analyticsCatId = 0;
 
   test.beforeAll(async ({ browser, wpBaseURL, loginAsAdmin }) => {
     baseURL = wpBaseURL;
@@ -289,6 +290,21 @@ test.describe('REST API — opt_in/opt_out_script maxLength enforcement', () => 
       waitUntil: 'domcontentloaded',
     });
     nonce = await getAdminNonce(adminPage);
+    // Resolve the analytics category ID dynamically so the test works even if
+    // categories have been recreated with different auto-increment IDs.
+    analyticsCatId = parseInt(
+      wpEval(`
+        global $wpdb;
+        echo (int) $wpdb->get_var(
+          $wpdb->prepare(
+            "SELECT category_id FROM {$wpdb->prefix}faz_cookie_categories WHERE slug = %s",
+            'analytics'
+          )
+        );
+      `).trim(),
+      10,
+    );
+    expect(analyticsCatId, 'analytics category must exist in DB').toBeGreaterThan(0);
   });
 
   test.afterAll(async () => {
@@ -303,7 +319,7 @@ test.describe('REST API — opt_in/opt_out_script maxLength enforcement', () => 
         name:           '_faz_ml_test',
         slug:           '_faz_ml_test',
         domain:         '127.0.0.1',
-        category:       1,
+        category:       analyticsCatId,
         duration:       { en: 'session' },
         description:    { en: 'maxLength test' },
         opt_in_script:  tooLong,
@@ -324,7 +340,7 @@ test.describe('REST API — opt_in/opt_out_script maxLength enforcement', () => 
         name:           '_faz_ml_test2',
         slug:           '_faz_ml_test2',
         domain:         '127.0.0.1',
-        category:       1,
+        category:       analyticsCatId,
         duration:       { en: 'session' },
         description:    { en: 'maxLength test 2' },
         opt_in_script:  '',

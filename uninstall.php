@@ -100,13 +100,15 @@ if ( $faz_force_remove_all || faz_should_remove_on_uninstall() || is_multisite()
 			$dsar_posts = get_posts(
 				array(
 					'post_type'      => 'faz_dsar',
-					'post_status'    => array( 'private', 'publish', 'pending', 'draft', 'any' ),
+					// Include 'trash': get_posts with 'any' excludes trashed posts
+					// (WP docs: "any" means "all statuses except trash and auto-draft").
+					'post_status'    => array( 'private', 'publish', 'pending', 'draft', 'trash', 'any' ),
 					'posts_per_page' => -1,
 					'fields'         => 'ids',
 				)
 			);
 			foreach ( $dsar_posts as $dsar_post_id ) {
-				wp_delete_post( (int) $dsar_post_id, true );
+				wp_delete_post( absint( $dsar_post_id ), true );
 			}
 
 			// Delete all plugin options.

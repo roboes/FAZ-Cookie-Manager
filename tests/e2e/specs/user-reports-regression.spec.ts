@@ -515,7 +515,7 @@ test.describe('User-reported regressions (v1.11.0 publisher report)', () => {
 			// browser silently discards Set-Cookie → JS placeholder overwrites it.
 			wpEval(`
 				global $wpdb;
-				$standard = array('necessary','analytics','functional','marketing','performance','uncategorized');
+				$standard = array('necessary','analytics','functional','marketing','performance','uncategorized','wordpress-internal');
 				$ph = implode(',', array_fill(0, count($standard), '%s'));
 				$wpdb->query($wpdb->prepare(
 					"DELETE FROM {$wpdb->prefix}faz_cookie_categories WHERE slug NOT IN ($ph)",

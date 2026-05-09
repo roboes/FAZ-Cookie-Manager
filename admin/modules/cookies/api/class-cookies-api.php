@@ -247,17 +247,20 @@ class Cookies_API extends API_Controller {
 				'opt_in_script'  => array(
 					'description'       => __( 'JavaScript executed when this cookie\'s category is accepted.', 'faz-cookie-manager' ),
 					'type'              => 'string',
-					'context'           => array( 'view', 'edit' ),
-					// strval prevents WordPress's default sanitize_text_field which strips JS syntax.
-					'sanitize_callback' => 'strval',
+					// Keep out of the public 'view' context so the raw JS is not exposed
+					// to unauthenticated callers; only admins with 'edit' context see it.
+					'context'           => array( 'edit' ),
+					// Only users with unfiltered_html (administrators on single-site,
+					// super-admins on multisite) may save arbitrary JS. Everyone else gets
+					// an empty string, which preserves the existing value.
+					'sanitize_callback' => array( __CLASS__, 'sanitize_script_field' ),
 					'maxLength'         => 10000,
 				),
 				'opt_out_script' => array(
 					'description'       => __( 'JavaScript executed when this cookie\'s category is rejected or revoked.', 'faz-cookie-manager' ),
 					'type'              => 'string',
-					'context'           => array( 'view', 'edit' ),
-					// strval prevents WordPress's default sanitize_text_field which strips JS syntax.
-					'sanitize_callback' => 'strval',
+					'context'           => array( 'edit' ),
+					'sanitize_callback' => array( __CLASS__, 'sanitize_script_field' ),
 					'maxLength'         => 10000,
 				),
 			),
@@ -353,6 +356,30 @@ class Cookies_API extends API_Controller {
 		}
 
 		return rest_ensure_response( $templates );
+	}
+
+	/**
+	 * Sanitize an admin-defined script field (opt_in_script / opt_out_script).
+	 *
+	 * Raw JavaScript may only be saved by users with the `unfiltered_html`
+	 * capability — equivalent to Administrators on single-site and Super Admins
+	 * on multisite. Any other role receives an empty string, preserving the
+	 * existing value in the DB (the API layer will not overwrite it).
+	 *
+	 * This mirrors WordPress core's handling of unfiltered content in the REST
+	 * API (see WP_REST_Posts_Controller::sanitize_post_statuses).
+	 *
+	 * @param mixed $value Raw input value.
+	 * @return string
+	 */
+	public static function sanitize_script_field( $value ) {
+		if ( ! current_user_can( 'unfiltered_html' ) ) {
+			// Return empty string so the field is written as '' rather than
+			// the raw JS; Cookie::set_meta() will merge this into the JSON.
+			// Admins that lack unfiltered_html should not be able to inject JS.
+			return '';
+		}
+		return (string) $value;
 	}
 
 } // End the class.

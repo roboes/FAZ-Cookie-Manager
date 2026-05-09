@@ -198,10 +198,14 @@ class Do_Not_Sell_Shortcode {
 	 */
 	private function set_optout_cookie() {
 		$expires = time() + ( self::COOKIE_DAYS * DAY_IN_SECONDS );
+		// Use '/' for path and '' for domain (lets the browser derive the domain
+		// from the request) instead of COOKIEPATH/COOKIE_DOMAIN which are not
+		// defined in all WordPress contexts (e.g. REST routes, AJAX) and cause
+		// PHPStan errors when those constants are absent from the stub set.
 		setcookie( self::COOKIE_NAME, '1', array(
 			'expires'  => $expires,
-			'path'     => COOKIEPATH,
-			'domain'   => COOKIE_DOMAIN,
+			'path'     => '/',
+			'domain'   => '',
 			'secure'   => is_ssl(),
 			'httponly' => true,
 			'samesite' => 'Lax',

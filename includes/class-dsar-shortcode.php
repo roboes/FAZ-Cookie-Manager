@@ -7,7 +7,12 @@
  * private post (post_type = 'faz_dsar') so requests survive email failures.
  *
  * Usage: [faz_dsar_form]
- *        [faz_dsar_form button="Send Request" admin_email="dpo@example.com"]
+ *        [faz_dsar_form button="Send Request"]
+ *
+ * The notification recipient is always the WordPress admin email from Settings →
+ * General. To customise the address update that setting — do not pass it as a
+ * shortcode attribute (removed for security: any editor with page-edit access
+ * could redirect DSAR notifications to an external address).
  *
  * @package FazCookie\Includes
  */
@@ -42,17 +47,28 @@ class DSAR_Shortcode {
 		register_post_type(
 			self::POST_TYPE,
 			array(
-				'label'              => __( 'Data Requests', 'faz-cookie-manager' ),
-				'public'             => false,
-				'show_ui'            => true,
-				'show_in_menu'       => false,
-				'capability_type'    => 'post',
-				'capabilities'       => array(
-					'create_posts' => 'do_not_allow',
+				'label'           => __( 'Data Requests', 'faz-cookie-manager' ),
+				'public'          => false,
+				'show_ui'         => true,
+				'show_in_menu'    => false,
+				// Map all capabilities to manage_options so Editors (who have
+				// read_private_posts by default) cannot access DSAR records
+				// which contain personal data (name, email, request type).
+				'capability_type' => 'post',
+				'capabilities'    => array(
+					'edit_post'          => 'manage_options',
+					'read_post'          => 'manage_options',
+					'delete_post'        => 'manage_options',
+					'edit_posts'         => 'manage_options',
+					'edit_others_posts'  => 'manage_options',
+					'delete_posts'       => 'manage_options',
+					'publish_posts'      => 'manage_options',
+					'read_private_posts' => 'manage_options',
+					'create_posts'       => 'do_not_allow',
 				),
-				'map_meta_cap'       => true,
-				'supports'           => array( 'title', 'custom-fields' ),
-				'show_in_rest'       => false,
+				'map_meta_cap'    => true,
+				'supports'        => array( 'title', 'custom-fields' ),
+				'show_in_rest'    => false,
 			)
 		);
 	}
@@ -63,15 +79,11 @@ class DSAR_Shortcode {
 	public function render( $atts = array() ) {
 		$atts = shortcode_atts(
 			array(
-				'button'      => __( 'Send Request', 'faz-cookie-manager' ),
-				'admin_email' => get_option( 'admin_email' ),
+				'button' => __( 'Send Request', 'faz-cookie-manager' ),
 			),
 			$atts,
 			'faz_dsar_form'
 		);
-
-		// Normalise the admin_email attribute: fall back to site admin if invalid.
-		$admin_email = is_email( $atts['admin_email'] ) ? sanitize_email( $atts['admin_email'] ) : get_option( 'admin_email' );
 
 		wp_register_style( 'faz-dsar', false, array(), FAZ_VERSION );
 		wp_enqueue_style( 'faz-dsar' );
@@ -93,14 +105,6 @@ class DSAR_Shortcode {
 		' );
 
 		$nonce = wp_create_nonce( self::AJAX_ACTION );
-		// Store recipient server-side so the client never controls where the
-		// DSAR notification is sent.  Key is an HMAC of the nonce to prevent
-		// transient enumeration; TTL matches the WordPress nonce window (24 h).
-		set_transient(
-			'faz_dsar_email_' . substr( hash_hmac( 'sha256', $nonce, wp_salt( 'nonce' ) ), 0, 32 ),
-			$admin_email,
-			DAY_IN_SECONDS
-		);
 		$id    = 'faz-dsar-' . wp_rand( 1000, 9999 );
 
 		$request_types = array(
@@ -233,16 +237,12 @@ class DSAR_Shortcode {
 		}
 		set_transient( $rl_key, 1, 60 );
 
-		$name    = isset( $_POST['dsar_name'] ) ? sanitize_text_field( wp_unslash( $_POST['dsar_name'] ) ) : '';
-		$email   = isset( $_POST['dsar_email'] ) ? sanitize_email( wp_unslash( $_POST['dsar_email'] ) ) : '';
-		$type    = isset( $_POST['dsar_type'] ) ? sanitize_key( wp_unslash( $_POST['dsar_type'] ) ) : '';
-		$message = isset( $_POST['dsar_message'] ) ? sanitize_textarea_field( wp_unslash( $_POST['dsar_message'] ) ) : '';
-
-		// Resolve recipient from the server-side transient — never trust client input.
-		$raw_nonce   = isset( $_POST['nonce'] ) ? sanitize_text_field( wp_unslash( $_POST['nonce'] ) ) : '';
-		$token_key   = 'faz_dsar_email_' . substr( hash_hmac( 'sha256', $raw_nonce, wp_salt( 'nonce' ) ), 0, 32 );
-		$stored      = get_transient( $token_key );
-		$admin_email = ( false !== $stored && is_email( $stored ) ) ? $stored : get_option( 'admin_email' );
+		$name        = isset( $_POST['dsar_name'] ) ? sanitize_text_field( wp_unslash( $_POST['dsar_name'] ) ) : '';
+		$email       = isset( $_POST['dsar_email'] ) ? sanitize_email( wp_unslash( $_POST['dsar_email'] ) ) : '';
+		$type        = isset( $_POST['dsar_type'] ) ? sanitize_key( wp_unslash( $_POST['dsar_type'] ) ) : '';
+		$message     = isset( $_POST['dsar_message'] ) ? sanitize_textarea_field( wp_unslash( $_POST['dsar_message'] ) ) : '';
+		// Recipient is always the site admin — not sourced from client input.
+		$admin_email = (string) get_option( 'admin_email' );
 
 		$valid_types = array( 'access', 'erasure', 'portability', 'rectify', 'restrict', 'object' );
 
@@ -269,9 +269,14 @@ class DSAR_Shortcode {
 			wp_send_json_error( __( 'Your message is too long. Please limit it to 5,000 characters.', 'faz-cookie-manager' ) );
 		}
 
-		set_transient( $email_rl_key, 1, HOUR_IN_SECONDS );
-
 		$post_id = $this->store_request( $name, $email, $type, $message );
+		if ( ! $post_id ) {
+			// DB error — do NOT arm the rate-limit so the user can retry.
+			wp_send_json_error( __( 'We could not record your request due to a server error. Please try again.', 'faz-cookie-manager' ) );
+			return;
+		}
+
+		set_transient( $email_rl_key, 1, HOUR_IN_SECONDS );
 		$this->notify_admin( $name, $email, $type, $message, $post_id, $admin_email );
 		$this->send_confirmation( $name, $email, $type );
 

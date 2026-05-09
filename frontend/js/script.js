@@ -2355,24 +2355,55 @@ function _fazShouldChangeType(element, src) {
         window.WebSocket = function (url, protocols) {
             var endpoint = _fazExtractEndpoint(url);
             if (endpoint && !_fazIsUserWhitelisted(url) && _fazShouldBlockProvider(endpoint)) {
-                // Return a mock WebSocket that immediately transitions to CLOSED.
-                // Using Object.create keeps instanceof checks working for callers
-                // that test `ws instanceof WebSocket`.
+                // Build a mock that immediately transitions to CLOSED.
+                // We set up the prototype chain from _fazOrigWebSocket so that
+                // `instanceof WebSocket` checks still pass for callers that use them.
                 var mock = Object.create(_fazOrigWebSocket.prototype);
-                Object.defineProperty(mock, 'readyState', { get: function () { return 3; /* CLOSED */ } });
+                Object.defineProperty(mock, 'readyState',     { get: function () { return 3; /* CLOSED */ } });
                 Object.defineProperty(mock, 'bufferedAmount', { get: function () { return 0; } });
-                Object.defineProperty(mock, 'url', { get: function () { return url; } });
-                mock.send = function () {};
+                Object.defineProperty(mock, 'url',            { get: function () { return url; } });
+                mock.send  = function () {};
                 mock.close = function () {};
-                // Fire the close event asynchronously so the caller can attach
-                // handlers before it fires (same as a normal network failure).
-                setTimeout(function () {
+
+                // Proxy EventTarget API so callers using addEventListener() work
+                // correctly (Object.create lacks native internal slots for dispatchEvent
+                // etc., causing "Illegal invocation" errors in some SDKs).
+                if (typeof EventTarget !== 'undefined') {
                     try {
-                        if (typeof mock.onclose === 'function') {
-                            mock.onclose(new CloseEvent('close', { wasClean: false, code: 1001, reason: 'blocked' }));
-                        }
-                    } catch (e) { /* ignore */ }
-                }, 0);
+                        var _et = new EventTarget();
+                        mock.addEventListener    = function (t, l, o) { return _et.addEventListener(t, l, o); };
+                        mock.removeEventListener = function (t, l, o) { return _et.removeEventListener(t, l, o); };
+                        mock.dispatchEvent       = function (e)        { return _et.dispatchEvent(e); };
+                        // Fire the close event asynchronously via both EventTarget
+                        // and the onclose property so all listener styles are covered.
+                        setTimeout(function () {
+                            try {
+                                var ev = new CloseEvent('close', { wasClean: false, code: 1001, reason: 'blocked' });
+                                _et.dispatchEvent(ev);
+                                if (typeof mock.onclose === 'function') { mock.onclose(ev); }
+                            } catch (e) { /* ignore */ }
+                        }, 0);
+                    } catch (e) {
+                        // EventTarget constructor failed (should not happen in modern browsers);
+                        // fall through to the onclose-only path below.
+                        setTimeout(function () {
+                            try {
+                                if (typeof mock.onclose === 'function') {
+                                    mock.onclose(new CloseEvent('close', { wasClean: false, code: 1001, reason: 'blocked' }));
+                                }
+                            } catch (e2) { /* ignore */ }
+                        }, 0);
+                    }
+                } else {
+                    // Legacy environments without a constructable EventTarget.
+                    setTimeout(function () {
+                        try {
+                            if (typeof mock.onclose === 'function') {
+                                mock.onclose(new CloseEvent('close', { wasClean: false, code: 1001, reason: 'blocked' }));
+                            }
+                        } catch (e) { /* ignore */ }
+                    }, 0);
+                }
                 return mock;
             }
             return typeof protocols !== 'undefined'

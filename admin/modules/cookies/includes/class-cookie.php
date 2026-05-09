@@ -405,6 +405,7 @@ class Cookie extends Store {
 	 */
 	public function set_meta( $data ) {
 		$this->set_object_data( 'meta', $data );
+		$this->decoded_meta = null;
 	}
 	/**
 	 * Get contents by language.

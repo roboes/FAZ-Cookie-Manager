@@ -162,7 +162,9 @@ test.describe('P1-A — consent expiry default 180 days', () => {
 
   test('02 — PHP: consentExpiry value in default config JSON is 180', async () => {
     const result = wpEval(`
-      $path = WP_PLUGIN_DIR . '/faz-cookie-manager/admin/modules/banners/includes/configs/gdpr.json';
+      $ref  = new ReflectionClass( '\\\\FazCookie\\\\Frontend\\\\Frontend' );
+      $base = dirname( $ref->getFileName(), 2 );
+      $path = $base . '/admin/modules/banners/includes/configs/gdpr.json';
       $json = json_decode( file_get_contents( $path ), true );
       echo intval( $json['settings']['consentExpiry']['value'] ?? -1 );
     `);

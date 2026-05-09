@@ -424,6 +424,9 @@ test.describe('PR audit regressions (2026-04-19)', () => {
       }
       $s['banner_control']['status'] = true;
       update_option( 'faz_settings', $s );
+      if ( class_exists( '\\FazCookie\\Includes\\Cache' ) ) {
+        \\FazCookie\\Includes\\Cache::invalidate_cache_group( 'settings' );
+      }
       echo 'ok';
     `);
 
@@ -444,14 +447,18 @@ test.describe('PR audit regressions (2026-04-19)', () => {
         script.src = `data:text/javascript;base64,${payload}`;
         document.head.appendChild(script);
 
-        // Yield to the event loop so the MutationObserver microtask fires before
-        // we read the type. The observer sets type="javascript/blocked" and then
-        // removes the node from the DOM, so getElementById() would return null.
-        await new Promise<void>((resolve) => setTimeout(resolve, 50));
+        // Poll until the MutationObserver has had a chance to mark the script
+        // as blocked (sets type="javascript/blocked") or a hard timeout elapses.
+        // A fixed sleep is fragile on slow CI runners; polling is more reliable.
+        const deadline = Date.now() + 2000;
+        let scriptType = '';
+        while (Date.now() < deadline) {
+          scriptType = script.getAttribute('type') || (script as HTMLScriptElement).type || '';
+          if (scriptType === 'javascript/blocked') break;
+          await new Promise<void>((resolve) => setTimeout(resolve, 20));
+        }
 
-        return {
-          type: script.getAttribute('type') || (script as HTMLScriptElement).type || '',
-        };
+        return { type: scriptType };
       });
 
       // FAZ's MutationObserver marks the data: URI script as blocked.
