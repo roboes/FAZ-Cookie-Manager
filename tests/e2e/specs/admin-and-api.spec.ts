@@ -23,9 +23,9 @@ test.describe('Admin and REST integration', () => {
     }
   });
 
-  test('settings API returns data with valid nonce and rejects invalid nonce', async ({ page, loginAsAdmin }) => {
+  test('settings API returns data with valid nonce and rejects invalid nonce', async ({ page, wpBaseURL, loginAsAdmin }) => {
     await loginAsAdmin(page);
-    await page.goto('/wp-admin/admin.php?page=faz-cookie-manager-settings', { waitUntil: 'domcontentloaded' });
+    await page.goto(`${wpBaseURL}/wp-admin/admin.php?page=faz-cookie-manager-settings`, { waitUntil: 'domcontentloaded' });
 
     const settingsResponse = await page.evaluate(async () => {
       const nonce = window.fazConfig?.api?.nonce ?? '';
@@ -62,9 +62,9 @@ test.describe('Admin and REST integration', () => {
     expect([401, 403]).toContain(badNonceStatus);
   });
 
-  test('cookies API returns an array payload', async ({ page, loginAsAdmin }) => {
+  test('cookies API returns an array payload', async ({ page, wpBaseURL, loginAsAdmin }) => {
     await loginAsAdmin(page);
-    await page.goto('/wp-admin/admin.php?page=faz-cookie-manager-cookies', { waitUntil: 'domcontentloaded' });
+    await page.goto(`${wpBaseURL}/wp-admin/admin.php?page=faz-cookie-manager-cookies`, { waitUntil: 'domcontentloaded' });
 
     const cookiesResponse = await page.evaluate(async () => {
       const nonce = window.fazConfig?.api?.nonce ?? '';
@@ -82,9 +82,9 @@ test.describe('Admin and REST integration', () => {
     expect(Array.isArray(cookiesResponse.payload)).toBeTruthy();
   });
 
-  test('deprecated languages endpoint returns 410 Gone for admin', async ({ page, loginAsAdmin }) => {
+  test('deprecated languages endpoint returns 410 Gone for admin', async ({ page, wpBaseURL, loginAsAdmin }) => {
     await loginAsAdmin(page);
-    await page.goto('/wp-admin/admin.php?page=faz-cookie-manager-settings', { waitUntil: 'domcontentloaded' });
+    await page.goto(`${wpBaseURL}/wp-admin/admin.php?page=faz-cookie-manager-settings`, { waitUntil: 'domcontentloaded' });
 
     const langResponse = await page.evaluate(async () => {
       const nonce = window.fazConfig?.api?.nonce ?? '';
