@@ -497,7 +497,22 @@
 			var editBtn = document.createElement('button');
 			editBtn.className = 'faz-btn faz-btn-outline faz-btn-sm';
 			editBtn.textContent = __('cookies.edit', 'Edit');
-			editBtn.addEventListener('click', function () { openCookieModal(cookie); });
+			editBtn.addEventListener('click', function () {
+				var cookieId = getCookieId(cookie);
+				if (!cookieId) {
+					openCookieModal(cookie);
+					return;
+				}
+
+				editBtn.disabled = true;
+				FAZ.get('cookies/' + cookieId, { context: 'edit' }).then(function (fullCookie) {
+					openCookieModal(fullCookie || cookie);
+				}).catch(function () {
+					FAZ.notify(__('cookies.cookieLoadFailed', 'Failed to load cookie details.'), 'error');
+				}).then(function () {
+					editBtn.disabled = false;
+				});
+			});
 			tdActions.appendChild(editBtn);
 
 			var delBtn = document.createElement('button');

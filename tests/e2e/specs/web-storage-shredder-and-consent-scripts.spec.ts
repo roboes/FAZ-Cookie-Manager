@@ -372,7 +372,7 @@ test.describe('Per-cookie opt-in/out consent scripts', () => {
 
   test('cookies REST endpoint returns opt_in_script field', async ({ wpBaseURL }) => {
     const res = await adminPage.request.get(
-      `${wpBaseURL}/?rest_route=/faz/v1/cookies/${testCookieId}`,
+      `${wpBaseURL}/?rest_route=/faz/v1/cookies/${testCookieId}&context=edit`,
       { headers: { 'X-WP-Nonce': nonce } },
     );
     expect(res.status()).toBe(200);
@@ -382,7 +382,7 @@ test.describe('Per-cookie opt-in/out consent scripts', () => {
 
   test('cookies REST endpoint returns opt_out_script field', async ({ wpBaseURL }) => {
     const res = await adminPage.request.get(
-      `${wpBaseURL}/?rest_route=/faz/v1/cookies/${testCookieId}`,
+      `${wpBaseURL}/?rest_route=/faz/v1/cookies/${testCookieId}&context=edit`,
       { headers: { 'X-WP-Nonce': nonce } },
     );
     expect(res.status()).toBe(200);
@@ -392,7 +392,7 @@ test.describe('Per-cookie opt-in/out consent scripts', () => {
 
   test('opt_in_script value is preserved through API round-trip', async ({ wpBaseURL }) => {
     const res = await adminPage.request.get(
-      `${wpBaseURL}/?rest_route=/faz/v1/cookies/${testCookieId}`,
+      `${wpBaseURL}/?rest_route=/faz/v1/cookies/${testCookieId}&context=edit`,
       { headers: { 'X-WP-Nonce': nonce } },
     );
     const body = await res.json() as Record<string, unknown>;
@@ -401,7 +401,7 @@ test.describe('Per-cookie opt-in/out consent scripts', () => {
 
   test('opt_out_script value is preserved through API round-trip', async ({ wpBaseURL }) => {
     const res = await adminPage.request.get(
-      `${wpBaseURL}/?rest_route=/faz/v1/cookies/${testCookieId}`,
+      `${wpBaseURL}/?rest_route=/faz/v1/cookies/${testCookieId}&context=edit`,
       { headers: { 'X-WP-Nonce': nonce } },
     );
     const body = await res.json() as Record<string, unknown>;
@@ -413,7 +413,7 @@ test.describe('Per-cookie opt-in/out consent scripts', () => {
       opt_in_script: "window._fazE2EOptInV2 = true;",
     });
     const res = await adminPage.request.get(
-      `${wpBaseURL}/?rest_route=/faz/v1/cookies/${testCookieId}`,
+      `${wpBaseURL}/?rest_route=/faz/v1/cookies/${testCookieId}&context=edit`,
       { headers: { 'X-WP-Nonce': nonce } },
     );
     const body = await res.json() as Record<string, unknown>;
@@ -432,7 +432,7 @@ test.describe('Per-cookie opt-in/out consent scripts', () => {
       opt_in_script: "window._fazPreserveTest = 1;",
     });
     const res = await adminPage.request.get(
-      `${wpBaseURL}/?rest_route=/faz/v1/cookies/${testCookieId}`,
+      `${wpBaseURL}/?rest_route=/faz/v1/cookies/${testCookieId}&context=edit`,
       { headers: { 'X-WP-Nonce': nonce } },
     );
     const body = await res.json() as Record<string, unknown>;
@@ -720,5 +720,39 @@ test.describe('Per-cookie opt-in/out consent scripts', () => {
     await adminPage.waitForSelector('[data-field="opt_in_script"]', { timeout: 5_000 });
     const val = await adminPage.locator('[data-field="opt_in_script"]').inputValue();
     expect(val).toContain('_fazE2EOptIn');
+  });
+
+  test('editing non-script fields in the modal preserves saved opt-in/out scripts', async ({
+    wpBaseURL,
+  }) => {
+    test.setTimeout(60_000);
+    await adminPage.goto(`${wpBaseURL}/wp-admin/admin.php?page=faz-cookie-manager-cookies`, {
+      waitUntil: 'domcontentloaded',
+    });
+
+    await waitForCookiesLoaded();
+
+    const testRow = adminPage
+      .locator('#faz-cookies-tbody tr', { hasText: '_faz_e2e_script_test' })
+      .first();
+    await testRow.locator('button', { hasText: 'Edit' }).click();
+    await adminPage.waitForSelector('[data-field="opt_in_script"]', { timeout: 5_000 });
+
+    await adminPage.locator('[data-field="domain"]').fill('127.0.0.1');
+
+    await Promise.all([
+      adminPage.waitForResponse((res) =>
+        res.url().includes('/faz/v1/cookies/') && res.request().method() === 'POST',
+      ),
+      adminPage.locator('button', { hasText: 'Update Cookie' }).click(),
+    ]);
+
+    const res = await adminPage.request.get(
+      `${wpBaseURL}/?rest_route=/faz/v1/cookies/${testCookieId}&context=edit`,
+      { headers: { 'X-WP-Nonce': nonce } },
+    );
+    const body = await res.json() as Record<string, unknown>;
+    expect(body.opt_in_script).toBe("window._fazE2EOptIn = (window._fazE2EOptIn || 0) + 1;");
+    expect(body.opt_out_script).toBe("window._fazE2EOptOut = (window._fazE2EOptOut || 0) + 1;");
   });
 });

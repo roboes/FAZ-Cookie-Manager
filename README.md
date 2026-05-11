@@ -380,10 +380,9 @@ Supported request types: Right of Access (Art. 15), Right to Erasure (Art. 17), 
 | Attribute | Default | Description |
 |-----------|---------|-------------|
 | `button` | `Send Request` | Submit button label |
-| `admin_email` | site admin email | Override the recipient address |
 
 ```
-[faz_dsar_form button="Send Request" admin_email="dpo@example.com"]
+[faz_dsar_form button="Send Request"]
 ```
 
 ---
