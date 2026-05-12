@@ -382,6 +382,15 @@ class Cookies_API extends API_Controller {
 	 * @return string|WP_Error
 	 */
 	public static function sanitize_script_field( $value, $request, $param ) {
+		// Allow saves with empty script fields regardless of capability. The
+		// admin UI always submits these fields (even empty strings) on every
+		// cookie edit, so a strict capability check would otherwise block
+		// multisite site-admins who have `manage_options` but not
+		// `unfiltered_html` from editing any cookie. Empty strings cannot
+		// inject JavaScript, so there is no XSS risk in this early return.
+		if ( '' === (string) $value ) {
+			return '';
+		}
 		if ( ! current_user_can( 'unfiltered_html' ) ) {
 			return new WP_Error(
 				'rest_forbidden',

@@ -48,9 +48,11 @@ class DSAR_Shortcode {
 	/**
 	 * Enqueue the DSAR form JS on every frontend page.
 	 *
-	 * The submit handler uses a delegated listener and is a no-op when the
-	 * page contains no .faz-dsar-form element, so the cost on non-DSAR pages
-	 * is a single HTTP request for a ~1 KB file.
+	 * The submit handler is attached directly to each .faz-dsar-form element
+	 * (not via document-level delegation), with a MutationObserver to cover
+	 * forms injected into the DOM after script execution. When the page
+	 * contains no .faz-dsar-form element the script is a no-op, so the cost
+	 * on non-DSAR pages is a single HTTP request for a ~1 KB file.
 	 *
 	 * Unconditional enqueue is intentional: page builders (e.g. Bricks) may
 	 * render the shortcode HTML client-side after page load. In that scenario
@@ -81,9 +83,13 @@ class DSAR_Shortcode {
 				'faz-dsar-form',
 				'fazDsarConfig',
 				array(
-					'ajaxUrl' => admin_url( 'admin-ajax.php' ),
-					'errMsg'  => __( 'An error occurred. Please try again.', 'faz-cookie-manager' ),
-					'reqMsg'  => __( 'Please fill in all required fields.', 'faz-cookie-manager' ),
+					'ajaxUrl'    => admin_url( 'admin-ajax.php' ),
+					'errMsg'     => __( 'An error occurred. Please try again.', 'faz-cookie-manager' ),
+					'reqMsg'     => __( 'Please fill in all required fields.', 'faz-cookie-manager' ),
+					'emailMsg'   => __( 'Please enter a valid email address.', 'faz-cookie-manager' ),
+					'nameLabel'  => __( 'Name', 'faz-cookie-manager' ),
+					'emailLabel' => __( 'Email', 'faz-cookie-manager' ),
+					'typeLabel'  => __( 'Request type', 'faz-cookie-manager' ),
 				)
 			);
 		}
@@ -256,7 +262,7 @@ class DSAR_Shortcode {
 		// Per-email rate limit: one submission per email per hour.
 		$email_rl_key = 'faz_dsar_rl_em_' . substr( hash_hmac( 'sha256', strtolower( $email ), wp_salt() ), 0, 16 );
 		if ( false !== get_transient( $email_rl_key ) ) {
-			wp_send_json_error( __( 'Too many requests. Please wait 1 minute before submitting again.', 'faz-cookie-manager' ) );
+			wp_send_json_error( __( 'Too many requests. Please wait 1 hour before submitting again.', 'faz-cookie-manager' ) );
 		}
 
 		if ( ! in_array( $type, $valid_types, true ) ) {

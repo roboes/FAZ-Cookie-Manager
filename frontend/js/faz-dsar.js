@@ -34,9 +34,9 @@
 		var type    = typeEl  ? typeEl.value         : '';
 
 		var missing = [];
-		if (!name)  { missing.push('Name'); }
-		if (!email) { missing.push('Email'); }
-		if (!type)  { missing.push('Request type'); }
+		if (!name)  { missing.push(config.nameLabel  || 'Name'); }
+		if (!email) { missing.push(config.emailLabel || 'Email'); }
+		if (!type)  { missing.push(config.typeLabel  || 'Request type'); }
 		if (missing.length) {
 			if (notice) {
 				notice.className     = 'faz-dsar-notice error';

@@ -422,6 +422,7 @@ class Admin {
 				),
 				'version'        => $this->version,
 				'modules'        => self::$active_modules,
+				'canEditScripts' => current_user_can( 'unfiltered_html' ),
 				'locale'         => get_user_locale(),
 				'i18n'           => array(
 					// Dashboard widget strings (used by dashboard.js).

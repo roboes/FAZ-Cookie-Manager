@@ -23,7 +23,7 @@ trait IP_Hasher {
 	 * @return string 64-char hex string.
 	 */
 	private function hash_ip() {
-		$ip = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '';
+		$ip = \faz_resolve_client_ip();
 		if ( '' === $ip ) {
 			$ip = 'no-ip';
 		}

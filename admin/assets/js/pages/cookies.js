@@ -562,14 +562,23 @@
 		var isEdit = !!cookie;
 		var form = document.createElement('div');
 
+		var canEditScripts = !!(window.fazConfig && window.fazConfig.canEditScripts);
+
 		var fields = [
 			{ label: 'Cookie Name', path: 'name', type: 'text' },
 			{ label: 'Domain', path: 'domain', type: 'text' },
 			{ label: 'Duration', path: 'duration', type: 'text', placeholder: 'e.g. 1 year' },
 			{ label: 'Description', path: 'description', type: 'textarea' },
-			{ label: __('cookies.optInScriptLabel', 'Opt-in Script (runs when category is accepted)'), path: 'opt_in_script', type: 'textarea', placeholder: __('cookies.optInScriptPlaceholder', '// JS executed on consent accept\n// e.g. gtag("event", "consent_granted");') },
-			{ label: __('cookies.optOutScriptLabel', 'Opt-out Script (runs when category is rejected/revoked)'), path: 'opt_out_script', type: 'textarea', placeholder: __('cookies.optOutScriptPlaceholder', '// JS executed on consent reject or revoke') },
 		];
+
+		// Only expose opt-in/opt-out script fields to users with the
+		// `unfiltered_html` capability. Without this guard the admin UI would
+		// always POST these fields (even empty), tripping the REST sanitize
+		// callback's 403 for multisite site-admins who lack the capability.
+		if (canEditScripts) {
+			fields.push({ label: __('cookies.optInScriptLabel', 'Opt-in Script (runs when category is accepted)'), path: 'opt_in_script', type: 'textarea', placeholder: __('cookies.optInScriptPlaceholder', '// JS executed on consent accept\n// e.g. gtag("event", "consent_granted");') });
+			fields.push({ label: __('cookies.optOutScriptLabel', 'Opt-out Script (runs when category is rejected/revoked)'), path: 'opt_out_script', type: 'textarea', placeholder: __('cookies.optOutScriptPlaceholder', '// JS executed on consent reject or revoke') });
+		}
 
 		fields.forEach(function (f) {
 			var group = document.createElement('div');
