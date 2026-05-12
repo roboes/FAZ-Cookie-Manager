@@ -612,6 +612,19 @@ test.describe('WebSocket mock — EventTarget compatibility', () => {
     // FAZ should intercept it and return a mock. The mock MUST support addEventListener
     // (the old Object.create(WebSocket.prototype) mock lacked working EventTarget slots).
     const result = await page.evaluate(async () => {
+      const config = (window as unknown as {
+        _fazConfig?: { _providersToBlock?: Array<{ re: string; categories: string[]; fullPath?: boolean }> };
+      })._fazConfig;
+      if (config) {
+        config._providersToBlock = config._providersToBlock || [];
+        if (!config._providersToBlock.some((p) => p.re === 'connect.facebook.net/f_beacon')) {
+          config._providersToBlock.push({
+            re: 'connect.facebook.net/f_beacon',
+            categories: ['marketing'],
+            fullPath: true,
+          });
+        }
+      }
       return new Promise<{ intercepted: boolean; closeFiredViaAddEventListener: boolean }>(
         (resolve) => {
           const ws = new WebSocket('wss://connect.facebook.net/f_beacon');
@@ -622,9 +635,8 @@ test.describe('WebSocket mock — EventTarget compatibility', () => {
           const wasIntercepted = ws.readyState === 3;
 
           if (!wasIntercepted) {
-            // URL not blocked on this install — skip the assertion gracefully.
             ws.close();
-            resolve({ intercepted: false, closeFiredViaAddEventListener: true });
+            resolve({ intercepted: false, closeFiredViaAddEventListener: false });
             return;
           }
 
@@ -648,13 +660,10 @@ test.describe('WebSocket mock — EventTarget compatibility', () => {
       );
     });
 
-    if (result.intercepted) {
-      expect(
-        result.closeFiredViaAddEventListener,
-        'close event must fire via addEventListener on blocked WebSocket mock',
-      ).toBe(true);
-    }
-    // If the URL is not intercepted (provider not in database), the test passes
-    // vacuously — the assertion only applies when FAZ actually blocks the URL.
+    expect(result.intercepted, 'test must exercise the blocked WebSocket mock path').toBe(true);
+    expect(
+      result.closeFiredViaAddEventListener,
+      'close event must fire via addEventListener on blocked WebSocket mock',
+    ).toBe(true);
   });
 });

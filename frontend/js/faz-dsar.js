@@ -67,18 +67,23 @@
 		})
 		.then(function (r) { return r.json(); })
 		.then(function (res) {
+			var payload = (res && typeof res.data !== 'undefined') ? res.data : null;
+			var payloadMessage = '';
+			if (payload && typeof payload === 'object') {
+				payloadMessage = payload.message ? String(payload.message) : JSON.stringify(payload);
+			} else if (typeof payload === 'string') {
+				payloadMessage = payload;
+			}
 			if (res.success) {
 				form.style.display = 'none';
 				if (notice) {
 					notice.className   = 'faz-dsar-notice success';
-					var msg = (res.data && typeof res.data === 'object') ? res.data.message : res.data;
-					notice.textContent = (typeof msg === 'string' && msg) ? msg : errMsg;
+					notice.textContent = payloadMessage || errMsg;
 				}
 			} else {
 				if (notice) {
 					notice.className   = 'faz-dsar-notice error';
-					var errData = (res.data && typeof res.data === 'object') ? res.data.message : res.data;
-					notice.textContent = (typeof errData === 'string' && errData) ? errData : errMsg;
+					notice.textContent = payloadMessage || errMsg;
 				}
 				if (btn) { btn.disabled = false; }
 			}

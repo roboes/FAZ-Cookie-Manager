@@ -75,12 +75,20 @@ function clearOptoutLogs(): void {
 function clearRateLimitTransients(): void {
   wpEval(`
     global $wpdb;
-    $wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_faz_dsar_rl_%' OR option_name LIKE '_transient_faz_dnsmpi_rl_%'" );
-    // Also evict from object-cache backends (Redis/Memcached) if active.
-    if ( function_exists( 'wp_cache_flush_group' ) ) {
-      wp_cache_flush_group( 'transient' );
-    } elseif ( function_exists( 'wp_cache_flush' ) ) {
-      wp_cache_flush();
+    $rows = $wpdb->get_col(
+      "SELECT option_name FROM {$wpdb->options}
+       WHERE option_name LIKE '_transient_faz_dsar_%'
+          OR option_name LIKE '_transient_faz_dnsmpi_%'"
+    );
+    $wpdb->query(
+      "DELETE FROM {$wpdb->options}
+       WHERE option_name LIKE '_transient_faz_dsar_%'
+          OR option_name LIKE '_transient_faz_dnsmpi_%'
+          OR option_name LIKE 'faz_dnsmpi_lock_%'"
+    );
+    foreach ( $rows as $opt ) {
+      $key = preg_replace( '/^_transient_/', '', $opt );
+      wp_cache_delete( $key, 'faz_rate_limit' );
     }
   `);
 }
@@ -113,13 +121,14 @@ test.describe('[faz_do_not_sell] CCPA opt-out form', () => {
 
   // Pre-accept the consent banner so it does not cover the form or trap Tab focus.
   // Also clear any stale rate-limit transients so submission tests don't block each other.
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, wpBaseURL }) => {
     clearRateLimitTransients();
     const rev = parseInt(wpEval('echo faz_get_consent_revision();').trim(), 10) || 1;
+    const domain = new URL(wpBaseURL).hostname;
     await page.context().addCookies([{
       name:     'fazcookie-consent',
       value:    `consentid%3Ae2e-ccpa-test%2Cconsent%3Ayes%2Caction%3Ayes%2Cnecessary%3Ayes%2Cfunctional%3Ayes%2Canalytics%3Ayes%2Cperformance%3Ayes%2Cuncategorized%3Ayes%2Cmarketing%3Ayes%2Crev%3A${rev}`,
-      domain:   '127.0.0.1',
+      domain,
       path:     '/',
       sameSite: 'Lax',
     }]);
@@ -254,13 +263,14 @@ test.describe('[faz_dsar_form] GDPR DSAR form', () => {
   // 1280x720 viewport.  Setting the fazcookie-consent cookie before each
   // navigation keeps the banner out of the DOM for all DSAR tests.
   // Also clear any stale rate-limit transients so submission tests don't block each other.
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, wpBaseURL }) => {
     clearRateLimitTransients();
     const rev = parseInt(wpEval('echo faz_get_consent_revision();').trim(), 10) || 1;
+    const domain = new URL(wpBaseURL).hostname;
     await page.context().addCookies([{
       name:     'fazcookie-consent',
       value:    `consentid%3Ae2e-dsar-test%2Cconsent%3Ayes%2Caction%3Ayes%2Cnecessary%3Ayes%2Cfunctional%3Ayes%2Canalytics%3Ayes%2Cperformance%3Ayes%2Cuncategorized%3Ayes%2Cmarketing%3Ayes%2Crev%3A${rev}`,
-      domain:   '127.0.0.1',
+      domain,
       path:     '/',
       sameSite: 'Lax',
     }]);

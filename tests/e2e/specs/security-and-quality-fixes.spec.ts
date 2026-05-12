@@ -188,10 +188,12 @@ test.describe('CCPA opt-out form — security fixes', () => {
     // Navigate again to get a fresh nonce (previous nonce still valid; WordPress nonces
     // are time-window-based, not single-use).
     await page.context().clearCookies();
+    const rev = parseInt(wpEval('echo faz_get_consent_revision();').trim(), 10) || 1;
+    const domain = new URL(wpBaseURL).hostname;
     await page.context().addCookies([{
       name:     'fazcookie-consent',
-      value:    'consentid%3Ae2e-sqf%2Cconsent%3Ayes%2Caction%3Ayes%2Cnecessary%3Ayes',
-      domain:   '127.0.0.1',
+      value:    `consentid%3Ae2e-sqf%2Cconsent%3Ayes%2Caction%3Ayes%2Cnecessary%3Ayes%2Crev%3A${rev}`,
+      domain,
       path:     '/',
       sameSite: 'Lax',
     }]);

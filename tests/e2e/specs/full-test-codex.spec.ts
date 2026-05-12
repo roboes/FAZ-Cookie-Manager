@@ -214,7 +214,7 @@ async function gotoResilient(page: Page, url: string): Promise<void> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await page.goto(url, { waitUntil: 'commit', timeout: 120_000 });
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120_000 });
       await page.waitForLoadState('domcontentloaded', { timeout: 120_000 }).catch(() => {
         // Some plugin combinations keep requests open for a long time.
       });
@@ -349,7 +349,7 @@ test.describe('full-test-codex', () => {
         const visitorContext = await browser.newContext({ baseURL: wpBaseURL });
         try {
           const visitorPage = await visitorContext.newPage();
-          await visitorPage.goto('/', { waitUntil: 'commit', timeout: 120_000 });
+          await visitorPage.goto('/', { waitUntil: 'domcontentloaded', timeout: 120_000 });
           await visitorPage.waitForLoadState('domcontentloaded', { timeout: 120_000 }).catch(() => {
             // Some third-party plugins keep the document loading indefinitely.
             // We only need the DOM to be reachable for banner/script assertions.
@@ -444,7 +444,7 @@ test.describe('full-test-codex', () => {
           return raw.includes('consent:yes');
         }, { timeout: 30_000 }).toBeTruthy();
 
-        await visitorPage.reload({ waitUntil: 'commit', timeout: 120_000 });
+        await visitorPage.reload({ waitUntil: 'domcontentloaded', timeout: 120_000 });
         await visitorPage.waitForLoadState('domcontentloaded', { timeout: 120_000 }).catch(() => {
           // Third-party plugins can keep pending requests open; not fatal for assertions.
         });

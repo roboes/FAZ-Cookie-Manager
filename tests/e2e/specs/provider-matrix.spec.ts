@@ -185,7 +185,7 @@ async function blockedMatrixScriptCount(page: Parameters<typeof openCookiesPage>
 }
 
 async function gotoFrontend(page: Parameters<typeof openCookiesPage>[0], url: string): Promise<void> {
-  await page.goto(url, { waitUntil: 'commit' });
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
   await page.locator('body').waitFor({ state: 'visible' });
 }
 

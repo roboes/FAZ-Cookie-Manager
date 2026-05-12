@@ -52,7 +52,7 @@ async function gotoResilient(page: Page, url: string): Promise<void> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      await page.goto(url, { waitUntil: 'commit', timeout: 60_000 });
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
       await page.waitForLoadState('domcontentloaded', { timeout: 60_000 }).catch(() => {
         // Some WordPress/plugin combinations keep requests open longer than needed.
       });
