@@ -36,6 +36,16 @@ class Cookies extends Modules {
 		add_action( 'faz_after_update_cookie', array( Cookie_Controller::get_instance(), 'delete_cache' ) );
 		add_action( 'faz_after_update_cookie_category', array( Cookie_Controller::get_instance(), 'delete_cache' ) );
 		add_action( 'faz_after_update_cookie_category', array( Category_Controller::get_instance(), 'delete_cache' ) );
+		// Create / delete hooks: Cookie_Controller already clears its own cache
+		// in create_item() / delete_item(), but Category_Controller's get_items()
+		// cache also embeds the per-category cookie list, so it must be
+		// invalidated whenever cookies change — otherwise the frontend
+		// _categories[].cookies payload keeps a stale list after a new cookie
+		// is created via the REST API.
+		add_action( 'faz_after_create_cookie', array( Category_Controller::get_instance(), 'delete_cache' ) );
+		add_action( 'faz_after_create_cookie', array( Cookie_Controller::get_instance(), 'delete_cache' ) );
+		add_action( 'faz_after_delete_cookie', array( Category_Controller::get_instance(), 'delete_cache' ) );
+		add_action( 'faz_after_delete_cookie', array( Cookie_Controller::get_instance(), 'delete_cache' ) );
 		add_action( 'faz_reinstall_tables', array( Category_Controller::get_instance(), 'reinstall' ) );
 		add_action( 'faz_reinstall_tables', array( Cookie_Controller::get_instance(), 'reinstall' ) );
 	}

@@ -280,6 +280,9 @@ test.describe('Deep scan and catalog flows', () => {
   let deactivatedPlugins: string[] = [];
 
   test.beforeAll(async () => {
+    // Deactivating ~40 plugins on the test site via WP-CLI takes longer than
+    // Playwright's default 30s hook timeout — raise it generously.
+    test.setTimeout(180_000);
     const allowed = new Set(['faz-cookie-manager', 'faz-e2e-provider-matrix', 'faz-e2e-scan-lab', 'faz-e2e-woo-lab', 'woocommerce']);
     deactivatedPlugins = listActivePlugins().filter((slug) => !allowed.has(slug));
     deactivatePluginsExcept([
@@ -304,6 +307,9 @@ test.describe('Deep scan and catalog flows', () => {
   });
 
   test.afterAll(async () => {
+    // Reactivating ~40 plugins via WP-CLI can take longer than 30s. Match the
+    // beforeAll budget so cleanup always completes.
+    test.setTimeout(180_000);
     if (deactivatedPlugins.length > 0) {
       activatePlugins(deactivatedPlugins);
     }

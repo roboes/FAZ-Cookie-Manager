@@ -643,6 +643,13 @@ test.describe('Banner settings: persistence and frontend reflection', () => {
     const testRejectLabel = 'Deny Cookies';
     const testSettingsLabel = 'Preferences';
 
+    // The admin form's "current language" defaults to the site's default
+    // language — which on this test site is `it`. The visitor below opens
+    // the frontend with locale=`en-US`, so unless we switch the admin form
+    // to the EN tab the values get stored under contents.it.* and the
+    // visitor's banner keeps reading the unchanged contents.en.* defaults.
+    await page.locator('#faz-b-content-lang').selectOption('en').catch(() => {});
+
     await setInput(page, 'faz-b-notice-title', testTitle);
     await setInput(page, 'faz-b-btn-accept-label', testAcceptLabel);
     await setInput(page, 'faz-b-btn-reject-label', testRejectLabel);
@@ -652,6 +659,8 @@ test.describe('Banner settings: persistence and frontend reflection', () => {
     // Verify persistence
     await goToBannerPage(page);
     await clickTab(page, 'content');
+    // Re-switch the content tab to EN (default may be IT on this test site).
+    await page.locator('#faz-b-content-lang').selectOption('en').catch(() => {});
     expect(await getInputValue(page, 'faz-b-notice-title')).toBe(testTitle);
     expect(await getInputValue(page, 'faz-b-btn-accept-label')).toBe(testAcceptLabel);
     expect(await getInputValue(page, 'faz-b-btn-reject-label')).toBe(testRejectLabel);
@@ -1022,6 +1031,14 @@ test.describe('Banner settings: persistence and frontend reflection', () => {
     await loginAsAdmin(page);
     await goToBannerPage(page);
     await clickTab(page, 'preferences');
+    // The Preferences tab has its OWN language selector (separate from the
+    // Content tab) — see banner.js populateLangSelects() which targets both
+    // #faz-b-content-lang and #faz-b-pref-lang. The default lang on this
+    // test site is `it`, but openVisitorPage() below loads the frontend with
+    // locale=`en-US`, so unless we switch the Preferences lang tab to `en`
+    // the new values land in contents.it.preferenceCenter while the visitor
+    // keeps reading contents.en.preferenceCenter.
+    await page.locator('#faz-b-pref-lang').selectOption('en').catch(() => {});
 
     const testPrefTitle = 'E2E Preference Title';
     const testPrefAccept = 'Allow Everything';
@@ -1037,6 +1054,7 @@ test.describe('Banner settings: persistence and frontend reflection', () => {
     // Verify persistence
     await goToBannerPage(page);
     await clickTab(page, 'preferences');
+    await page.locator('#faz-b-pref-lang').selectOption('en').catch(() => {});
     expect(await getInputValue(page, 'faz-b-pref-title')).toBe(testPrefTitle);
     expect(await getInputValue(page, 'faz-b-pref-accept')).toBe(testPrefAccept);
     expect(await getInputValue(page, 'faz-b-pref-save')).toBe(testPrefSave);
@@ -1063,8 +1081,9 @@ test.describe('Banner settings: persistence and frontend reflection', () => {
       await visitor.ctx.close();
     }
 
-    // Restore
+    // Restore — same EN tab so we don't leave the EN copy with the test values.
     await clickTab(page, 'preferences');
+    await page.locator('#faz-b-pref-lang').selectOption('en').catch(() => {});
     await setInput(page, 'faz-b-pref-title', 'Customize consent preferences');
     await setInput(page, 'faz-b-pref-accept', 'Accept All');
     await setInput(page, 'faz-b-pref-save', 'Save My Preferences');

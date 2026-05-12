@@ -390,3 +390,55 @@ export function resetScanState(): void {
     delete_option( 'faz_scanner_debug_log' );
   `);
 }
+
+/**
+ * Flush every cache that the FAZ cookie pipeline relies on. Used by specs
+ * that insert/delete cookies via raw `$wpdb->insert/delete` (bypassing the
+ * `faz_after_create_cookie` / `faz_after_delete_cookie` action hooks), so
+ * the next page load on the frontend sees the fresh DB state instead of
+ * a stale cached _categories[].cookies or _cookieScripts payload.
+ *
+ * Also re-emits `faz_after_create_cookie` so any plugin/listener that
+ * registers after this helper still picks the change up — this avoids
+ * specs going stale if a new controller-level cache is added later.
+ */
+export function clearAllFazCookieCaches(): void {
+  wpEval(`
+    delete_transient( 'faz_cookie_scripts_map' );
+    \\FazCookie\\Admin\\Modules\\Cookies\\Includes\\Cookie_Controller::get_instance()->delete_cache();
+    \\FazCookie\\Admin\\Modules\\Cookies\\Includes\\Category_Controller::get_instance()->delete_cache();
+    if ( function_exists( 'faz_clear_banner_template_cache' ) ) {
+      faz_clear_banner_template_cache();
+    }
+    do_action( 'faz_after_create_cookie' );
+  `);
+}
+
+/**
+ * Synthetic "user has already consented to everything" cookie. Used by
+ * specs whose subject is an interaction that lives AFTER the banner has
+ * been dismissed (DSAR forms, click-to-consent flows, …) where leaving
+ * the consent banner up would intercept the click and break the test.
+ *
+ * Reads the current consent revision so the cookie isn't immediately
+ * invalidated by `faz_maybe_invalidate_stale_consent_cookie`.
+ *
+ * @param page    Playwright Page (used for context().addCookies)
+ * @param baseURL The site origin (e.g., http://127.0.0.1:9998)
+ * @param consentId Optional opaque identifier; defaults to a random token.
+ */
+export async function seedConsentedCookie(
+  page: import('@playwright/test').Page,
+  baseURL: string,
+  consentId = 'e2e-seed',
+): Promise<void> {
+  const rev = parseInt(wpEval('echo faz_get_consent_revision();').trim(), 10) || 1;
+  const domain = new URL(baseURL).hostname;
+  await page.context().addCookies([{
+    name:     'fazcookie-consent',
+    value:    `consentid%3A${encodeURIComponent(consentId)}%2Cconsent%3Ayes%2Caction%3Ayes%2Cnecessary%3Ayes%2Cfunctional%3Ayes%2Canalytics%3Ayes%2Cperformance%3Ayes%2Cuncategorized%3Ayes%2Cmarketing%3Ayes%2Crev%3A${rev}`,
+    domain,
+    path:     '/',
+    sameSite: 'Lax',
+  }]);
+}

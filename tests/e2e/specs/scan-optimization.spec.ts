@@ -12,6 +12,7 @@
  */
 import { createServer, type Server } from 'node:http';
 import { expect, test } from '../fixtures/wp-fixture';
+import { wpEval } from '../utils/wp-env';
 
 const WP_BASE = process.env.WP_BASE_URL ?? 'http://localhost:9998';
 
@@ -217,6 +218,17 @@ test.describe('Scan optimization features', () => {
     await loginAsAdmin(page);
     await page.goto(`${WP_BASE}/wp-admin/admin.php?page=faz-cookie-manager-settings`, { waitUntil: 'domcontentloaded' });
     const nonce = await getAdminNonce(page);
+
+    // Ensure a clean slate: another test (or an aborted prior run of this test)
+    // may have left remove_data_on_uninstall=true persisted. Reset before
+    // asserting on the documented default.
+    wpEval(`
+      $s = get_option( 'faz_settings', array() );
+      if ( isset( $s['general']['remove_data_on_uninstall'] ) ) {
+        unset( $s['general']['remove_data_on_uninstall'] );
+        update_option( 'faz_settings', $s );
+      }
+    `);
 
     const settings = (await apiGet(page, nonce, 'settings')).data;
 

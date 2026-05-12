@@ -225,7 +225,18 @@ test.describe('P1-B — cross-domain forwarding security guards', () => {
       }
     });
 
-    const cookieBefore = await page.evaluate(() => document.cookie);
+    // Capture only the FAZ consent cookie — `document.cookie` returns every
+    // cookie on the document and the test site has third-party tracking
+    // plugins (burst-statistics, IAWP, pys, etc.) that can write/refresh
+    // their own cookies during the 300ms wait below, which would otherwise
+    // make this assertion intermittently fail even when the FAZ listener
+    // correctly refuses the forwarded message.
+    const readFazCookie = () =>
+      page.evaluate(() => {
+        const m = document.cookie.split(';').find((c) => c.trim().startsWith('fazcookie-consent='));
+        return m ?? '';
+      });
+    const cookieBefore = await readFazCookie();
 
     await page.evaluate(() => {
       window.dispatchEvent(
@@ -240,7 +251,7 @@ test.describe('P1-B — cross-domain forwarding security guards', () => {
     });
 
     await page.waitForTimeout(300);
-    const cookieAfter = await page.evaluate(() => document.cookie);
+    const cookieAfter = await readFazCookie();
     expect(cookieAfter).toBe(cookieBefore);
   });
 

@@ -19,7 +19,7 @@
 
 import { expect, test } from '../fixtures/wp-fixture';
 import type { Page } from '@playwright/test';
-import { upsertPage, wpEval } from '../utils/wp-env';
+import { clearAllFazCookieCaches, upsertPage, wpEval } from '../utils/wp-env';
 
 const WP_BASE = process.env.WP_BASE_URL ?? 'http://127.0.0.1:9998';
 
@@ -283,13 +283,22 @@ test.describe('_fazAcceptCategory — opt_in_script fires for newly accepted cat
       duration:      { en: 'session' },
       opt_in_script: 'window._fazPR96AcceptCatFired = (window._fazPR96AcceptCatFired || 0) + 1;',
     });
-    // Invalidate the scripts-map cache so the new cookie is picked up on the frontend.
-    wpEval(`delete_transient('faz_cookie_scripts_map');`);
+    // Invalidate caches manually: createTestCookie uses raw $wpdb->insert and
+    // therefore does NOT fire faz_after_create_cookie, so the listeners that
+    // invalidate Category_Controller / Cookie_Controller object caches never
+    // run. Without this, the frontend serves a stale _categories[].cookies
+    // payload that omits the test cookie. clearAllFazCookieCaches() is the
+    // canonical helper (see tests/e2e/utils/wp-env.ts) — adding new caches
+    // there keeps every spec that uses raw DB writes in sync.
+    clearAllFazCookieCaches();
   });
 
   test.afterAll(() => {
     deleteTestCookie(testCookieId);
     testCookieId = 0;
+    // Same rationale as beforeAll — deleteTestCookie also uses raw $wpdb->
+    // delete and skips the action hooks.
+    clearAllFazCookieCaches();
   });
 
   test('ACC-CAT-01: _fazAcceptCategory() fires opt_in_script for newly accepted category', async ({

@@ -599,9 +599,28 @@ test.describe('Blocking compliance coverage', () => {
       expect(cookieNamesAfterReload).toContain('_ga');
       expect(cookieNamesAfterReload).not.toContain('_clck');
     } finally {
-      await postSettings(page, nonce, {
-        banner_control: original.banner_control ?? {},
-      });
+      // The test path calls page.context().clearCookies() inside `try`, which
+      // wipes the wordpress_logged_in_* cookies along with the consent cookie.
+      // That invalidates the REST nonce we captured earlier — so re-login and
+      // fetch a fresh nonce before restoring the original settings.
+      //
+      // Wrap the restore in its own try/catch: if the network call here
+      // throws (e.g., the server is broken so the original assertion failed
+      // in the first place), we MUST NOT mask the real test error with a
+      // finally-block exception. Log + continue, then still run
+      // resetProviderMatrixState() so cleanup is best-effort.
+      try {
+        const restoreNonce = await openSettingsPage(page, loginAsAdmin);
+        await postSettings(page, restoreNonce, {
+          banner_control: original.banner_control ?? {},
+        });
+      } catch (restoreError) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[blocking-compliance per-service finally] settings restore failed:',
+          restoreError,
+        );
+      }
       resetProviderMatrixState();
     }
   });

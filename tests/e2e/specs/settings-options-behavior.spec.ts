@@ -250,10 +250,17 @@ test.describe('Settings option behavior interactions', () => {
 
     await expect(page.locator('#faz-age-gate')).toBeVisible();
     await expect(page.locator('.faz-age-gate-message')).toContainText('14');
+    // When the age gate intercepts an accept-all click, the script intentionally
+    // avoids writing `action:age-gate` to the persistent fazcookie-consent
+    // cookie (otherwise an abandoned modal would suppress the banner forever).
+    // Instead it flags the pending state via sessionStorage. Verify both that
+    // the persistent cookie still has no action and that the session flag is set.
     const pendingCookie = (await context.cookies(baseURL)).find((cookie) => cookie.name === 'fazcookie-consent');
-    expect(decodeURIComponent(pendingCookie?.value ?? '')).toContain('action:');
-    expect(decodeURIComponent(pendingCookie?.value ?? '')).not.toContain('action:yes');
-    expect(decodeURIComponent(pendingCookie?.value ?? '')).not.toContain('action:no');
+    const pendingValue = decodeURIComponent(pendingCookie?.value ?? '');
+    expect(pendingValue).not.toContain('action:yes');
+    expect(pendingValue).not.toContain('action:no');
+    const agePending = await page.evaluate(() => sessionStorage.getItem('faz_age_gate_pending'));
+    expect(agePending).toBe('1');
 
     await page.locator('.faz-age-gate-btn-no').click();
     await page.waitForFunction(() => document.cookie.includes('fazcookie-consent'));

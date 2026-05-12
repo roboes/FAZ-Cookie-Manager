@@ -174,6 +174,16 @@ async function openPreferenceCenter(page: Page) {
 	await page.evaluate(() => {
 		(window as any)._fazSetPreferenceAction('settings-button');
 	});
+	// Wait for the preference center to mount + reach a non-zero computed
+	// backgroundColor on .faz-modal. Reading getComputedStyle() immediately
+	// after the open call can return null/empty values because the CSS
+	// animation has not yet applied the modal's background.
+	await page.waitForFunction(() => {
+		const modal = document.querySelector('.faz-modal') as HTMLElement | null;
+		if (!modal) return false;
+		const bg = getComputedStyle(modal).backgroundColor;
+		return !!bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent';
+	}, undefined, { timeout: 5_000 }).catch(() => {});
 }
 
 async function readPreferenceCenterPalette(page: Page) {
