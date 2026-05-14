@@ -300,10 +300,16 @@ class Frontend {
 			// Utility rules appended AFTER boost_css_specificity() so they are NOT
 			// scoped inside #faz-consent — these classes are used on elements outside
 			// the banner container (consent-bridge iframe, age-gate overlay, blocked embeds).
+			// `_fazAddPlaceholder` inserts `.video-placeholder-{normal,youtube}` next
+			// to blocked iframes (outside #faz-consent), so the scoped template.json
+			// rules never reach them. Without this floor, placeholders for lazy-loaded
+			// iframes (Bricks/Elementor/Divi Video) collapse to 0×0. The 4-ancestor
+			// probe in _fazAddPlaceholder (issue #87) expected this CSS floor.
 			$css .= '.faz-hidden{display:none!important;visibility:hidden!important}'
 				. '.faz-consent-bridge{width:0;height:0;border:0}'
 				. '.faz-age-gate-overlay{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6)}'
-				. '.faz-age-gate-modal{background:#fff;border-radius:8px;padding:24px 32px;max-width:420px;text-align:center}';
+				. '.faz-age-gate-modal{background:#fff;border-radius:8px;padding:24px 32px;max-width:420px;text-align:center}'
+				. '.video-placeholder-normal,.video-placeholder-youtube{min-height:200px;display:flex;align-items:center;justify-content:center;width:100%;max-width:100%;box-sizing:border-box}';
 			$css_handle = $this->plugin_name . '-css';
 			wp_register_style( $css_handle, false, array(), $this->version );
 			wp_enqueue_style( $css_handle );
@@ -1469,6 +1475,33 @@ class Frontend {
 		// so site owners can diagnose and raise pcre.backtrack_limit if needed.
 		$pcre_failed = false;
 
+		// Stash <noscript> blocks BEFORE running the script/iframe/link filters.
+		// <noscript> content only renders when JS is disabled; visitors with JS
+		// (>99% case) never see it. Without stashing, an iframe wrapped in
+		// <noscript> (e.g. theme's "video fallback for non-JS users") would be
+		// rewritten by process_iframe_tag into a consent placeholder that lives
+		// forever in the DOM as a 0×0 phantom — invisible to humans, but found
+		// by document.querySelector. The phantom collides with
+		// `_fazAddPlaceholder()` placeholders for legitimate dynamic iframes
+		// and breaks any `.first()`-style locator. Restore after all filters.
+		$noscript_stash = array();
+		if ( false !== stripos( $html, '<noscript' ) ) {
+			$stash_result = preg_replace_callback(
+				'#<noscript\b[^>]*>.*?</noscript>#is',
+				function ( $m ) use ( &$noscript_stash ) {
+					$key = '__FAZ_NOSCRIPT_STASH_' . count( $noscript_stash ) . '__';
+					$noscript_stash[ $key ] = $m[0];
+					return $key;
+				},
+				$html
+			);
+			if ( null === $stash_result ) {
+				$pcre_failed = true;
+			} else {
+				$html = $stash_result;
+			}
+		}
+
 		// 1. Block <script> tags.
 		if ( false !== stripos( $html, '<script' ) ) {
 			$result = preg_replace_callback(
@@ -1567,6 +1600,11 @@ class Frontend {
 		}
 		if ( false !== $old_recursion && '' !== $old_recursion ) {
 			@ini_set( 'pcre.recursion_limit', (string) $old_recursion ); // phpcs:ignore WordPress.PHP.NoSilencedErrors,Squiz.PHP.DiscouragedFunctions.Discouraged -- restoring the original PCRE recursion_limit value (paired with the temporary raise above).
+		}
+
+		// Restore <noscript> blocks we stashed before the filter pass.
+		if ( ! empty( $noscript_stash ) ) {
+			$html = strtr( $html, $noscript_stash );
 		}
 
 		return $html;

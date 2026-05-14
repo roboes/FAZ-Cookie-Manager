@@ -1742,6 +1742,21 @@ function _fazMutationObserver(mutations) {
     // `.bricks-video` wrapper played without ever being intercepted and
     // no consent placeholder was ever shown. Reported as #87.
     var nodesToProcess = [];
+    // Skip nodes that live inside a <noscript> ancestor. Some page builders
+    // (Bricks Builder Video element, plus various lazy-load themes) inject
+    // an iframe wrapped in <noscript> as a "JS-disabled fallback" — those
+    // nodes are never rendered to a visitor with JS, but Chromium still
+    // exposes them via the MutationObserver and querySelector. Without
+    // this guard we transform them into consent placeholders that live
+    // forever in the DOM as 0×0 phantoms (parent is <noscript>, which
+    // never gets a layout box), corrupting any `.first()`-style query
+    // that downstream code (or tests) runs against placeholder-title.
+    function _fazInsideNoscript(node) {
+        for (var anc = node && node.parentNode; anc; anc = anc.parentNode) {
+            if (anc.nodeType === 1 && (anc.nodeName || '').toLowerCase() === 'noscript') return true;
+        }
+        return false;
+    }
     for (var mi = 0; mi < mutations.length; mi++) {
         var added = mutations[mi].addedNodes;
         for (var ai = 0; ai < added.length; ai++) {
@@ -1749,12 +1764,14 @@ function _fazMutationObserver(mutations) {
             if (!n || n.nodeType !== 1) continue; // ELEMENT_NODE only
             var tag = (n.nodeName || '').toLowerCase();
             if (tag === 'script' || tag === 'iframe') {
+                if (_fazInsideNoscript(n)) continue;
                 nodesToProcess.push(n);
             } else if (typeof n.querySelectorAll === 'function') {
                 // Descend: pick up <script[src]> / <iframe[src]> nested
                 // inside the inserted wrapper.
                 var nested = n.querySelectorAll('script[src], iframe[src]');
                 for (var ni = 0; ni < nested.length; ni++) {
+                    if (_fazInsideNoscript(nested[ni])) continue;
                     nodesToProcess.push(nested[ni]);
                 }
             }

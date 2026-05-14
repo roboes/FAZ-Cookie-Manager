@@ -142,6 +142,20 @@ class DSAR_Shortcode {
 				'show_ui'         => true,
 				'show_in_menu'    => false,
 				'capability_type' => 'faz_dsar',
+				// Override create-side caps to 'do_not_allow' so even an
+				// administrator with edit_faz_dsars cannot manually craft a
+				// DSAR record via /wp-admin/post-new.php?post_type=faz_dsar.
+				// DSAR records are written exclusively by the public-facing
+				// shortcode AJAX handler (handle_submit) after honeypot +
+				// nonce + IP-rate-limit checks. Manual creation would bypass
+				// that audit trail. The plural-form caps cover the
+				// list-table "Add New" / bulk-edit paths; map_meta_cap will
+				// route singular create/edit through edit_faz_dsar (which
+				// administrators do hold).
+				'capabilities'    => array(
+					'create_posts'        => 'do_not_allow',
+					'publish_posts'       => 'do_not_allow',
+				),
 				'map_meta_cap'    => true,
 				'supports'        => array( 'title', 'custom-fields' ),
 				'show_in_rest'    => false,
