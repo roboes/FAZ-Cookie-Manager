@@ -493,7 +493,18 @@ test.describe('[faz_dsar_form] — ARIA accessibility', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 test.describe('DSAR CPT — capability mapping', () => {
-  test('DSAR-CPT-01: faz_dsar post type caps map to manage_options, create_posts locked', async () => {
+  // Updated 1.13.17: the prior implementation mapped every singular CPT cap
+  // to 'manage_options' and then had to unset $post_type_meta_caps['manage_options']
+  // to keep current_user_can('manage_options') working as a primitive — a fragile
+  // hack with a global side-effect. The current implementation uses a proper
+  // capability_type='faz_dsar' with map_meta_cap=true, granting the resulting
+  // primitive caps (edit_faz_dsar, read_faz_dsar, …) only to the administrator
+  // role via assign_capabilities(). The security guarantee is identical: Editor
+  // and below cannot access DSAR records. `create_posts` and `publish_posts`
+  // remain explicitly 'do_not_allow' so even an administrator cannot manually
+  // craft a DSAR record via /wp-admin/post-new.php?post_type=faz_dsar — DSAR
+  // records are written exclusively by the public AJAX handler.
+  test('DSAR-CPT-01: faz_dsar post type caps map to faz_dsar primitives, create/publish locked', async () => {
     const raw = wpEval(`
       $cpt = get_post_type_object('faz_dsar');
       if (!$cpt) { echo 'null'; return; }
@@ -505,17 +516,69 @@ test.describe('DSAR CPT — capability mapping', () => {
         'delete_post'        => $cpt->cap->delete_post,
         'edit_posts'         => $cpt->cap->edit_posts,
         'create_posts'       => $cpt->cap->create_posts,
+        'publish_posts'      => $cpt->cap->publish_posts,
       ));
     `);
     expect(raw.trim(), 'faz_dsar post type must be registered').not.toBe('null');
 
     const caps = JSON.parse(raw) as Record<string, string>;
-    expect(caps.read_post,          'read_post').toBe('manage_options');
-    expect(caps.read_private_posts, 'read_private_posts').toBe('manage_options');
-    expect(caps.edit_post,          'edit_post').toBe('manage_options');
-    expect(caps.edit_private_posts, 'edit_private_posts').toBe('manage_options');
-    expect(caps.delete_post,        'delete_post').toBe('manage_options');
+    expect(caps.read_post,          'read_post').toBe('read_faz_dsar');
+    expect(caps.read_private_posts, 'read_private_posts').toBe('read_private_faz_dsars');
+    expect(caps.edit_post,          'edit_post').toBe('edit_faz_dsar');
+    expect(caps.edit_private_posts, 'edit_private_posts').toBe('edit_private_faz_dsars');
+    expect(caps.delete_post,        'delete_post').toBe('delete_faz_dsar');
+    expect(caps.edit_posts,         'edit_posts').toBe('edit_faz_dsars');
     expect(caps.create_posts,       'create_posts').toBe('do_not_allow');
+    expect(caps.publish_posts,      'publish_posts').toBe('do_not_allow');
+  });
+
+  test('DSAR-CPT-02: Editor role cannot read or edit faz_dsar records (security guarantee)', async () => {
+    // Create a throwaway Editor user, ask WordPress whether they can perform
+    // each sensitive op against a real DSAR record, then clean up. This is
+    // the security guarantee the cap mapping above exists to enforce — the
+    // implementation can change (cap names, role-grant mechanism) as long as
+    // this stays false.
+    const raw = wpEval(`
+      $user_id = wp_insert_user(array(
+        'user_login' => 'faz_e2e_editor_dsar_cpt',
+        'user_pass'  => wp_generate_password(20, true, true),
+        'user_email' => 'faz-e2e-editor-dsar-cpt@example.invalid',
+        'role'       => 'editor',
+      ));
+      if (is_wp_error($user_id)) { echo 'err:' . $user_id->get_error_message(); return; }
+
+      $post_id = wp_insert_post(array(
+        'post_type'   => 'faz_dsar',
+        'post_status' => 'private',
+        'post_title'  => 'FAZ E2E DSAR cap-test record',
+        'post_author' => 1,
+      ));
+      if (is_wp_error($post_id) || $post_id === 0) {
+        wp_delete_user($user_id, 0);
+        echo 'err:cannot-insert-dsar';
+        return;
+      }
+
+      $result = array(
+        'edit_post'     => user_can($user_id, 'edit_post', $post_id),
+        'read_post'     => user_can($user_id, 'read_post', $post_id),
+        'delete_post'   => user_can($user_id, 'delete_post', $post_id),
+        'edit_others'   => user_can($user_id, 'edit_others_faz_dsars'),
+        'read_private'  => user_can($user_id, 'read_private_faz_dsars'),
+      );
+
+      wp_delete_post($post_id, true);
+      wp_delete_user($user_id, 0);
+      echo wp_json_encode($result);
+    `);
+
+    expect(raw, 'cap probe must succeed (no PHP errors)').not.toMatch(/^err:/);
+    const caps = JSON.parse(raw) as Record<string, boolean>;
+    expect(caps.edit_post,    'Editor must NOT be able to edit a DSAR record').toBe(false);
+    expect(caps.read_post,    'Editor must NOT be able to read a private DSAR record').toBe(false);
+    expect(caps.delete_post,  'Editor must NOT be able to delete a DSAR record').toBe(false);
+    expect(caps.edit_others,  'Editor must NOT have edit_others_faz_dsars').toBe(false);
+    expect(caps.read_private, 'Editor must NOT have read_private_faz_dsars').toBe(false);
   });
 });
 

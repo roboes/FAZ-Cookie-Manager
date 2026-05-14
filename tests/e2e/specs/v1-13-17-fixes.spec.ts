@@ -395,6 +395,20 @@ test.describe('F028/F029/F030 — DSAR form accessibility', () => {
       const page = await ctx.newPage();
       await page.goto(dsarUrl, { waitUntil: 'domcontentloaded' });
 
+      // Dismiss the consent banner first — in a fresh context the
+      // `.faz-consent-container` overlay (box-bottom-left) intercepts
+      // pointer events on `.faz-dsar-btn`. The banner is injected
+      // asynchronously by the frontend script, so wait for it to
+      // appear (with a short cap) before trying to dismiss it; if it
+      // never appears, the DSAR fixture page is in an environment
+      // that bypasses the banner — fall through unchanged.
+      const banner = page.locator('.faz-consent-container');
+      const bannerAppeared = await banner.waitFor({ state: 'visible', timeout: 5_000 }).then(() => true).catch(() => false);
+      if (bannerAppeared) {
+        await page.locator('[data-faz-tag="accept-button"]').first().click();
+        await banner.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {});
+      }
+
       // Submit empty — every required field should be flagged.
       await page.locator('.faz-dsar-form button[type="submit"], .faz-dsar-btn').first().click();
 
