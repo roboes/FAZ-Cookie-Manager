@@ -11,12 +11,27 @@ const ADMIN_PAGES = [
   'faz-cookie-manager-gvl',
 ];
 
+/** Wait until window.fazConfig.api.nonce is populated by the admin footer script. */
+async function waitForAdminNonce(page: import('@playwright/test').Page): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const config = (window as Record<string, unknown> & { fazConfig?: { api?: { nonce?: string } } }).fazConfig;
+      return typeof config?.api?.nonce === 'string' && config.api.nonce.length > 0;
+    },
+    undefined,
+    { timeout: 15_000 },
+  );
+}
+
 test.describe('Admin and REST integration', () => {
   test('admin pages are reachable only after successful auth', async ({ page, wpBaseURL, loginAsAdmin }) => {
     await loginAsAdmin(page);
 
     for (const slug of ADMIN_PAGES) {
       await page.goto(`${wpBaseURL}/wp-admin/admin.php?page=${slug}`, { waitUntil: 'domcontentloaded' });
+      // Accessibility check only — nonce is not needed here. Some pages in the
+      // list may not enqueue the FAZ admin bundle (e.g. consent-logs, gvl), so
+      // waitForAdminNonce is intentionally NOT called inside this loop.
       await expect(page.locator('#wpadminbar')).toBeVisible();
       await expect(page.locator('#loginform')).toHaveCount(0);
       await expect(page).toHaveURL(new RegExp(`page=${slug}`));
@@ -26,9 +41,10 @@ test.describe('Admin and REST integration', () => {
   test('settings API returns data with valid nonce and rejects invalid nonce', async ({ page, wpBaseURL, loginAsAdmin }) => {
     await loginAsAdmin(page);
     await page.goto(`${wpBaseURL}/wp-admin/admin.php?page=faz-cookie-manager-settings`, { waitUntil: 'domcontentloaded' });
+    await waitForAdminNonce(page);
 
     const settingsResponse = await page.evaluate(async () => {
-      const nonce = window.fazConfig?.api?.nonce ?? '';
+      const nonce = (window as any).fazConfig?.api?.nonce ?? '';
       const response = await fetch('/?rest_route=/faz/v1/settings/', {
         headers: { 'X-WP-Nonce': nonce },
       });
@@ -65,9 +81,10 @@ test.describe('Admin and REST integration', () => {
   test('cookies API returns an array payload', async ({ page, wpBaseURL, loginAsAdmin }) => {
     await loginAsAdmin(page);
     await page.goto(`${wpBaseURL}/wp-admin/admin.php?page=faz-cookie-manager-cookies`, { waitUntil: 'domcontentloaded' });
+    await waitForAdminNonce(page);
 
     const cookiesResponse = await page.evaluate(async () => {
-      const nonce = window.fazConfig?.api?.nonce ?? '';
+      const nonce = (window as any).fazConfig?.api?.nonce ?? '';
       const response = await fetch('/?rest_route=/faz/v1/cookies/', {
         headers: { 'X-WP-Nonce': nonce },
       });
@@ -85,9 +102,10 @@ test.describe('Admin and REST integration', () => {
   test('deprecated languages endpoint returns 410 Gone for admin', async ({ page, wpBaseURL, loginAsAdmin }) => {
     await loginAsAdmin(page);
     await page.goto(`${wpBaseURL}/wp-admin/admin.php?page=faz-cookie-manager-settings`, { waitUntil: 'domcontentloaded' });
+    await waitForAdminNonce(page);
 
     const langResponse = await page.evaluate(async () => {
-      const nonce = window.fazConfig?.api?.nonce ?? '';
+      const nonce = (window as any).fazConfig?.api?.nonce ?? '';
       const response = await fetch('/?rest_route=/faz/v1/languages/', {
         headers: { 'X-WP-Nonce': nonce },
       });

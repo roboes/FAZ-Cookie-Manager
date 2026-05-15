@@ -14,7 +14,7 @@
 
 import { expect, type Page, type Route } from '@playwright/test';
 import { test } from '../fixtures/wp-fixture';
-import { upsertPage, wpEval } from '../utils/wp-env';
+import { seedConsentedCookie, upsertPage, wpEval } from '../utils/wp-env';
 
 /**
  * Block ONLY admin-ajax requests with the given FAZ action token, leaving
@@ -67,18 +67,13 @@ test.beforeAll(() => {
   }
 });
 
-// Pre-accept consent banner so it never overlaps form elements.
+// Pre-accept consent banner so it never overlaps form elements. The
+// `seedConsentedCookie` helper (tests/e2e/utils/wp-env.ts) reads the live
+// consent_revision so PHP's stale-cookie filter doesn't immediately
+// invalidate the cookie we inject.
 test.beforeEach(async ({ page, wpBaseURL }) => {
   await page.context().clearCookies();
-  const rev = parseInt(wpEval('echo faz_get_consent_revision();').trim(), 10) || 1;
-  const domain = new URL(wpBaseURL).hostname;
-  await page.context().addCookies([{
-    name:     'fazcookie-consent',
-    value:    `consentid%3Ae2e-ar%2Cconsent%3Ayes%2Caction%3Ayes%2Cnecessary%3Ayes%2Cmarketing%3Ayes%2Crev%3A${rev}`,
-    domain,
-    path:     '/',
-    sameSite: 'Lax',
-  }]);
+  await seedConsentedCookie(page, wpBaseURL, 'e2e-ar');
 });
 
 // ── F003 — Rate-limit message says "1 hour" ───────────────────────────────────
@@ -300,14 +295,24 @@ test.describe('F050 — hash_ip() is proxy-aware via faz_resolve_client_ip()', (
   });
 
   test('Dsar_Shortcode::hash_ip() returns a 64-char hex string (no namespace crash)', () => {
-    // Instantiate DSAR_Shortcode (which uses the IP_Hasher trait) and call
-    // hash_ip() via reflection. A 64-char hex string means SHA-256 ran without
-    // crashing on namespace resolution (the \faz_resolve_client_ip() call).
+    // The IP_Hasher trait exposes a public WP_DEBUG-gated wrapper
+    // `debug_hash_ip()` specifically for this test. Calling that wrapper
+    // (instead of using ReflectionMethod::setAccessible on the private
+    // hash_ip()) means the assertion survives any future refactor of the
+    // trait's visibility, while keeping the hashing implementation private
+    // in production.
+    //
+    // The test toggles WP_DEBUG on inside the wpEval to make the wrapper
+    // return the real hash even if the test site is running without
+    // WP_DEBUG. The override stays scoped to this single eval call.
     const result = wpEval(`
+      if ( ! defined( 'WP_DEBUG' ) ) { define( 'WP_DEBUG', true ); }
       $sc = new \\FazCookie\\Includes\\Dsar_Shortcode();
-      $ref = new ReflectionMethod( $sc, 'hash_ip' );
-      $ref->setAccessible( true );
-      $hash = $ref->invoke( $sc );
+      if ( ! method_exists( $sc, 'debug_hash_ip' ) ) {
+        echo 'fail:debug_hash_ip method missing';
+        return;
+      }
+      $hash = $sc->debug_hash_ip();
       // hash_hmac( 'sha256', ... ) produces 64 hex chars.
       echo ( is_string( $hash ) && preg_match( '/^[a-f0-9]{64}$/', $hash ) ) ? 'ok' : 'fail:' . $hash;
     `).trim();

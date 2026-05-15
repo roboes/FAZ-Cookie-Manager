@@ -411,42 +411,46 @@ test.describe('Per-cookie opt-in/out consent scripts', () => {
   });
 
   test('opt_in_script can be updated via POST to the cookie endpoint', async ({ wpBaseURL }) => {
-    await updateCookie(adminPage, nonce, baseURL, testCookieId, {
-      opt_in_script: "window._fazE2EOptInV2 = true;",
-    });
-    const res = await adminPage.request.get(
-      `${wpBaseURL}/?rest_route=/faz/v1/cookies/${testCookieId}&context=edit`,
-      { headers: { 'X-WP-Nonce': nonce } },
-    );
-    const body = await res.json() as Record<string, unknown>;
-    expect(body.opt_in_script).toBe("window._fazE2EOptInV2 = true;");
-
-    // Restore original for subsequent tests.
-    await updateCookie(adminPage, nonce, baseURL, testCookieId, {
-      opt_in_script: "window._fazE2EOptIn = (window._fazE2EOptIn || 0) + 1;",
-    });
+    try {
+      await updateCookie(adminPage, nonce, baseURL, testCookieId, {
+        opt_in_script: "window._fazE2EOptInV2 = true;",
+      });
+      const res = await adminPage.request.get(
+        `${wpBaseURL}/?rest_route=/faz/v1/cookies/${testCookieId}&context=edit`,
+        { headers: { 'X-WP-Nonce': nonce } },
+      );
+      const body = await res.json() as Record<string, unknown>;
+      expect(body.opt_in_script).toBe("window._fazE2EOptInV2 = true;");
+    } finally {
+      // Restore original for subsequent tests.
+      await updateCookie(adminPage, nonce, baseURL, testCookieId, {
+        opt_in_script: "window._fazE2EOptIn = (window._fazE2EOptIn || 0) + 1;",
+      });
+    }
   });
 
   test('other cookie fields are not lost when updating only opt_in_script', async ({
     wpBaseURL,
   }) => {
-    await updateCookie(adminPage, nonce, baseURL, testCookieId, {
-      opt_in_script: "window._fazPreserveTest = 1;",
-    });
-    const res = await adminPage.request.get(
-      `${wpBaseURL}/?rest_route=/faz/v1/cookies/${testCookieId}&context=edit`,
-      { headers: { 'X-WP-Nonce': nonce } },
-    );
-    const body = await res.json() as Record<string, unknown>;
-    expect(body.name, 'name preserved').toBe('_faz_e2e_script_test');
-    expect(body.opt_out_script, 'opt_out_script preserved').toBe(
-      "window._fazE2EOptOut = (window._fazE2EOptOut || 0) + 1;",
-    );
-
-    // Restore.
-    await updateCookie(adminPage, nonce, baseURL, testCookieId, {
-      opt_in_script: "window._fazE2EOptIn = (window._fazE2EOptIn || 0) + 1;",
-    });
+    try {
+      await updateCookie(adminPage, nonce, baseURL, testCookieId, {
+        opt_in_script: "window._fazPreserveTest = 1;",
+      });
+      const res = await adminPage.request.get(
+        `${wpBaseURL}/?rest_route=/faz/v1/cookies/${testCookieId}&context=edit`,
+        { headers: { 'X-WP-Nonce': nonce } },
+      );
+      const body = await res.json() as Record<string, unknown>;
+      expect(body.name, 'name preserved').toBe('_faz_e2e_script_test');
+      expect(body.opt_out_script, 'opt_out_script preserved').toBe(
+        "window._fazE2EOptOut = (window._fazE2EOptOut || 0) + 1;",
+      );
+    } finally {
+      // Restore.
+      await updateCookie(adminPage, nonce, baseURL, testCookieId, {
+        opt_in_script: "window._fazE2EOptIn = (window._fazE2EOptIn || 0) + 1;",
+      });
+    }
   });
 
   test('new cookie without scripts defaults opt_in_script and opt_out_script to empty string', async ({

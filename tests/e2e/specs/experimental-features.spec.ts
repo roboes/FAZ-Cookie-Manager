@@ -33,18 +33,27 @@ const WP_BASE = process.env.WP_BASE_URL ?? 'http://127.0.0.1:9998';
 // for `name="action"` followed by the action token instead, and also accept
 // the URL-encoded form for callers that POST with application/x-www-form-urlencoded.
 function waitForFazAjax(page: Page, action: string) {
+  // Escape regex metacharacters in the action token before interpolating it
+  // into the multipart matcher. Current call sites pass safe identifiers
+  // (`faz_dsar_submit`, `faz_dnsmpi_optout`) but treating the parameter as
+  // untrusted input keeps the helper future-proof.
+  const escapedAction = action.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // URL-encoded body: anchor with a word-boundary suffix so an action like
+  // `faz_dsar` doesn't false-positive a longer `faz_dsar_submit_v2`. The
+  // `action=` token may appear at the start of the body OR after a previous
+  // pair separated by `&` — start-of-string or `&` are the only valid
+  // prefixes in `application/x-www-form-urlencoded`.
+  const urlEncodedRe = new RegExp(`(?:^|&)action=${escapedAction}(?:&|$)`);
+  // multipart/form-data: locate the form-data part with name="action" and
+  // check the value that follows the blank line. The `\b` suffix ensures the
+  // action token ends at a word boundary (CRLF, end-of-part marker, …).
+  const multipartRe = new RegExp(`name="action"\\s*\\r?\\n\\s*\\r?\\n\\s*${escapedAction}\\b`);
   return page.waitForResponse((r) => {
     if (!r.url().includes('admin-ajax.php')) {
       return false;
     }
     const body = r.request().postData() ?? '';
-    if (body.includes(`action=${action}`)) {
-      return true;
-    }
-    // multipart/form-data: locate the form-data part with name="action"
-    // and check the value that follows the blank line.
-    const re = new RegExp(`name="action"\\s*\\r?\\n\\s*\\r?\\n\\s*${action}\\b`);
-    return re.test(body);
+    return urlEncodedRe.test(body) || multipartRe.test(body);
   });
 }
 
