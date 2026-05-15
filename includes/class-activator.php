@@ -88,7 +88,15 @@ class Activator {
 		add_action( 'faz_weekly_gvl_update', array( 'FazCookie\Includes\Gvl', 'cron_update' ) );
 		add_action( 'faz_scheduled_scan', array( __CLASS__, 'run_scheduled_scan' ) );
 		add_action( 'faz_after_update_settings', array( __CLASS__, 'reschedule_auto_scan' ) );
+		// F009: keep the IAB unmatched-vendors transient fresh on every
+		// cookie write path (create / update / delete) — not just update.
+		// A new cookie can introduce an unmatched IAB vendor; a deleted
+		// cookie can resolve one. Restricting the listener to "update"
+		// only would leave the notice stale until the next edit on an
+		// existing row, surprising the publisher.
 		add_action( 'faz_after_update_cookie', array( __CLASS__, 'maybe_check_unmatched_vendors' ) );
+		add_action( 'faz_after_create_cookie', array( __CLASS__, 'maybe_check_unmatched_vendors' ) );
+		add_action( 'faz_after_delete_cookie', array( __CLASS__, 'maybe_check_unmatched_vendors' ) );
 		add_filter( 'cron_schedules', array( __CLASS__, 'register_cron_schedules' ) );
 		self::schedule_cleanup();
 	}
@@ -341,6 +349,11 @@ class Activator {
 		}
 		self::install_all_tables();
 		self::maybe_update_db();
+		// Ensure required default categories always exist, even on re-activation
+		// after a file-only delete (uninstall.php not called). These calls are
+		// idempotent — they no-op when the category already exists.
+		self::ensure_uncategorized_category();
+		self::ensure_wordpress_internal_category();
 		// Always clear the banner template cache on version upgrades so new
 		// CSS rules, shortcodes, and template HTML take effect immediately.
 		// Without this, users upgrading across multiple versions (e.g. 1.8 →

@@ -89,6 +89,7 @@ class Admin {
 		add_action( 'wp_ajax_faz_dismiss_unmatched', array( $this, 'ajax_dismiss_unmatched_vendors' ) );
 		add_filter( 'plugin_action_links_' . FAZ_PLUGIN_BASENAME, array( $this, 'plugin_action_links' ) );
 		add_action( 'wp_dashboard_setup', array( $this, 'register_dashboard_widget' ) );
+		add_action( 'rest_api_init', array( $this, 'add_rest_nocache_headers' ) );
 	}
 
 	/**
@@ -421,6 +422,7 @@ class Admin {
 				),
 				'version'        => $this->version,
 				'modules'        => self::$active_modules,
+				'canEditScripts' => current_user_can( 'unfiltered_html' ),
 				'locale'         => get_user_locale(),
 				'i18n'           => array(
 					// Dashboard widget strings (used by dashboard.js).
@@ -432,8 +434,22 @@ class Admin {
 					'saveFailed'               => __( 'Failed to save settings.', 'faz-cookie-manager' ),
 					'loadFailed'               => __( 'Failed to load settings.', 'faz-cookie-manager' ),
 					'confirmDelete'            => __( 'Are you sure you want to delete this?', 'faz-cookie-manager' ),
+					// (banner-status toggle strings live in the consolidated 'banner'
+				// sub-array further down — kept together to avoid PHP's last-key-wins
+				// silently dropping these entries when a later `'banner' => array(…)`
+				// is appended in the same parent array.)
 					// Cookies page.
 					'cookies'                  => array(
+						// Cookie modal field labels (issue #97 — these used to be
+						// hardcoded English in admin/assets/js/pages/cookies.js;
+						// 1.13.17 wraps them through __() so they participate in
+						// the same translation pipeline as the opt-in / opt-out
+						// script labels rendered alongside them).
+						'nameLabel'                => __( 'Cookie Name', 'faz-cookie-manager' ),
+						'domainLabel'              => __( 'Domain', 'faz-cookie-manager' ),
+						'durationLabel'            => __( 'Duration', 'faz-cookie-manager' ),
+						'durationPlaceholder'      => __( 'e.g. 1 year', 'faz-cookie-manager' ),
+						'descriptionLabel'         => __( 'Description', 'faz-cookie-manager' ),
 						'bulkDeleteConfirm'        => __( 'Delete selected cookie(s)?', 'faz-cookie-manager' ),
 						'bulkDeleteFailed'         => __( 'Bulk delete failed.', 'faz-cookie-manager' ),
 						'categoriesSaved'          => __( 'Categories saved.', 'faz-cookie-manager' ),
@@ -508,6 +524,10 @@ class Admin {
 						'loadFailed'               => __( 'Failed to load banner settings.', 'faz-cookie-manager' ),
 						'saved'                    => __( 'Banner settings saved.', 'faz-cookie-manager' ),
 						'saveFailed'               => __( 'Failed to save banner settings.', 'faz-cookie-manager' ),
+						// Banner-status toggle (loadBannerEnabledToggle on the Banner page).
+						'enabled'                  => __( 'Cookie banner enabled.', 'faz-cookie-manager' ),
+						'disabled'                 => __( 'Cookie banner disabled.', 'faz-cookie-manager' ),
+						'toggleFailed'             => __( 'Failed to update banner status.', 'faz-cookie-manager' ),
 					),
 					// Settings page.
 					'settings'                 => array(
@@ -1289,6 +1309,31 @@ class Admin {
 			do_action( 'faz_after_first_time_install' );
 			delete_option( 'faz_first_time_activated_plugin' );
 		}
+	}
+
+	/**
+	 * Send no-cache headers for all faz/v1 REST responses so HTTP caches
+	 * (LiteSpeed, Nginx proxy, CDNs) never serve stale cookie/category data.
+	 *
+	 * @return void
+	 */
+	public function add_rest_nocache_headers() {
+		add_filter(
+			'rest_pre_serve_request',
+			function ( $served, $result, $request ) {
+				$route = $request->get_route();
+				// Exclude /faz/v1/banner/* — those routes set their own
+				// Cache-Control: public, max-age=300 for CDN caching.
+				if ( 0 === strpos( $route, '/faz/v1' ) && 0 !== strpos( $route, '/faz/v1/banner' ) ) {
+					header( 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0' );
+					header( 'Pragma: no-cache' );
+					header( 'X-LiteSpeed-Cache-Control: no-cache' );
+				}
+				return $served;
+			},
+			10,
+			3
+		);
 	}
 
 	/**

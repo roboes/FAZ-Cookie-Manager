@@ -497,7 +497,22 @@
 			var editBtn = document.createElement('button');
 			editBtn.className = 'faz-btn faz-btn-outline faz-btn-sm';
 			editBtn.textContent = __('cookies.edit', 'Edit');
-			editBtn.addEventListener('click', function () { openCookieModal(cookie); });
+			editBtn.addEventListener('click', function () {
+				var cookieId = getCookieId(cookie);
+				if (!cookieId) {
+					openCookieModal(cookie);
+					return;
+				}
+
+				editBtn.disabled = true;
+				FAZ.get('cookies/' + cookieId, { context: 'edit' }).then(function (fullCookie) {
+					openCookieModal(fullCookie || cookie);
+				}).catch(function () {
+					FAZ.notify(__('cookies.cookieLoadFailed', 'Failed to load cookie details.'), 'error');
+				}).then(function () {
+					editBtn.disabled = false;
+				});
+			});
 			tdActions.appendChild(editBtn);
 
 			var delBtn = document.createElement('button');
@@ -547,12 +562,23 @@
 		var isEdit = !!cookie;
 		var form = document.createElement('div');
 
+		var canEditScripts = !!(window.fazConfig && window.fazConfig.canEditScripts);
+
 		var fields = [
-			{ label: 'Cookie Name', path: 'name', type: 'text' },
-			{ label: 'Domain', path: 'domain', type: 'text' },
-			{ label: 'Duration', path: 'duration', type: 'text', placeholder: 'e.g. 1 year' },
-			{ label: 'Description', path: 'description', type: 'textarea' },
+			{ label: __('cookies.nameLabel', 'Cookie Name'), path: 'name', type: 'text' },
+			{ label: __('cookies.domainLabel', 'Domain'), path: 'domain', type: 'text' },
+			{ label: __('cookies.durationLabel', 'Duration'), path: 'duration', type: 'text', placeholder: __('cookies.durationPlaceholder', 'e.g. 1 year') },
+			{ label: __('cookies.descriptionLabel', 'Description'), path: 'description', type: 'textarea' },
 		];
+
+		// Only expose opt-in/opt-out script fields to users with the
+		// `unfiltered_html` capability. Without this guard the admin UI would
+		// always POST these fields (even empty), tripping the REST sanitize
+		// callback's 403 for multisite site-admins who lack the capability.
+		if (canEditScripts) {
+			fields.push({ label: __('cookies.optInScriptLabel', 'Opt-in Script (runs when category is accepted)'), path: 'opt_in_script', type: 'textarea', placeholder: __('cookies.optInScriptPlaceholder', '// JS executed on consent accept\n// e.g. gtag("event", "consent_granted");') });
+			fields.push({ label: __('cookies.optOutScriptLabel', 'Opt-out Script (runs when category is rejected/revoked)'), path: 'opt_out_script', type: 'textarea', placeholder: __('cookies.optOutScriptPlaceholder', '// JS executed on consent reject or revoke') });
+		}
 
 		fields.forEach(function (f) {
 			var group = document.createElement('div');
@@ -566,6 +592,9 @@
 				input = document.createElement('textarea');
 				input.className = 'faz-textarea';
 				input.rows = 3;
+				if (f.path === 'opt_in_script' || f.path === 'opt_out_script') {
+					input.maxLength = 10000;
+				}
 			} else {
 				input = document.createElement('input');
 				input.type = f.type;
@@ -575,6 +604,17 @@
 			if (f.placeholder) input.placeholder = f.placeholder;
 			if (isEdit && cookie[f.path]) input.value = textVal(cookie[f.path]);
 			group.appendChild(input);
+			if (f.path === 'opt_in_script' || f.path === 'opt_out_script') {
+				var scriptNotice = document.createElement('p');
+				// #767676 is the minimum WCAG-AA-passing gray on white (4.5:1
+				// contrast); #888 used previously was 3.54:1 and failed AA.
+				// font-size pulled up from 11px to 12px to give the helper
+				// text some breathing room without breaking the compact form
+				// layout.
+				scriptNotice.style.cssText = 'font-size:12px;color:#767676;margin:4px 0 0;';
+				scriptNotice.textContent = __('cookies.scriptNotice', 'Note: code entered here is included in the page source and visible to all visitors.');
+				group.appendChild(scriptNotice);
+			}
 			form.appendChild(group);
 		});
 
@@ -1604,7 +1644,18 @@
 
 	/* ── Custom Blocking Rules ────────────────────────── */
 
-	var ruleCategories = ['analytics', 'marketing', 'functional', 'performance'];
+	// Must match the allowlist in class-settings.php::sanitize_settings()
+	// case 'custom_rules' (admin/modules/settings/includes/class-settings.php:386).
+	// `necessary` is required by 8 built-in blocker templates (Cloudflare
+	// Turnstile, Gravatar, reCAPTCHA, hCaptcha, Wordfence, WPForms, Ninja
+	// Forms reCAPTCHA, WooCommerce Attribution) — these scripts must load
+	// unconditionally regardless of consent state and the auto-scanner must
+	// leave them alone. Without `necessary` here the dropdown silently
+	// refused to expose the option even though the backend accepted it,
+	// forcing admins into the lossy workaround of re-deleting GTM/Turnstile
+	// rows after every re-scan. `uncategorized` is the fallback bucket; it
+	// is accepted by the backend but rarely a useful choice for a rule.
+	var ruleCategories = ['necessary', 'analytics', 'marketing', 'functional', 'performance'];
 
 	function loadCustomRules() {
 		FAZ.get('settings').then(function (data) {

@@ -95,6 +95,27 @@ if ( $faz_force_remove_all || faz_should_remove_on_uninstall() || is_multisite()
 				}
 			}
 
+			// Delete DSAR request posts — they contain personal data (name, email, request
+			// type) and must be erased on uninstall to honour GDPR Article 17.
+			// Enumerate every status WordPress recognises (including auto-draft and
+			// inherit) because get_post_stati() returns them all and DSAR records
+			// must not survive uninstall regardless of state.
+			// Note: 'any' is a magic sentinel for get_posts() that only works when
+			// post_status is a scalar string — inside an array it is interpreted as
+			// a literal status name and matches nothing. Listing explicit statuses
+			// is the correct shape.
+			$dsar_posts = get_posts(
+				array(
+					'post_type'      => 'faz_dsar',
+					'post_status'    => array( 'private', 'publish', 'pending', 'draft', 'trash', 'auto-draft', 'inherit', 'future' ),
+					'posts_per_page' => -1,
+					'fields'         => 'ids',
+				)
+			);
+			foreach ( $dsar_posts as $dsar_post_id ) {
+				wp_delete_post( absint( $dsar_post_id ), true );
+			}
+
 			// Delete all plugin options.
 			$faz_options = array(
 				'faz_settings',
@@ -132,6 +153,27 @@ if ( $faz_force_remove_all || faz_should_remove_on_uninstall() || is_multisite()
 			);
 			foreach ( $faz_options as $option_name ) {
 				delete_option( $option_name );
+			}
+
+			// Clean up Do Not Sell / DSAR atomic lock options (created by add_option,
+			// not set_transient, so the _transient_faz% LIKE above misses them).
+			// Includes the rescind-lock variant (faz_dnsmpi_rsc_lock_*) — the opt-out
+			// and rescind paths in Do_Not_Sell_Shortcode use distinct lock-key prefixes
+			// (handle_optout uses faz_dnsmpi_lock_, handle_rescind uses faz_dnsmpi_rsc_lock_).
+			// Without the third pattern a request that crashed between add_option (line
+			// 212 of class-do-not-sell-shortcode.php) and delete_option (line 225) leaves
+			// orphan locks behind on uninstall.
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$faz_lock_keys = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s OR option_name LIKE %s",
+					$wpdb->esc_like( 'faz_dnsmpi_lock_' ) . '%',
+					$wpdb->esc_like( 'faz_dnsmpi_rsc_lock_' ) . '%',
+					$wpdb->esc_like( 'faz_dsar_lock_' ) . '%'
+				)
+			);
+			foreach ( $faz_lock_keys as $faz_lock_key ) {
+				delete_option( $faz_lock_key );
 			}
 
 			// Also delete any language-suffixed banner template variants

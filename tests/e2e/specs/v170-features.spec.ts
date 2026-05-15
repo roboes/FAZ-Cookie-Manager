@@ -32,6 +32,7 @@ async function updateSettings(page: any, nonce: string, data: Record<string, unk
 /* ─── Tests ────────────────────────────────────── */
 
 test.describe('v1.7.0 features', () => {
+  test.describe.configure({ mode: 'serial' });
 
   // 1. Scheduled Cookie Scanning
   test('F01: auto_scan and scan_frequency settings persist', async ({ page, loginAsAdmin }) => {
@@ -408,11 +409,13 @@ test.describe('v1.7.0 features', () => {
     await page.goto(`${WP_BASE}/wp-admin/admin.php?page=faz-cookie-manager-settings`, { waitUntil: 'domcontentloaded' });
     const nonce = await getAdminNonce(page);
 
-    // Default should be off
-    const before = await getSettings(page, nonce);
-    expect(before.pageview_tracking).toBe(false);
-
+    const original = await getSettings(page, nonce);
     try {
+      // Ensure we start from a known state (another test may have left it true)
+      await updateSettings(page, nonce, { pageview_tracking: false });
+      const before = await getSettings(page, nonce);
+      expect(before.pageview_tracking).toBe(false);
+
       // Enable and check frontend
       await updateSettings(page, nonce, { pageview_tracking: true });
 
@@ -425,20 +428,22 @@ test.describe('v1.7.0 features', () => {
       } finally {
         await ctx.close();
       }
-    } finally {
-      // Restore
-      await updateSettings(page, nonce, { pageview_tracking: before.pageview_tracking });
-    }
 
-    // Verify disabled state (should match original)
-    const ctx2 = await page.context().browser()!.newContext({ baseURL: WP_BASE });
-    const p2 = await ctx2.newPage();
-    try {
-      await p2.goto('/', { waitUntil: 'domcontentloaded' });
-      const hasPvConfig2 = await p2.evaluate(() => typeof (window as any)._fazPageviewConfig !== 'undefined');
-      expect(hasPvConfig2).toBe(false);
+      // Bring back the disabled state for the negative assertion below.
+      await updateSettings(page, nonce, { pageview_tracking: false });
+
+      // Verify disabled state (should match original)
+      const ctx2 = await page.context().browser()!.newContext({ baseURL: WP_BASE });
+      const p2 = await ctx2.newPage();
+      try {
+        await p2.goto('/', { waitUntil: 'domcontentloaded' });
+        const hasPvConfig2 = await p2.evaluate(() => typeof (window as any)._fazPageviewConfig !== 'undefined');
+        expect(hasPvConfig2).toBe(false);
+      } finally {
+        await ctx2.close();
+      }
     } finally {
-      await ctx2.close();
+      await updateSettings(page, nonce, { pageview_tracking: original.pageview_tracking });
     }
   });
 

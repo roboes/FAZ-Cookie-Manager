@@ -18,6 +18,7 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 use FazCookie\Includes\Loader;
 use FazCookie\Includes\I18n;
+use FazCookie\Includes\DSAR_Shortcode;
 use FazCookie\Admin\Admin;
 use FazCookie\Frontend\Frontend;
 use FazCookie\Admin\Modules\Settings\Includes\Settings;
@@ -97,7 +98,6 @@ class CLI {
 		$this->define_admin_hooks();
 		$this->define_public_hooks();
 		$this->register_blocks();
-		$this->init_license();
 		$this->register_privacy_hooks();
 
 	}
@@ -168,6 +168,11 @@ class CLI {
 	 * @access   private
 	 */
 	private function define_public_hooks() {
+		// Register DSAR CPT unconditionally — the post type must be present on
+		// admin requests so post.php?post=…&action=edit edit links for stored
+		// DSAR requests resolve to a registered post type.
+		new DSAR_Shortcode();
+
 		// Skip frontend initialization on admin page requests — none of the
 		// frontend hooks (wp_footer, wp_enqueue_scripts, template_redirect,
 		// etc.) fire in admin context, so the object creation is wasted work.
@@ -291,14 +296,4 @@ class CLI {
 		});
 	}
 
-	/**
-	 * Inititialize the license.
-	 *
-	 * @return void
-	 */
-	public function init_license() {
-		if ( ! defined( 'FAZ_CLOUD_REQUEST' ) ) {
-			define( 'FAZ_CLOUD_REQUEST', false );
-		}
-	}
 }

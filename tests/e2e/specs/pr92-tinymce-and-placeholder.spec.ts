@@ -185,32 +185,72 @@ test.describe('PR #92 — TinyMCE restore + REST DELETE + video placeholder', ()
         return;
       }
 
-      await page.evaluate(() => {
+      // Tag our injected iframe with a unique marker so we can identify the
+      // placeholder generated specifically for it (rather than relying on
+      // DOM-order with .last(), which is fragile on a page builder that
+      // may append later content). The plugin inserts the placeholder right
+      // before the iframe with `insertBefore`, so the placeholder is the
+      // iframe's `previousElementSibling` at the moment of injection.
+      const vimeoMarker = `e2e-vimeo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      await page.evaluate((marker) => {
         const iframe = document.createElement('iframe');
         iframe.src = 'https://player.vimeo.com/video/123456789';
         iframe.width = '640';
         iframe.height = '360';
+        iframe.setAttribute('data-e2e-vimeo-marker', marker);
         document.body.appendChild(iframe);
-      });
+      }, vimeoMarker);
 
       // Poll for the placeholder instead of a fixed sleep — avoids both
       // false negatives on slow machines and wasted time on fast ones.
       await page.waitForSelector('[data-faz-tag="video-placeholder"]', { timeout: 5_000 }).catch(() => {});
 
-      const placeholderCount = await page.locator('[data-faz-tag="video-placeholder"]').count();
+      // Find the placeholder id assigned to OUR Vimeo iframe. The plugin
+      // sets a unique id on the placeholder element (UNIQUEID generated in
+      // _fazAddPlaceholder), and inserts the placeholder as the iframe's
+      // previousElementSibling. Read the id once and use a stable id-anchored
+      // locator from there.
+      const vimeoPlaceholderId = await page.evaluate((marker) => {
+        const iframe = document.querySelector(`iframe[data-e2e-vimeo-marker="${marker}"]`);
+        // Plugin already removed the iframe after placeholder insert: fall
+        // back to backupNodes if available (the MutationObserver keeps a
+        // reference for the post-insert remeasure).
+        if (iframe?.previousElementSibling?.matches('[data-faz-tag="video-placeholder"]')) {
+          return (iframe.previousElementSibling as HTMLElement).id || '';
+        }
+        // Fallback: last placeholder in DOM order that uses the non-YouTube
+        // template (`.video-placeholder-text-normal`).
+        const candidates = Array.from(
+          document.querySelectorAll('[data-faz-tag="video-placeholder"]'),
+        ).filter((el) =>
+          el.querySelector('[data-faz-tag="placeholder-title"].video-placeholder-text-normal'),
+        );
+        const last = candidates[candidates.length - 1] as HTMLElement | undefined;
+        return last?.id || '';
+      }, vimeoMarker);
 
-      if (placeholderCount === 0) {
+      if (!vimeoPlaceholderId) {
+        test.skip();
+        return;
+      }
+
+      const vimeoPlaceholder = page.locator(`#${vimeoPlaceholderId}`);
+      const vimeoPlaceholderCount = await vimeoPlaceholder.count();
+
+      if (vimeoPlaceholderCount === 0) {
         test.skip();
         return;
       }
 
       // THE KEY ASSERTION — without the fix, non-YouTube providers returned
       // before _fazSetPlaceHolder(), leaving faz-hidden on the title element.
-      const hiddenTitles = await page.locator('[data-faz-tag="placeholder-title"].faz-hidden').count();
-      expect(hiddenTitles, 'Vimeo placeholder title must not have faz-hidden class').toBe(0);
-
+      const titleInVimeo = vimeoPlaceholder.locator('[data-faz-tag="placeholder-title"]');
       await expect(
-        page.locator('[data-faz-tag="placeholder-title"]').first(),
+        titleInVimeo,
+        'Vimeo placeholder title must not have faz-hidden class',
+      ).not.toHaveClass(/(?:^|\s)faz-hidden(?:\s|$)/);
+      await expect(
+        titleInVimeo,
         'Vimeo placeholder title must be visible',
       ).toBeVisible();
     } finally {

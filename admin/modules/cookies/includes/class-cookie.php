@@ -24,6 +24,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Cookie extends Store {
 
 	/**
+	 * Cached result of get_meta() to avoid repeated json_decode calls.
+	 *
+	 * @var array|null
+	 */
+	private $decoded_meta = null;
+
+	/**
 	 * Data array, with defaults.
 	 *
 	 * @var array
@@ -90,6 +97,7 @@ class Cookie extends Store {
 	 * @return void
 	 */
 	public function set_data( $data ) {
+		$this->decoded_meta = null;
 		if ( isset( $data->cookie_id ) ) {
 			$this->set_multi_item_data(
 				array(
@@ -125,6 +133,11 @@ class Cookie extends Store {
 	/**
 	 * Get an array of data required for APIs.
 	 *
+	 * Note: Script fields (opt_in_script, opt_out_script) are intentionally
+	 * excluded here because they are admin-only and only valid in the REST
+	 * 'edit' context. Use get_script_data() to retrieve them, and merge the
+	 * result in REST callers that should expose the scripts.
+	 *
 	 * @return array
 	 */
 	public function get_prepared_data() {
@@ -141,6 +154,22 @@ class Cookie extends Store {
 			'category'      => $this->get_category(),
 			'date_created'  => $this->get_date_created(),
 			'date_modified' => $this->get_date_modified(),
+		);
+	}
+
+	/**
+	 * Get the admin-only script fields for this cookie.
+	 *
+	 * These fields are kept separate from get_prepared_data() so that callers
+	 * which do not run inside the REST 'edit' context (and therefore must not
+	 * leak raw JS) do not receive them by default.
+	 *
+	 * @return array
+	 */
+	public function get_script_data() {
+		return array(
+			'opt_in_script'  => $this->get_opt_in_script(),
+			'opt_out_script' => $this->get_opt_out_script(),
 		);
 	}
 
@@ -239,16 +268,85 @@ class Cookie extends Store {
 	/**
 	 * Return cookie meta data.
 	 *
+	 * Script keys (opt_in_script, opt_out_script) are preserved as-is because
+	 * sanitize_textarea_field() strips HTML tags, which would corrupt JS code.
+	 * These keys are admin-only and are JSON-encoded before reaching the browser.
+	 *
 	 * @return array
 	 */
 	public function get_meta() {
-		$meta = array();
-		$data = $this->get_object_data( 'meta' );
-		$data = ( isset( $data ) && is_array( $data ) ) ? $data : array();
-		foreach ( $data as $key => $item ) {
-			$meta[ $key ] = sanitize_textarea_field( $item );
+		if ( null !== $this->decoded_meta ) {
+			return $this->decoded_meta;
 		}
+		$meta        = array();
+		$raw         = $this->get_object_data( 'meta' );
+		$data        = is_string( $raw ) ? json_decode( $raw, true ) : ( is_array( $raw ) ? $raw : array() );
+		$script_keys = array( 'opt_in_script', 'opt_out_script' );
+		if ( ! is_array( $data ) ) {
+			$this->decoded_meta = $meta;
+			return $meta;
+		}
+		foreach ( $data as $key => $item ) {
+			$meta[ $key ] = in_array( $key, $script_keys, true )
+				? (string) $item
+				: sanitize_textarea_field( $item );
+		}
+		$this->decoded_meta = $meta;
 		return $meta;
+	}
+
+	/**
+	 * Return the opt-in script for this cookie (raw JS, admin-only).
+	 *
+	 * @return string
+	 */
+	public function get_opt_in_script() {
+		$meta = $this->get_meta();
+		return isset( $meta['opt_in_script'] ) ? (string) $meta['opt_in_script'] : '';
+	}
+
+	/**
+	 * Return the opt-out script for this cookie (raw JS, admin-only).
+	 *
+	 * @return string
+	 */
+	public function get_opt_out_script() {
+		$meta = $this->get_meta();
+		return isset( $meta['opt_out_script'] ) ? (string) $meta['opt_out_script'] : '';
+	}
+
+	/**
+	 * Set the opt-in script, merging into the existing meta JSON.
+	 *
+	 * Routes through set_meta() so the
+	 * sanitize_meta_for_current_user capability gate (unfiltered_html
+	 * required) applies on this write path too — set_meta is documented as
+	 * the single source of truth for every wp_faz_cookies.meta write, and
+	 * this setter must honour that invariant rather than reach for
+	 * set_object_data directly.
+	 *
+	 * @param string $script JavaScript to execute when this cookie's category is accepted.
+	 * @return void
+	 */
+	public function set_opt_in_script( $script ) {
+		$meta                   = $this->get_meta();
+		$meta['opt_in_script']  = (string) $script;
+		$this->set_meta( $meta );
+	}
+
+	/**
+	 * Set the opt-out script, merging into the existing meta JSON.
+	 *
+	 * Routes through set_meta() — same rationale as set_opt_in_script
+	 * above.
+	 *
+	 * @param string $script JavaScript to execute when this cookie's category is rejected or revoked.
+	 * @return void
+	 */
+	public function set_opt_out_script( $script ) {
+		$meta                    = $this->get_meta();
+		$meta['opt_out_script']  = (string) $script;
+		$this->set_meta( $meta );
 	}
 
 	/**
@@ -330,11 +428,27 @@ class Cookie extends Store {
 	/**
 	 * Set meta data
 	 *
-	 * @param array $data Meta data array.
+	 * Defence-in-depth: routes through the capability-aware sanitiser
+	 * (\FazCookie\Admin\Modules\Cookies\Api\Cookies_API::sanitize_meta_for_current_user)
+	 * so any internal write path — including REST handlers, settings import,
+	 * migrations — cannot silently smuggle raw JS into opt_in_script /
+	 * opt_out_script for callers below the unfiltered_html capability gate.
+	 *
+	 * Skips when running outside a WordPress request context (e.g. unit tests
+	 * before WP bootstrap) where capability functions are unavailable.
+	 *
+	 * @param array|string $data Meta data array (or JSON-encoded string).
 	 * @return void
 	 */
 	public function set_meta( $data ) {
+		if (
+			is_callable( array( '\\FazCookie\\Admin\\Modules\\Cookies\\Api\\Cookies_API', 'sanitize_meta_for_current_user' ) )
+			&& function_exists( 'current_user_can' )
+		) {
+			$data = \FazCookie\Admin\Modules\Cookies\Api\Cookies_API::sanitize_meta_for_current_user( $data );
+		}
 		$this->set_object_data( 'meta', $data );
+		$this->decoded_meta = null;
 	}
 	/**
 	 * Get contents by language.

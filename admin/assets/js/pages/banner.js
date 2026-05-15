@@ -76,6 +76,7 @@
 
 		loadBanner();
 		loadDesignPresets();
+		loadBannerEnabledToggle();
 		syncPreviewSpacer(DEFAULT_PREVIEW_FRAME_HEIGHT);
 
 		document.getElementById('faz-b-save').addEventListener('click', saveBanner);
@@ -227,6 +228,39 @@
 			refreshPreview();
 		}).catch(function () {
 			FAZ.notify(__('banner.loadFailed', 'Failed to load banner settings.'), 'error');
+		});
+	}
+
+	/**
+	 * Load the "Enable cookie banner" toggle state from /settings and wire
+	 * up a live change handler that writes back to the same option. The
+	 * setting is also available on the Settings page (Banner Control card);
+	 * we mirror it here so users have an obvious entry-point on the Cookie
+	 * Banner page (publisher feedback, 2026-05).
+	 */
+	function loadBannerEnabledToggle() {
+		var toggle = document.getElementById('faz-b-enabled');
+		if (!toggle) return;
+		FAZ.get('settings').then(function (settings) {
+			var enabled = !!(settings && settings.banner_control && settings.banner_control.status);
+			toggle.checked = enabled;
+			toggle.addEventListener('change', function () {
+				var newValue = !!toggle.checked;
+				// Optimistic UI — revert on failure.
+				FAZ.post('settings', {
+					banner_control: { status: newValue }
+				}).then(function () {
+					FAZ.notify(newValue
+						? __('banner.enabled', 'Cookie banner enabled.')
+						: __('banner.disabled', 'Cookie banner disabled.'));
+				}).catch(function () {
+					toggle.checked = !newValue;
+					FAZ.notify(__('banner.toggleFailed', 'Failed to update banner status.'), 'error');
+				});
+			});
+		}).catch(function () {
+			// Quiet failure — the Settings page remains as the source of truth.
+			toggle.disabled = true;
 		});
 	}
 

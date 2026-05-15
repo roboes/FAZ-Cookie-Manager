@@ -158,6 +158,7 @@ function clearConsentLogState(): void {
 }
 
 test.describe('User-reported regressions (v1.11.0 publisher report)', () => {
+	test.describe.configure({ mode: 'serial' });
 
 	/* ─────────────────────────────────────────────────────────────────
 	 * Report 1 — "There should maybe be an option to force new consent"
@@ -501,6 +502,36 @@ test.describe('User-reported regressions (v1.11.0 publisher report)', () => {
 		});
 
 		try {
+			// The PMP auto-grant cookie lists every cookie category slug from the DB.
+			// If the test DB has accumulated hundreds of garbage categories from old
+			// test runs (e.g. faz-audit-perf-*, delete-regression-pr92-*), the
+			// URL-encoded cookie value can exceed the browser's 4096-byte limit and be
+			// silently discarded. Delete any non-standard categories and invalidate the
+			// category cache so the next PHP request sees the clean DB state.
+			// Remove any non-standard cookie categories accumulated by other test runs
+			// and nuke stale FAZ transients. Without this, the transient cache may
+			// still return hundreds of test categories → the PMP auto-grant cookie
+			// would include them all → value exceeds the browser's 4096-byte limit →
+			// browser silently discards Set-Cookie → JS placeholder overwrites it.
+			wpEval(`
+				global $wpdb;
+				$standard = array('necessary','analytics','functional','marketing','performance','uncategorized','wordpress-internal');
+				$ph = implode(',', array_fill(0, count($standard), '%s'));
+				$wpdb->query($wpdb->prepare(
+					"DELETE FROM {$wpdb->prefix}faz_cookie_categories WHERE slug NOT IN ($ph)",
+					...$standard
+				));
+				$wpdb->query("DELETE FROM {$wpdb->prefix}options WHERE option_name LIKE '_transient_faz%' OR option_name LIKE '_transient_timeout_faz%'");
+				if ( class_exists( '\\FazCookie\\Includes\\Cache' ) ) {
+					\\FazCookie\\Includes\\Cache::invalidate_cache_group( 'categories' );
+					\\FazCookie\\Includes\\Cache::invalidate_cache_group( 'cookies' );
+				}
+			`);
+			// Drop any stale fazcookie-consent cookie that previous tests in the same
+			// browser context may have set; otherwise PHP sees the existing cookie and
+			// may skip re-setting it (or the old value shadows the new one in document.cookie).
+			await page.context().clearCookies({ name: 'fazcookie-consent' });
+
 			// Act — visit the frontend as the logged-in admin (who, per our
 			// mock, has level 2 membership).
 			await page.goto(`${WP_BASE}/`, { waitUntil: 'domcontentloaded' });

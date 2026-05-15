@@ -57,8 +57,14 @@ abstract class API_Controller extends Rest_Controller {
 	/**
 	 * Get formatted data from corresponding object.
 	 *
+	 * Subclasses (Cookies_API, Categories_API) override this to return an
+	 * array. The base implementation here returns a WP_Error because being
+	 * called directly on the parent is a misuse — the not-implemented error
+	 * surfaces to the REST layer with HTTP 405.
+	 *
 	 * @param object $object Cookie_Categories or Cookie instance.
-	 * @return WP_Error
+	 * @return array|WP_Error Array in concrete subclasses; WP_Error from this
+	 *   default implementation.
 	 */
 	protected function get_formatted_item_data( $object ) {
 		// translators: %s: Class method name.

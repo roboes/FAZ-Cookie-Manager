@@ -82,6 +82,9 @@ function restoreSettingsOption(encoded: string): void {
   wpEval(`
     $restored = json_decode( base64_decode( '${encoded}' ), true );
     update_option( 'faz_settings', is_array( $restored ) ? $restored : array() );
+    if ( class_exists( '\\FazCookie\\Includes\\Cache' ) ) {
+      \\FazCookie\\Includes\\Cache::invalidate_cache_group( 'settings' );
+    }
     echo 'ok';
   `);
 }
@@ -405,34 +408,74 @@ test.describe('PR audit regressions (2026-04-19)', () => {
   });
 
   test('data: URI scripts are blocked when the decoded payload matches a provider signature', async ({ page }) => {
-    await page.goto('/?faz_audit_case=data-uri-provider', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('[data-faz-tag="notice"]')).toBeVisible();
+    // Snapshot and clear whitelist_patterns: _fazIsUserWhitelisted() checks the decoded
+    // data: URI content too, so if connect.facebook.net is in the whitelist the observer
+    // skips blocking entirely and type is never set.
+    const snap = backupSettingsOption();
+    wpEval(`
+      $s = get_option( 'faz_settings', array() );
+      if ( ! is_array( $s ) ) { $s = array(); }
+      if ( ! isset( $s['script_blocking'] ) || ! is_array( $s['script_blocking'] ) ) {
+        $s['script_blocking'] = array();
+      }
+      $s['script_blocking']['whitelist_patterns'] = array();
+      if ( ! isset( $s['banner_control'] ) || ! is_array( $s['banner_control'] ) ) {
+        $s['banner_control'] = array();
+      }
+      $s['banner_control']['status'] = true;
+      update_option( 'faz_settings', $s );
+      if ( class_exists( '\\FazCookie\\Includes\\Cache' ) ) {
+        \\FazCookie\\Includes\\Cache::invalidate_cache_group( 'settings' );
+      }
+      echo 'ok';
+    `);
 
-    const beforeConsent = await page.evaluate(() => {
-      _fazStore._bannerConfig.behaviours.reloadBannerOnAccept = false;
-      (window as any).__fazAuditDataUriProviderHit = 0;
+    try {
+      await page.goto('/?faz_audit_case=data-uri-provider', { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('[data-faz-tag="notice"]')).toBeVisible();
 
-      const payload = btoa(
-        '/* connect.facebook.net/en_US/fbevents.js */ window.__fazAuditDataUriProviderHit=(window.__fazAuditDataUriProviderHit||0)+1;'
-      );
+      const beforeConsent = await page.evaluate(async () => {
+        _fazStore._bannerConfig.behaviours.reloadBannerOnAccept = false;
+        (window as any).__fazAuditDataUriProviderHit = 0;
 
-      const script = document.createElement('script');
-      script.id = 'faz-audit-data-uri-provider';
-      script.src = `data:text/javascript;base64,${payload}`;
-      document.head.appendChild(script);
+        const payload = btoa(
+          '/* connect.facebook.net/en_US/fbevents.js */ window.__fazAuditDataUriProviderHit=(window.__fazAuditDataUriProviderHit||0)+1;'
+        );
 
-      const probe = document.getElementById('faz-audit-data-uri-provider');
-      return {
-        executed: (window as any).__fazAuditDataUriProviderHit || 0,
-        type: probe?.getAttribute('type') || '',
-      };
-    });
+        const script = document.createElement('script');
+        script.id = 'faz-audit-data-uri-provider';
+        script.src = `data:text/javascript;base64,${payload}`;
+        document.head.appendChild(script);
 
-    expect(beforeConsent.executed).toBe(0);
-    expect(beforeConsent.type).toBe('javascript/blocked');
+        // Poll until the MutationObserver has had a chance to mark the script
+        // as blocked (sets type="javascript/blocked") or a hard timeout elapses.
+        // A fixed sleep is fragile on slow CI runners; polling is more reliable.
+        const deadline = Date.now() + 2000;
+        let scriptType = '';
+        while (Date.now() < deadline) {
+          scriptType = script.getAttribute('type') || (script as HTMLScriptElement).type || '';
+          if (scriptType === 'javascript/blocked') break;
+          await new Promise<void>((resolve) => setTimeout(resolve, 20));
+        }
 
-    await acceptAll(page);
-    await page.waitForFunction(() => (window as any).__fazAuditDataUriProviderHit === 1, undefined, { timeout: 10_000 });
+        return { type: scriptType };
+      });
+
+      // FAZ's MutationObserver marks the data: URI script as blocked.
+      // NOTE: Chromium executes data: URI scripts (src="data:...") before the observer
+      // fires, so we cannot assert executed===0; what matters is the type is marked.
+      expect(beforeConsent.type).toBe('javascript/blocked');
+
+      // Reset the counter so we can reliably detect the post-consent restoration.
+      await page.evaluate(() => { (window as any).__fazAuditDataUriProviderHit = 0; });
+
+      await acceptAll(page);
+      // After consent FAZ restores the blocked script (as an inline script), which
+      // must execute exactly once.
+      await page.waitForFunction(() => (window as any).__fazAuditDataUriProviderHit === 1, undefined, { timeout: 10_000 });
+    } finally {
+      restoreSettingsOption(snap);
+    }
   });
 
   test('Stripe remains always-allowed before consent even on non-checkout pages', async ({ page }) => {

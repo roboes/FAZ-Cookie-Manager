@@ -19,7 +19,7 @@
         "theme": "light",
         "consentExpiry": {
             "status": true,
-            "value": 365
+            "value": 180
         },
         "ruleSet": [
             {

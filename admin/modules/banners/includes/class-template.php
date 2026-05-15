@@ -154,7 +154,10 @@ class Template {
 		}
 		add_action( 'faz_after_update_banner', array( $this, 'clear_template' ) );
 		add_action( 'faz_after_update_cookie_category', array( $this, 'clear_template' ) );
+		add_action( 'faz_after_delete_cookie_category', array( $this, 'clear_template' ) );
 		add_action( 'faz_after_update_cookie', array( $this, 'clear_template' ) );
+		add_action( 'faz_after_create_cookie', array( $this, 'clear_template' ) );
+		add_action( 'faz_after_delete_cookie', array( $this, 'clear_template' ) );
 		add_action( 'faz_after_update_settings', array( $this, 'clear_template' ), 10, 1 );
 		add_action( 'faz_clear_cache', array( $this, 'clear_template' ) );
 	}
@@ -428,6 +431,18 @@ class Template {
 				if ( 'donotsell-button' === $tag ) {
 					$law = isset( $properties['settings']['applicableLaw'] ) ? $properties['settings']['applicableLaw'] : 'gdpr';
 					if ( 'gdpr' === $law && ( ! isset( $config['status'] ) || false === $config['status'] ) ) {
+						$element->parentNode->removeChild( $element ); //phpcs:ignore WordPress.NamingConventions.ValidVariableName
+						continue;
+					}
+				}
+				// Close button: Garante Privacy Provv. 10/06/2021 — hide the X when
+				// the Reject button is present. Two dismissal paths of different visual
+				// weight (X = neutral-looking, Reject = labelled) on the same banner
+				// constitutes a recognised dark pattern (ambiguità multipla scelta).
+				if ( 'close-button' === $tag ) {
+					$reject_cfg     = faz_array_search( $configs, 'tag', 'reject-button' );
+					$reject_enabled = $reject_cfg && ( ! isset( $reject_cfg['status'] ) || true === $reject_cfg['status'] );
+					if ( $reject_enabled ) {
 						$element->parentNode->removeChild( $element ); //phpcs:ignore WordPress.NamingConventions.ValidVariableName
 						continue;
 					}

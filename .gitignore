@@ -66,3 +66,14 @@ graphify-out/
 *.canvas
 /obsidian/
 /raw/
+
+# Test artifacts that occasionally leak into the working tree
+#  - cookies.txt: Netscape cookie jar written by curl during manual debug
+#  - /wp-content/: fixture-plugin staging directory that test helpers
+#    sometimes mirror into the repo root (the real fixtures live in
+#    tests/e2e/fixtures/plugins/ and the WP test site mounts them under
+#    /Users/fabio/Sites/faz-test/wp-content/plugins/)
+cookies.txt
+/wp-content/
+# Probe scripts created on-the-fly during debugging (probe-youtube.mjs etc.)
+/probe-*.mjs

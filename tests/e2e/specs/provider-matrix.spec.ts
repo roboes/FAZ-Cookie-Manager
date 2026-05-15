@@ -12,16 +12,19 @@ import {
   openSettingsPage,
 } from '../utils/faz-api';
 import {
+  activatePlugins,
   deactivatePluginsExcept,
   enableProviderMatrixCustomScenario,
   enableProviderMatrixWooScenario,
   ensureFixturePlugin,
   ensureProviderMatrixPage,
   ensureWooCommerceLabData,
+  listActivePlugins,
   readProviderMatrixHits,
   readProviderMatrixUrl,
   readWooUrls,
   resetProviderMatrixState,
+  wpEval,
 } from '../utils/wp-env';
 
 const WP_BASE = process.env.WP_BASE_URL ?? 'http://localhost:9998';
@@ -182,7 +185,7 @@ async function blockedMatrixScriptCount(page: Parameters<typeof openCookiesPage>
 }
 
 async function gotoFrontend(page: Parameters<typeof openCookiesPage>[0], url: string): Promise<void> {
-  await page.goto(url, { waitUntil: 'commit' });
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
   await page.locator('body').waitFor({ state: 'visible' });
 }
 
@@ -293,8 +296,10 @@ test.describe('Provider matrix scan and blocking', () => {
   test.setTimeout(300_000);
 
   let matrixUrl = '';
+  let initialActivePlugins: string[] = [];
 
   test.beforeAll(async () => {
+    initialActivePlugins = listActivePlugins();
     deactivatePluginsExcept([
       'faz-cookie-manager',
       'faz-e2e-provider-matrix',
@@ -307,6 +312,19 @@ test.describe('Provider matrix scan and blocking', () => {
     matrixUrl = readProviderMatrixUrl();
     if (!matrixUrl) {
       throw new Error('Provider matrix page URL could not be resolved.');
+    }
+  });
+
+  test.afterAll(async () => {
+    // Restore the exact set of plugins that were active before this suite ran.
+    const currentlyActive = new Set(listActivePlugins());
+    const toActivate = initialActivePlugins.filter((slug) => !currentlyActive.has(slug));
+    const toDeactivate = [...currentlyActive].filter((slug) => !initialActivePlugins.includes(slug));
+    if (toActivate.length > 0) {
+      activatePlugins(toActivate, { tolerateFailures: true });
+    }
+    if (toDeactivate.length > 0) {
+      deactivatePluginsExcept(initialActivePlugins);
     }
   });
 
@@ -566,6 +584,7 @@ test.describe('Provider matrix scan and blocking', () => {
   });
 
   test('10. fetch requests to provider-like endpoints are dropped before consent and allowed after accept', async ({ page }) => {
+    await page.context().clearCookies();
     await gotoFrontend(page, matrixUrl);
     const target = directCollectUrl('googletagmanager.com/gtag/js');
 
@@ -580,6 +599,7 @@ test.describe('Provider matrix scan and blocking', () => {
   });
 
   test('11. XMLHttpRequest requests to provider-like endpoints follow the same consent gating', async ({ page }) => {
+    await page.context().clearCookies();
     await gotoFrontend(page, matrixUrl);
     const target = directCollectUrl('clarity.ms/tag/faz-matrix.js');
 
@@ -594,17 +614,44 @@ test.describe('Provider matrix scan and blocking', () => {
   });
 
   test('12. sendBeacon requests to provider-like endpoints are also gated by consent', async ({ page }) => {
-    await gotoFrontend(page, matrixUrl);
-    const target = directCollectUrl('connect.facebook.net/en_US/fbevents.js');
+    // Snapshot and clear whitelist_patterns: if connect.facebook.net is whitelisted in the DB,
+    // _fazIsUserWhitelisted() returns true and the sendBeacon interceptor skips blocking.
+    const snap = wpEval(`echo wp_json_encode( get_option( 'faz_settings', array() ) );`);
+    const snapEncoded = Buffer.from(snap, 'utf8').toString('base64');
+    wpEval(`
+      $s = get_option( 'faz_settings', array() );
+      if ( ! is_array( $s ) ) { $s = array(); }
+      if ( ! isset( $s['script_blocking'] ) || ! is_array( $s['script_blocking'] ) ) {
+        $s['script_blocking'] = array();
+      }
+      $s['script_blocking']['whitelist_patterns'] = array();
+      update_option( 'faz_settings', $s );
+      if ( class_exists( '\\FazCookie\\Includes\\Cache' ) ) {
+        \\FazCookie\\Includes\\Cache::invalidate_cache_group( 'settings' );
+      }
+    `);
+    try {
+      await page.context().clearCookies();
+      await gotoFrontend(page, matrixUrl);
+      const target = directCollectUrl('connect.facebook.net/en_US/fbevents.js');
 
-    expect(await runDirectBeacon(page, target)).toBe(true);
-    await page.waitForTimeout(500);
-    expect(readProviderMatrixHits()['connect.facebook.net/en_US/fbevents.js'] ?? 0).toBe(0);
+      expect(await runDirectBeacon(page, target)).toBe(true);
+      await page.waitForTimeout(500);
+      expect(readProviderMatrixHits()['connect.facebook.net/en_US/fbevents.js'] ?? 0).toBe(0);
 
-    await acceptAll(page);
-    expect(await runDirectBeacon(page, target)).toBe(true);
-    await page.waitForTimeout(750);
-    expect(readProviderMatrixHits()['connect.facebook.net/en_US/fbevents.js'] ?? 0).toBeGreaterThanOrEqual(1);
+      await acceptAll(page);
+      expect(await runDirectBeacon(page, target)).toBe(true);
+      await page.waitForTimeout(750);
+      expect(readProviderMatrixHits()['connect.facebook.net/en_US/fbevents.js'] ?? 0).toBeGreaterThanOrEqual(1);
+    } finally {
+      wpEval(`
+        $s = json_decode( base64_decode( '${snapEncoded}' ), true );
+        update_option( 'faz_settings', is_array( $s ) ? $s : array() );
+        if ( class_exists( '\\FazCookie\\Includes\\Cache' ) ) {
+          \\FazCookie\\Includes\\Cache::invalidate_cache_group( 'settings' );
+        }
+      `);
+    }
   });
 
   test('13. per-service consent can allow Google Analytics while keeping Clarity blocked', async ({ page, browser, loginAsAdmin }) => {

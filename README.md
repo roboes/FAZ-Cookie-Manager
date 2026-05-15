@@ -351,8 +351,49 @@ add_filter( 'faz_send_vary_header', '__return_false' );
 |-----------|-------------|
 | `[faz_cookie_table]` | Responsive cookie table grouped by category for policy pages |
 | `[cookie_audit]` | Backward-compatible alias |
+| `[faz_do_not_sell]` | CCPA "Do Not Sell My Personal Information" opt-out form |
+| `[faz_dsar_form]` | GDPR Data Subject Access Request (DSAR) form |
 
-**Attributes:** `columns`, `category`, `heading`
+**`[faz_cookie_table]` attributes:** `columns`, `category`, `heading`
+
+#### `[faz_do_not_sell]` — CCPA Opt-Out
+
+Renders a CCPA opt-out form for California residents. On submission:
+
+- Logs the opt-out to the `wp_faz_consent_logs` table with `status = 'dnsmpi_optout'` and a hashed IP address
+- Sets a `fazcookie-dnsmpi` cookie (365 days) so returning visitors see a confirmation instead of the form
+- Sends a notification email to the site admin
+
+If the visitor already has the opt-out cookie, the form is replaced with a confirmation message automatically.
+
+| Attribute | Default | Description |
+|-----------|---------|-------------|
+| `title` | `Do Not Sell My Personal Information` | Heading above the form |
+| `button` | `Submit Opt-Out Request` | Submit button label |
+
+```text
+[faz_do_not_sell title="Opt Out" button="Submit Request"]
+```
+
+#### `[faz_dsar_form]` — GDPR DSAR Form
+
+Renders a GDPR-compliant Data Subject Access Request form covering Articles 15–21. On submission:
+
+- Stores the request as a private WordPress post (post type `faz_dsar`) so requests survive email delivery failures
+- Sends a notification email to the admin with a direct link to the stored request (Reply-To set to the requester's address)
+- Sends a confirmation email to the requester
+
+Includes a honeypot field for bot protection and nonce verification.
+
+Supported request types: Right of Access (Art. 15), Right to Erasure (Art. 17), Right to Data Portability (Art. 20), Right to Rectification (Art. 16), Right to Restrict Processing (Art. 18), Right to Object (Art. 21).
+
+| Attribute | Default | Description |
+|-----------|---------|-------------|
+| `button` | `Send Request` | Submit button label |
+
+```text
+[faz_dsar_form button="Send Request"]
+```
 
 ---
 
@@ -503,6 +544,22 @@ Value format: `consentid:{base64},consent:yes,action:yes,necessary:yes,functiona
 ---
 
 ## Changelog
+
+### 1.13.17
+- **Fix**: `dataLayer is not defined` when third-party trackers emit a bare `dataLayer.push()` before GTM bootstraps. Pre-initialised via `wp_add_inline_script('before')`.
+- **Fix**: Cookie category counts stay stale after scan + auto-categorise — every cookie create/update/delete now invalidates the Category controller cache, the banner template, the IAB unmatched-vendors transient, and 10 page-cache adapters.
+- **Fix**: REST `bulk_update` was silently dropping `opt_in_script` / `opt_out_script` — now iterates schema editable fields through the same `sanitize_script_field` capability gate as single-cookie updates.
+- **Fix**: `_cookieScripts` no longer truncates at 500 cookies (paged query, JSON-key-anchored LIKE, 10000-row ceiling).
+- **Fix**: `sanitize_meta_for_current_user` intercepts every write path into `wp_faz_cookies.meta`. Closes a stored-XSS surface for multisite Site Administrators without `unfiltered_html`.
+- **Fix**: Own `wp_localize_script` payloads (`{handle}-js-extra`) can no longer be classified as analytics by the output-buffer blocker. Closes #99 and #101 (reported independently by @Myblueroom).
+- **Fix**: WP Rocket "Load JavaScript deferred" no longer wraps our `_fazConfig` bootstrap payload in a `DOMContentLoaded` callback (which would scope `var _fazConfig` to the callback and break `script.js` with `Cannot set properties of undefined`). New `rocket_defer_inline_exclusions` filter excludes `_fazConfig`, `_fazCfg`, `_fazGcm`, `_fazTcfConfig` from DeferJS wrapping. Closes #95 (thanks @dominikkucharski for the diagnosis and reference patch).
+- **Fix**: `<noscript>`-wrapped iframes injected by page builders (Bricks/Elementor/Divi) no longer become 0x0 phantom placeholders.
+- **Fix**: Escape key no longer dismisses the consent banner without a recorded decision (EDPB dark-pattern). Preference center close-on-Escape preserved.
+- **Added**: `Necessary` selectable in Custom Blocking Rules dropdown.
+- **Added**: Banner-status toggle on the Cookie Banner admin page mirroring Settings → Banner Control.
+- **Added**: CCPA 1798.135(c) compliance — `[faz_do_not_sell]` renders a Withdraw opt-out button + `dns_rescinded` log entry.
+- **Added**: DSAR validation announces errors via `role=alert`, `aria-invalid` per field, focus on first invalid. WCAG 1.4.11 focus indicator on `.faz-dsar-btn` / `.faz-dnsmpi-btn`.
+- **Release**: `scripts/build-release.sh` — scripted 3-way ZIP builder for wp.org / GitHub / ClassicPress Directory. Refs #20.
 
 ### 1.13.16
 - **Fix**: Inline scripts referencing tracker domains in config data (Rank Math) incorrectly triggered script blocking — URL-fragment patterns now matched only against `src` attribute, not inline content.

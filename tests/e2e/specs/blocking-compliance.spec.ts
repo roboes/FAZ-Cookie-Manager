@@ -3,11 +3,13 @@ import { expect, test } from '../fixtures/wp-fixture';
 import { clickFirstVisible } from '../utils/ui';
 import { fazApiGet, fazApiPost, openSettingsPage } from '../utils/faz-api';
 import {
+  activatePlugins,
   deactivatePluginsExcept,
   enableProviderMatrixCustomScenario,
   ensureFixturePlugin,
   ensureProviderMatrixPage,
   ensureScanLabPages,
+  listActivePlugins,
   readProviderMatrixHits,
   readProviderMatrixUrl,
   resetProviderMatrixState,
@@ -69,6 +71,7 @@ function withCustomRules(scriptBlocking: SettingsPayload | undefined): SettingsP
   return {
     ...(scriptBlocking ?? {}),
     custom_rules: merged,
+    whitelist_patterns: [],
   };
 }
 
@@ -88,7 +91,7 @@ async function postSettings(page: Page, nonce: string, payload: SettingsPayload)
 }
 
 async function gotoFrontend(page: Page, url: string): Promise<void> {
-  await page.goto(url, { waitUntil: 'commit' });
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
   await page.locator('body').waitFor({ state: 'visible' });
 }
 
@@ -238,8 +241,10 @@ async function runDirectBeacon(page: Page, url: string): Promise<boolean> {
 }
 
 function readPageUrl(slug: string): string {
+  const slugB64 = Buffer.from(slug, 'utf8').toString('base64');
   return wpEval(`
-    $page = get_page_by_path( ${JSON.stringify(slug)}, OBJECT, 'page' );
+    $slug = base64_decode( '${slugB64}' );
+    $page = get_page_by_path( $slug, OBJECT, 'page' );
     echo $page ? get_permalink( $page->ID ) : '';
   `);
 }
@@ -252,8 +257,19 @@ test.describe('Blocking compliance coverage', () => {
   let matrixPageId = 0;
   let matrixPagePattern = '';
   let iframeLabUrl = '';
+  // Snapshot of every active plugin at the moment the suite starts.
+  // The afterAll restores this exact set so co-running test files
+  // that depend on third-party plugins (cache adapters, analytics
+  // sniffers, etc.) see the same environment they did before. A
+  // prior refactor renamed this from `deactivatedPlugins` (filter of
+  // pre-snapshot minus allowlist) to `initialActivePlugins` (full
+  // snapshot) and updated the afterAll but forgot to rename the
+  // declaration here — that's why the afterAll was throwing
+  // `ReferenceError: initialActivePlugins is not defined`.
+  let initialActivePlugins: string[] = [];
 
   test.beforeAll(async () => {
+    initialActivePlugins = listActivePlugins();
     deactivatePluginsExcept([
       'faz-cookie-manager',
       'faz-e2e-provider-matrix',
@@ -275,6 +291,17 @@ test.describe('Blocking compliance coverage', () => {
     }
 
     matrixPagePattern = `${new URL(matrixUrl).pathname.replace(/\/$/, '')}*`;
+  });
+
+  test.afterAll(async () => {
+    const currentlyActive = new Set(listActivePlugins());
+    const toActivate = initialActivePlugins.filter((slug) => !currentlyActive.has(slug));
+
+    if (toActivate.length > 0) {
+      activatePlugins(toActivate, { tolerateFailures: true });
+    }
+    // Deactivate everything that wasn't originally active.
+    deactivatePluginsExcept(initialActivePlugins);
   });
 
   test.beforeEach(async () => {
@@ -491,8 +518,13 @@ test.describe('Blocking compliance coverage', () => {
         },
       });
 
+      await page.context().clearCookies();
       await gotoFrontend(page, matrixUrl);
       await expect(page.locator('[data-faz-tag="notice"]')).toBeVisible();
+
+      // Verify per-service consent is active on the frontend.
+      const perServiceActive = await page.evaluate(() => !!(window as any)._fazConfig?._perServiceConsent);
+      expect(perServiceActive).toBe(true);
 
       await openPreferenceCenter(page);
       const renderedCategories = await page.locator('input[id^="fazSwitch"], input[id^="fazCategoryDirect"]').evaluateAll((inputs) =>
@@ -505,21 +537,46 @@ test.describe('Blocking compliance coverage', () => {
         ),
       );
 
+      // Force-dispatch change events so the category→service sync listener fires
+      // even when the toggle is already in the desired state.
+      const forceToggle = async (slug: string, checked: boolean) => {
+        await page.evaluate(
+          ({ slug: s, checked: c }) => {
+            ['fazSwitch', 'fazCategoryDirect'].forEach((prefix) => {
+              const el = document.getElementById(`${prefix}${s}`) as HTMLInputElement | null;
+              if (!el) return;
+              el.checked = c;
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            });
+          },
+          { slug, checked },
+        );
+      };
+
       if (renderedCategories.includes('analytics')) {
-        await setCategoryToggle(page, 'analytics', true);
+        await forceToggle('analytics', true);
       }
       if (renderedCategories.includes('marketing')) {
-        await setCategoryToggle(page, 'marketing', false);
+        await forceToggle('marketing', false);
       }
       if (renderedCategories.includes('functional')) {
-        await setCategoryToggle(page, 'functional', false);
+        await forceToggle('functional', false);
       }
 
       await page.locator('#fazDetailCategoryanalytics .faz-accordion-header-wrapper').click();
-      await page.locator('.faz-service-toggle[data-service="google-analytics"]').waitFor({ state: 'attached' });
+      await page.locator('.faz-service-toggle[data-service="google-analytics"]').waitFor({ state: 'visible' });
 
       await setServiceToggle(page, 'google-analytics', true);
-      await setServiceToggle(page, 'clarity', false);
+      // Force-uncheck clarity via evaluate to guarantee the change event fires
+      // even if the toggle is already unchecked (Playwright's setChecked is a
+      // no-op when the current state already matches, so no event is dispatched).
+      await page.evaluate(() => {
+        const el = document.querySelector('.faz-service-toggle[data-service="clarity"]') as HTMLInputElement | null;
+        if (el) {
+          el.checked = false;
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      });
       await savePreferences(page);
 
       await waitForCookie(page, '_ga');
@@ -555,9 +612,28 @@ test.describe('Blocking compliance coverage', () => {
       expect(cookieNamesAfterReload).toContain('_ga');
       expect(cookieNamesAfterReload).not.toContain('_clck');
     } finally {
-      await postSettings(page, nonce, {
-        banner_control: original.banner_control ?? {},
-      });
+      // The test path calls page.context().clearCookies() inside `try`, which
+      // wipes the wordpress_logged_in_* cookies along with the consent cookie.
+      // That invalidates the REST nonce we captured earlier — so re-login and
+      // fetch a fresh nonce before restoring the original settings.
+      //
+      // Wrap the restore in its own try/catch: if the network call here
+      // throws (e.g., the server is broken so the original assertion failed
+      // in the first place), we MUST NOT mask the real test error with a
+      // finally-block exception. Log + continue, then still run
+      // resetProviderMatrixState() so cleanup is best-effort.
+      try {
+        const restoreNonce = await openSettingsPage(page, loginAsAdmin);
+        await postSettings(page, restoreNonce, {
+          banner_control: original.banner_control ?? {},
+        });
+      } catch (restoreError) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          '[blocking-compliance per-service finally] settings restore failed:',
+          restoreError,
+        );
+      }
       resetProviderMatrixState();
     }
   });

@@ -174,6 +174,27 @@ async function openPreferenceCenter(page: Page) {
 	await page.evaluate(() => {
 		(window as any)._fazSetPreferenceAction('settings-button');
 	});
+	// Wait for the preference center to mount + reach a non-zero computed
+	// backgroundColor. Reading getComputedStyle() immediately after the open
+	// call can return null/empty values because the CSS animation has not yet
+	// applied the bg. The selector falls back from `.faz-modal` (popup layout,
+	// banner+popup / box+popup) to `.faz-preference-center` (pushdown layout,
+	// banner+pushdown / classic): the `gdpr-strict` preset is banner+pushdown,
+	// which renders an embedded `.faz-preference-wrapper` containing
+	// `.faz-preference-center` and NO `.faz-modal` overlay. Without this
+	// fallback the helper times out on every pushdown-mode preset even though
+	// readPreferenceCenterPalette() already supports both. If neither target
+	// reaches a non-transparent background within 5s, let the timeout
+	// propagate — a silent catch would turn a real "preference center never
+	// opened" regression into a flaky downstream color assertion with a
+	// confusing error message far away from the actual root cause.
+	await page.waitForFunction(() => {
+		const target = (document.querySelector('.faz-modal') as HTMLElement | null)
+			?? (document.querySelector('.faz-preference-center') as HTMLElement | null);
+		if (!target) return false;
+		const bg = getComputedStyle(target).backgroundColor;
+		return !!bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent';
+	}, undefined, { timeout: 5_000 });
 }
 
 async function readPreferenceCenterPalette(page: Page) {
@@ -264,7 +285,7 @@ function captureRuntimeErrors(page: Page) {
 
 function restorePlugins(originalActive: string[]) {
 	deactivatePluginsExcept(originalActive);
-	activatePlugins(originalActive);
+	activatePlugins(originalActive, { tolerateFailures: true });
 }
 
 test.describe.serial('PR #61 regressions', () => {

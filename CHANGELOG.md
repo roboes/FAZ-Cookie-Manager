@@ -2,6 +2,33 @@
 
 All notable changes to FAZ Cookie Manager are documented in this file.
 
+## [1.13.17] — 2026-05-15
+
+### Fixed
+
+- **`dataLayer is not defined`** when third-party trackers emit a bare `dataLayer.push()` before GTM bootstraps. Pre-initialised via `wp_add_inline_script('before')`. Closes wp.org thread *bug-report-datalayer-is-not-defined*.
+- **Cookie category counts stay stale after scan + auto-categorise** — every cookie create/update/delete now invalidates the Category controller cache, the banner template, the IAB unmatched-vendors transient, and 10 page-cache adapters. Closes wp.org thread *bug-report-cookie-categories-not-populated*.
+- **REST `bulk_update` silently dropping `opt_in_script` / `opt_out_script`** — now iterates schema editable fields through the same `sanitize_script_field` capability gate as single-cookie updates.
+- **`_cookieScripts` no longer truncates at 500 cookies** — paged query, JSON-key-anchored LIKE, 10000-row ceiling.
+- **`sanitize_meta_for_current_user`** intercepts every write path into `wp_faz_cookies.meta`. Closes a stored-XSS surface for multisite Site Administrators without `unfiltered_html`.
+- **Own `wp_localize_script` payloads (`{handle}-js-extra`)** can no longer be classified as analytics by the output-buffer blocker. Closes #99 and #101 (reported independently by @Myblueroom).
+- **WP Rocket "Load JavaScript deferred"** no longer wraps our `_fazConfig` bootstrap payload in a `DOMContentLoaded` callback (which would scope `var _fazConfig` to the callback and break `script.js` with `Cannot set properties of undefined`). New `rocket_defer_inline_exclusions` filter excludes `_fazConfig`, `_fazCfg`, `_fazGcm`, `_fazTcfConfig` from DeferJS wrapping. Closes #95 (thanks @dominikkucharski for the diagnosis and reference patch).
+- **`<noscript>`-wrapped iframes** injected by page builders (Bricks/Elementor/Divi) no longer become 0x0 phantom placeholders.
+- **Escape key no longer dismisses the consent banner** without a recorded decision (EDPB dark-pattern). Preference center close-on-Escape preserved.
+
+### Added
+
+- **`Necessary` selectable in Custom Blocking Rules dropdown.** Closes wp.org thread *feature-request-add-necessary-category-to-script-blocker*.
+- **Banner-status toggle on the Cookie Banner admin page** mirroring Settings → Banner Control.
+- **CCPA 1798.135(c) compliance** — `[faz_do_not_sell]` renders a Withdraw opt-out button + `dns_rescinded` log entry.
+- **DSAR validation** announces errors via `role=alert`, `aria-invalid` per field, focus on first invalid. `.faz-dsar-btn` / `.faz-dnsmpi-btn` carry a contrasting focus indicator (WCAG 1.4.11). DNSMPI error notice switches to `role=alert` on failure.
+- **`scripts/build-release.sh`** — scripted 3-way ZIP builder for wp.org / GitHub / ClassicPress Directory. Refs #20.
+
+### Tests
+
+- **Plugin lifecycle deep paths** — 6 new tests covering true fresh install, cross-version upgrade, `uninstall.php`, `run_pending_migrations` idempotence, Playground boot-order static analysis, and `svn-release.sh` smoke.
+- **v1.13.17 regression suite** — 17 tests covering the 11 fixes above.
+
 ## [1.13.16] — 2026-05-05
 
 ### Fixed

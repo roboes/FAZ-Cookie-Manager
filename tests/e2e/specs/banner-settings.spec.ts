@@ -41,6 +41,23 @@ async function openVisitorPage(browser: any, baseURL: string, path = '/', locale
   return { page, ctx };
 }
 
+/**
+ * Switch a banner-admin language selector to a specific locale, but ONLY if
+ * the selector + option are actually present. The Content / Preferences
+ * tabs have separate `<select>` widgets (`#faz-b-content-lang`,
+ * `#faz-b-pref-lang`) that only exist when the site has more than one
+ * language configured. A swallow-all `.catch(() => {})` would also hide
+ * real regressions (selector renamed, option list misrendered, …) — gate
+ * on count() so the only "soft failure" we tolerate is the documented
+ * single-language case.
+ */
+async function selectLangIfPresent(page: Page, selectId: string, lang: string): Promise<void> {
+  const select = page.locator(`#${selectId}`);
+  if ((await select.count()) === 0) return;
+  if ((await select.locator(`option[value="${lang}"]`).count()) === 0) return;
+  await select.selectOption(lang);
+}
+
 /** Navigate to the Cookie Banner admin page and wait for banner data to fully load.
  *  With REST preloading, the banner API response comes from the middleware cache
  *  (no network request). We wait for populateSettings to fill the form. */
@@ -643,6 +660,13 @@ test.describe('Banner settings: persistence and frontend reflection', () => {
     const testRejectLabel = 'Deny Cookies';
     const testSettingsLabel = 'Preferences';
 
+    // The admin form's "current language" defaults to the site's default
+    // language — which on this test site is `it`. The visitor below opens
+    // the frontend with locale=`en-US`, so unless we switch the admin form
+    // to the EN tab the values get stored under contents.it.* and the
+    // visitor's banner keeps reading the unchanged contents.en.* defaults.
+    await selectLangIfPresent(page, 'faz-b-content-lang', 'en');
+
     await setInput(page, 'faz-b-notice-title', testTitle);
     await setInput(page, 'faz-b-btn-accept-label', testAcceptLabel);
     await setInput(page, 'faz-b-btn-reject-label', testRejectLabel);
@@ -652,6 +676,8 @@ test.describe('Banner settings: persistence and frontend reflection', () => {
     // Verify persistence
     await goToBannerPage(page);
     await clickTab(page, 'content');
+    // Re-switch the content tab to EN (default may be IT on this test site).
+    await selectLangIfPresent(page, 'faz-b-content-lang', 'en');
     expect(await getInputValue(page, 'faz-b-notice-title')).toBe(testTitle);
     expect(await getInputValue(page, 'faz-b-btn-accept-label')).toBe(testAcceptLabel);
     expect(await getInputValue(page, 'faz-b-btn-reject-label')).toBe(testRejectLabel);
@@ -1022,6 +1048,14 @@ test.describe('Banner settings: persistence and frontend reflection', () => {
     await loginAsAdmin(page);
     await goToBannerPage(page);
     await clickTab(page, 'preferences');
+    // The Preferences tab has its OWN language selector (separate from the
+    // Content tab) — see banner.js populateLangSelects() which targets both
+    // #faz-b-content-lang and #faz-b-pref-lang. The default lang on this
+    // test site is `it`, but openVisitorPage() below loads the frontend with
+    // locale=`en-US`, so unless we switch the Preferences lang tab to `en`
+    // the new values land in contents.it.preferenceCenter while the visitor
+    // keeps reading contents.en.preferenceCenter.
+    await selectLangIfPresent(page, 'faz-b-pref-lang', 'en');
 
     const testPrefTitle = 'E2E Preference Title';
     const testPrefAccept = 'Allow Everything';
@@ -1037,6 +1071,7 @@ test.describe('Banner settings: persistence and frontend reflection', () => {
     // Verify persistence
     await goToBannerPage(page);
     await clickTab(page, 'preferences');
+    await selectLangIfPresent(page, 'faz-b-pref-lang', 'en');
     expect(await getInputValue(page, 'faz-b-pref-title')).toBe(testPrefTitle);
     expect(await getInputValue(page, 'faz-b-pref-accept')).toBe(testPrefAccept);
     expect(await getInputValue(page, 'faz-b-pref-save')).toBe(testPrefSave);
@@ -1063,8 +1098,9 @@ test.describe('Banner settings: persistence and frontend reflection', () => {
       await visitor.ctx.close();
     }
 
-    // Restore
+    // Restore — same EN tab so we don't leave the EN copy with the test values.
     await clickTab(page, 'preferences');
+    await selectLangIfPresent(page, 'faz-b-pref-lang', 'en');
     await setInput(page, 'faz-b-pref-title', 'Customize consent preferences');
     await setInput(page, 'faz-b-pref-accept', 'Accept All');
     await setInput(page, 'faz-b-pref-save', 'Save My Preferences');
@@ -1172,6 +1208,17 @@ test.describe('Banner settings: persistence and frontend reflection', () => {
 
     // Content
     await clickTab(page, 'content');
+    // The admin form's "current language" defaults to the site's default
+    // language (`it` on this test site). The visitor below opens the
+    // frontend with locale=`en-US`, so without this switch the test
+    // values land in contents.it.notice.* while the visitor keeps reading
+    // contents.en.notice.* defaults → assertion fails with "Received: We
+    // value your privacy". Mirrors the existing `selectLangIfPresent`
+    // pattern used by every other "verify on frontend" test in this file.
+    // Without this call the test passed in full-suite runs only because a
+    // prior test had already saved the language to `en` — an order-of-
+    // tests dependency that broke as soon as the test ran in isolation.
+    await selectLangIfPresent(page, 'faz-b-content-lang', 'en');
     await setInput(page, 'faz-b-notice-title', 'Cross-tab Test Title');
     await setInput(page, 'faz-b-btn-accept-label', 'CT Accept');
 
@@ -1185,6 +1232,10 @@ test.describe('Banner settings: persistence and frontend reflection', () => {
 
     // Preferences
     await clickTab(page, 'preferences');
+    // Same language-switch rationale as the Content tab above — the
+    // Preferences tab carries its own `faz-b-pref-lang` selector and the
+    // pref-title field is stored under contents.<lang>.preferenceCenter.
+    await selectLangIfPresent(page, 'faz-b-pref-lang', 'en');
     await setInput(page, 'faz-b-pref-title', 'CT Preferences');
 
     // Advanced
@@ -1203,8 +1254,11 @@ test.describe('Banner settings: persistence and frontend reflection', () => {
     expect(await getSelectValue(page, 'faz-b-pref-type')).toBe('sidebar');
     expect(await getInputValue(page, 'faz-b-expiry')).toBe('30');
 
-    // Content
+    // Content — re-switch to the same `en` tab used at save time;
+    // populateSettings() repaints the inputs from contents.<currentLang>.*
+    // and the admin defaults the language to `it` again on each page load.
     await clickTab(page, 'content');
+    await selectLangIfPresent(page, 'faz-b-content-lang', 'en');
     expect(await getInputValue(page, 'faz-b-notice-title')).toBe('Cross-tab Test Title');
     expect(await getInputValue(page, 'faz-b-btn-accept-label')).toBe('CT Accept');
 
@@ -1216,8 +1270,9 @@ test.describe('Banner settings: persistence and frontend reflection', () => {
     await clickTab(page, 'buttons');
     expect(await getToggle(page, 'faz-b-settings-toggle')).toBe(true);
 
-    // Preferences
+    // Preferences — same re-switch as Content above.
     await clickTab(page, 'preferences');
+    await selectLangIfPresent(page, 'faz-b-pref-lang', 'en');
     expect(await getInputValue(page, 'faz-b-pref-title')).toBe('CT Preferences');
 
     // Advanced
@@ -1342,6 +1397,109 @@ test.describe('Banner settings: persistence and frontend reflection', () => {
         default: banner.default,
         properties: banner.properties,
         contents: banner.contents,
+      });
+    }
+  });
+});
+
+// ── Banner Status toggle (loadBannerEnabledToggle) ──────────────────────────
+//
+// Covers:
+//   - admin/views/banner.php   — "Banner Status" card + #faz-b-enabled toggle
+//   - admin/assets/js/pages/banner.js::loadBannerEnabledToggle()
+//
+// The toggle mirrors banner_control.status from the /settings REST endpoint.
+// Changing it must write back to the same setting (optimistic UI + FAZ.post).
+test.describe('Banner page: banner status toggle', () => {
+  test('toggle reflects banner_control.status and persists changes via settings API', async ({
+    page,
+    wpBaseURL,
+    loginAsAdmin,
+  }) => {
+    await loginAsAdmin(page);
+
+    // Navigate to the Settings page first to obtain a nonce and prime a known
+    // state (banner enabled).
+    await page.goto(`${WP_BASE}/wp-admin/admin.php?page=faz-cookie-manager-settings`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 45_000,
+    });
+    await page.waitForFunction(
+      () => {
+        const cfg = (window as any).fazConfig;
+        return typeof cfg?.api?.nonce === 'string' && cfg.api.nonce.length > 0;
+      },
+      { timeout: 15_000 },
+    );
+    const nonce = await getAdminNonce(page);
+
+    // Ensure a known initial state: banner enabled.
+    await page.request.post(`${WP_BASE}/?rest_route=/faz/v1/settings/`, {
+      headers: { 'X-WP-Nonce': nonce, 'Content-Type': 'application/json' },
+      data: JSON.stringify({ banner_control: { status: true } }),
+    });
+
+    // Navigate to the Banner admin page and wait for banner data to load.
+    await goToBannerPage(page);
+    const bannerNonce = await getAdminNonce(page);
+
+    // Wait for loadBannerEnabledToggle() to complete its FAZ.get('settings')
+    // call and reflect the state we set above (status: true → checked).
+    const toggle = page.locator('#faz-b-enabled');
+    await expect(toggle).toBeVisible({ timeout: 10_000 });
+    await expect(toggle).toBeChecked({ timeout: 10_000 });
+
+    // The faz-toggle-track span overlays the input and intercepts Playwright's
+    // native click, so we use page.evaluate to fire the change event (same
+    // pattern as setToggle used elsewhere in this spec).
+    const setToggleChecked = (checked: boolean) =>
+      page.evaluate((state) => {
+        const cb = document.getElementById('faz-b-enabled') as HTMLInputElement | null;
+        if (cb && cb.checked !== state) {
+          cb.checked = state;
+          cb.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }, checked);
+
+    try {
+      // ── Uncheck: banner_control.status must become false ──
+      await setToggleChecked(false);
+
+      await expect.poll(
+        async () => {
+          const r = await page.request.get(`${WP_BASE}/?rest_route=/faz/v1/settings/`, {
+            headers: { 'X-WP-Nonce': bannerNonce },
+          });
+          const s = (await r.json()) as Record<string, any>;
+          return (s?.banner_control as Record<string, unknown>)?.status;
+        },
+        {
+          timeout: 8_000,
+          message: 'banner_control.status must be false after unchecking the toggle',
+        },
+      ).toBe(false);
+
+      // ── Re-check: banner_control.status must become true ──
+      await setToggleChecked(true);
+
+      await expect.poll(
+        async () => {
+          const r = await page.request.get(`${WP_BASE}/?rest_route=/faz/v1/settings/`, {
+            headers: { 'X-WP-Nonce': bannerNonce },
+          });
+          const s = (await r.json()) as Record<string, any>;
+          return (s?.banner_control as Record<string, unknown>)?.status;
+        },
+        {
+          timeout: 8_000,
+          message: 'banner_control.status must be true after re-checking the toggle',
+        },
+      ).toBe(true);
+    } finally {
+      // Restore: ensure the banner is always enabled after this test.
+      await page.request.post(`${WP_BASE}/?rest_route=/faz/v1/settings/`, {
+        headers: { 'X-WP-Nonce': bannerNonce, 'Content-Type': 'application/json' },
+        data: JSON.stringify({ banner_control: { status: true } }),
       });
     }
   });

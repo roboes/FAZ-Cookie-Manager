@@ -23,6 +23,7 @@ use FazCookie\Includes\Gvl;
 use FazCookie\Includes\Known_Providers;
 use FazCookie\Includes\Cookie_Table_Shortcode;
 use FazCookie\Includes\Cookie_Policy_Shortcode;
+use FazCookie\Includes\Do_Not_Sell_Shortcode;
 use FazCookie\Frontend\Includes\Placeholder_Builder;
 /**
  * The public-facing functionality of the plugin.
@@ -118,6 +119,7 @@ class Frontend {
 		new Banner_Rest();
 		new Cookie_Table_Shortcode();
 		new Cookie_Policy_Shortcode();
+		new Do_Not_Sell_Shortcode();
 		new AMP_Consent();
 		new Translation_Compat();
 		add_action( 'init', array( $this, 'load_banner' ) );
@@ -173,6 +175,17 @@ class Frontend {
 			add_filter( 'rocket_exclude_defer_js', array( $this, 'rocket_exclude_own_scripts' ) );
 			add_filter( 'rocket_delay_js_exclusions', array( $this, 'rocket_exclude_own_scripts' ) );
 			add_filter( 'rocket_minify_excluded_external_js', array( $this, 'rocket_exclude_own_scripts' ) );
+			// `Load JavaScript deferred` wraps any matching inline <script> in a
+			// DOMContentLoaded callback. Our wp_localize_script payload emits a
+			// top-level `var _fazConfig = {...}`; once wrapped the `var` becomes
+			// function-local and `window._fazConfig` is never set, fataling
+			// `_backupNodes` in script.js. Adding the four bootstrap markers to
+			// `rocket_defer_inline_exclusions` short-circuits the wrapping in
+			// `DeferJS::defer_inline_js()` before its jQuery-detection regex
+			// runs (which would otherwise match the `addtoany-jquery` provider
+			// substring inside the localized JSON). Reported by @dominikkucharski
+			// in #95.
+			add_filter( 'rocket_defer_inline_exclusions', array( $this, 'rocket_exclude_own_inline' ) );
 
 			// Autoptimize exclude helper.
 			add_filter( 'autoptimize_filter_js_exclude', array( $this, 'autoptimize_exclude_own_scripts' ) );
@@ -194,6 +207,24 @@ class Frontend {
 		add_filter( 'widget_text', array( $this, 'filter_content_blocking' ), 1000 );
 		add_filter( 'widget_block_content', array( $this, 'filter_content_blocking' ), 1000 );
 		add_filter( 'embed_oembed_html', array( $this, 'filter_oembed_blocking' ), 1000, 2 );
+
+		// Invalidate the cookie-scripts transient whenever a cookie or category is
+		// saved or deleted. Category changes affect slug lookups in _cookieScripts,
+		// so a rename / delete must also clear the map. faz_after_update_settings
+		// and faz_clear_cache are added here for symmetry with the banner-template
+		// cache invalidation in class-template.php: disabling a category via the
+		// Settings UI (or any other settings change that affects the category list)
+		// would otherwise leave the cookie-scripts map stale for up to 12 hours.
+		$invalidate_scripts_map = function() {
+			delete_transient( 'faz_cookie_scripts_map' );
+		};
+		add_action( 'faz_after_update_cookie', $invalidate_scripts_map );
+		add_action( 'faz_after_create_cookie', $invalidate_scripts_map );
+		add_action( 'faz_after_delete_cookie', $invalidate_scripts_map );
+		add_action( 'faz_after_update_cookie_category', $invalidate_scripts_map );
+		add_action( 'faz_after_delete_cookie_category', $invalidate_scripts_map );
+		add_action( 'faz_after_update_settings', $invalidate_scripts_map );
+		add_action( 'faz_clear_cache', $invalidate_scripts_map );
 	}
 
 	/**
@@ -226,8 +257,7 @@ class Frontend {
 		}
 
 		$suffix = $this->get_script_suffix( 'js/script' );
-		if ( false === $this->settings->is_connected() ) {
-			if ( ! $this->template ) {
+		if ( ! $this->template ) {
 				return;
 			}
 			$css = $this->get_boosted_css();
@@ -239,15 +269,14 @@ class Frontend {
 			// inert. Use Customizer → Additional CSS (built-in WordPress)
 			// and target `.faz-consent-container`, `.faz-modal`, etc.
 
-			// Ad-blocker compatibility: use generic handle/var names to avoid filter lists.
-			$faz_settings = $this->get_faz_settings();
-			$alt_asset = ! empty( $faz_settings['banner_control']['alternative_asset_path'] );
+			// Ad-blocker compatibility: serve script inline to avoid URL pattern matching.
+			// The plugin directory name contains "cookie" which triggers filter lists.
+			// The config variable always stays _fazConfig — ad blockers match URLs, not variable names.
+			$faz_settings  = $this->get_faz_settings();
+			$alt_asset     = ! empty( $faz_settings['banner_control']['alternative_asset_path'] );
 			$script_handle = $alt_asset ? 'faz-fw' : $this->plugin_name;
-			$config_var    = $alt_asset ? '_fazCfg' : '_fazConfig';
 
 			if ( $alt_asset ) {
-				// Serve script inline to avoid ad blocker URL pattern matching.
-				// The plugin directory name contains "cookie" which triggers filter lists.
 				$script_path = plugin_dir_path( __FILE__ ) . 'js/script' . $suffix . '.js';
 				wp_register_script( $script_handle, false, array(), $this->version, false );
 				wp_enqueue_script( $script_handle );
@@ -260,19 +289,49 @@ class Frontend {
 				wp_enqueue_script( $script_handle, plugin_dir_url( __FILE__ ) . 'js/script' . $suffix . '.js', array(), $this->version, false );
 			}
 
-			wp_localize_script( $script_handle, $config_var, $this->get_store_data() );
-			if ( $alt_asset ) {
-				// Bridge the alternative config variable to the expected name.
-				wp_add_inline_script( $script_handle, 'window._fazConfig = window._fazCfg;', 'before' );
-			}
+			wp_localize_script( $script_handle, '_fazConfig', $this->get_store_data() );
+
+			// Pre-initialise window.dataLayer so third-party trackers that emit
+			// `dataLayer.push(…)` bare (without the GTM bootstrap that
+			// historically initialises `var dataLayer = dataLayer || []`) do
+			// not throw `ReferenceError: dataLayer is not defined` when the
+			// plugin blocks the GTM bootstrap as a tracker.
+			//
+			// Reported by a publisher on citationstyler.com (LiteSpeed Cache +
+			// gtm4wp): the GTM4WP bootstrap script carries `data-faz-category=
+			// "analytics"` and is held in `type="text/plain"`, so its
+			// `dataLayer = dataLayer || []` never runs; a downstream gtm4wp
+			// push that lacks the blocking attributes still tries
+			// `dataLayer.push(...)` and crashes.
+			//
+			// WP_Scripts emits this inline in the "before" bucket, which
+			// renders AFTER the wp_localize_script "data" bucket (where the
+			// `_fazConfig` blob lives) but BEFORE the main `<script src="…">`
+			// tag. The dataLayer initialiser therefore runs after _fazConfig
+			// is on the page, but ahead of any later inline tags and the
+			// page-level body content where third-party trackers fire — which
+			// is all we need: only the trackers that emit bare `dataLayer.push`
+			// require this guard, and they always render after this point in
+			// the document order.
+			wp_add_inline_script(
+				$script_handle,
+				'window.dataLayer = window.dataLayer || [];',
+				'before'
+			);
 			// Inject template CSS as a proper inline style (nonce-compatible; no unsafe-inline needed).
 			// Utility rules appended AFTER boost_css_specificity() so they are NOT
 			// scoped inside #faz-consent — these classes are used on elements outside
 			// the banner container (consent-bridge iframe, age-gate overlay, blocked embeds).
+			// `_fazAddPlaceholder` inserts `.video-placeholder-{normal,youtube}` next
+			// to blocked iframes (outside #faz-consent), so the scoped template.json
+			// rules never reach them. Without this floor, placeholders for lazy-loaded
+			// iframes (Bricks/Elementor/Divi Video) collapse to 0×0. The 4-ancestor
+			// probe in _fazAddPlaceholder (issue #87) expected this CSS floor.
 			$css .= '.faz-hidden{display:none!important;visibility:hidden!important}'
 				. '.faz-consent-bridge{width:0;height:0;border:0}'
 				. '.faz-age-gate-overlay{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6)}'
-				. '.faz-age-gate-modal{background:#fff;border-radius:8px;padding:24px 32px;max-width:420px;text-align:center}';
+				. '.faz-age-gate-modal{background:#fff;border-radius:8px;padding:24px 32px;max-width:420px;text-align:center}'
+				. '.video-placeholder-normal,.video-placeholder-youtube{min-height:200px;display:flex;align-items:center;justify-content:center;width:100%;max-width:100%;box-sizing:border-box}';
 			$css_handle = $this->plugin_name . '-css';
 			wp_register_style( $css_handle, false, array(), $this->version );
 			wp_enqueue_style( $css_handle );
@@ -287,7 +346,7 @@ class Frontend {
 				$gcm_json = wp_json_encode( $gcm );
 				wp_add_inline_script( $script_handle, 'var _fazGcm = ' . $gcm_json . ';', 'before' );
 				$gcm_suffix = $this->get_script_suffix( 'js/gcm' );
-				$gcm_handle = $this->plugin_name . '-gcm';
+				$gcm_handle = $script_handle . '-gcm';
 				wp_enqueue_script( $gcm_handle, plugin_dir_url( __FILE__ ) . 'js/gcm' . $gcm_suffix . '.js', array( $script_handle ), $this->version, false );
 			}
 
@@ -475,7 +534,6 @@ class Frontend {
 					'checkboxDisabled' => __( '{name} disabled, enable {name}', 'faz-cookie-manager' ),
 				)
 			);
-		}
 		if ( true === $this->is_wpconsentapi_enabled() ) {
 			$handle = $this->plugin_name . '-wca';
 			// Compute the suffix per-file: wca.js and microsoft-consent.js
@@ -545,7 +603,7 @@ class Frontend {
 	 * @return void
 	 */
 	public function insert_styles() {
-		if ( true === $this->settings->is_connected() || true === faz_disable_banner() || is_admin() ) {
+		if ( true === faz_disable_banner() || is_admin() ) {
 			return;
 		}
 		// Use the wider UI-suppressed check: if the banner UI is hidden (e.g.
@@ -568,7 +626,7 @@ class Frontend {
 	 * @return void
 	 */
 	public function load_banner() {
-		if ( true === $this->settings->is_connected() || true === faz_disable_banner() ) {
+		if ( true === faz_disable_banner() ) {
 			return;
 		}
 		// NOTE: We deliberately do NOT check is_banner_ui_suppressed() here.
@@ -964,6 +1022,18 @@ class Frontend {
 		}
 		$store['_cookieCategoryMap'] = $cookie_category_map;
 
+		// Per-cookie opt-in/opt-out scripts grouped by category slug.
+		// Only populated when at least one cookie has a script defined.
+		// Result is cached in a transient (12h) and invalidated on cookie saves.
+		$cookie_scripts = get_transient( 'faz_cookie_scripts_map' );
+		if ( false === $cookie_scripts ) {
+			$cookie_scripts = $this->build_cookie_scripts_map();
+			set_transient( 'faz_cookie_scripts_map', $cookie_scripts, HOUR_IN_SECONDS * 12 );
+		}
+		if ( ! empty( $cookie_scripts ) ) {
+			$store['_cookieScripts'] = $cookie_scripts;
+		}
+
 		// Age gate (GDPR Art. 8).
 		$age_gate = array(
 			'enabled' => ! empty( $settings['age_gate']['enabled'] ),
@@ -1046,6 +1116,108 @@ class Frontend {
 
 		return $store;
 	}
+
+	/**
+	 * Build the per-cookie opt-in/opt-out script map grouped by category slug.
+	 *
+	 * Replaces a previously unbounded LIKE+LIMIT 500 query that silently
+	 * dropped rows beyond the cap. The new shape:
+	 *   - paged ORDER BY cookie_id, 1000 rows per page (stable, deterministic)
+	 *   - hard ceiling of 10,000 rows (defends against runaway tables)
+	 *   - LIKE patterns anchored on the JSON KEY form (`"opt_in_script":`)
+	 *     to eliminate false positives where the literal string appears
+	 *     inside a description or comment
+	 *   - error_log() warning if the ceiling is hit so publishers can see
+	 *     it in the PHP error log instead of silently losing scripts.
+	 *
+	 * Result is cached by the caller in a 12h transient and invalidated
+	 * on cookie saves / category renames (see Cookies module hooks).
+	 *
+	 * @return array<string, array{opt_in: string[], opt_out: string[]}>
+	 */
+	private function build_cookie_scripts_map() {
+		global $wpdb;
+
+		$cookie_scripts = array();
+		$max_rows       = 10000; // hard ceiling to bound worst-case scans
+		$page_size      = 1000;
+		$last_id        = 0;
+		$scanned        = 0;
+		$ceiling_hit    = false;
+
+		// LIKE patterns anchored on the JSON-key form (`"opt_in_script":"...`)
+		// so a description containing the literal text "opt_in_script" cannot
+		// false-positive into the result set. json_decode() below remains the
+		// authoritative parser; LIKE only narrows the rows we have to decode.
+		$like_opt_in  = '%"opt_in_script":"%';
+		$like_opt_out = '%"opt_out_script":"%';
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- custom tables, table-prefix interpolation only; values bound via $wpdb->prepare(); result used only for inline JS config, not rendered as HTML; outer transient provides caching.
+		do {
+			$rows = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT c.cookie_id, c.meta, cat.slug AS category_slug
+					 FROM {$wpdb->prefix}faz_cookies c
+					 INNER JOIN {$wpdb->prefix}faz_cookie_categories cat ON c.category = cat.category_id
+					 WHERE c.cookie_id > %d
+					   AND ( c.meta LIKE %s OR c.meta LIKE %s )
+					 ORDER BY c.cookie_id ASC
+					 LIMIT %d",
+					$last_id,
+					$like_opt_in,
+					$like_opt_out,
+					$page_size
+				)
+			);
+
+			if ( empty( $rows ) ) {
+				break;
+			}
+
+			foreach ( $rows as $row ) {
+				$last_id = (int) $row->cookie_id;
+				++$scanned;
+
+				$meta     = json_decode( $row->meta, true );
+				$cat_slug = sanitize_key( $row->category_slug );
+				if ( ! is_array( $meta ) || ! $cat_slug ) {
+					continue;
+				}
+				if ( ! isset( $cookie_scripts[ $cat_slug ] ) ) {
+					$cookie_scripts[ $cat_slug ] = array( 'opt_in' => array(), 'opt_out' => array() );
+				}
+				if ( ! empty( $meta['opt_in_script'] ) ) {
+					$cookie_scripts[ $cat_slug ]['opt_in'][] = (string) $meta['opt_in_script'];
+				}
+				if ( ! empty( $meta['opt_out_script'] ) ) {
+					$cookie_scripts[ $cat_slug ]['opt_out'][] = (string) $meta['opt_out_script'];
+				}
+
+				if ( $scanned >= $max_rows ) {
+					$ceiling_hit = true;
+					break 2;
+				}
+			}
+		} while ( count( $rows ) === $page_size );
+		// phpcs:enable
+
+		if ( $ceiling_hit ) {
+			// Surface truncation in PHP error log so publishers can detect
+			// the cap was reached and act (split categories, prune unused
+			// cookies, etc.). Intentionally not a user-facing notice — this
+			// runs on every front-end page render path.
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+			error_log(
+				sprintf(
+					'[faz-cookie-manager] build_cookie_scripts_map: hit hard ceiling of %d rows; additional cookies with opt_in_script/opt_out_script were NOT loaded. Review wp_faz_cookies size.',
+					$max_rows
+				)
+			);
+		}
+
+		return $cookie_scripts;
+	}
+
 	/**
 	 * Return cookie domain.
 	 *
@@ -1325,6 +1497,61 @@ class Frontend {
 		// so site owners can diagnose and raise pcre.backtrack_limit if needed.
 		$pcre_failed = false;
 
+		// Block tracking pixel <img> inside <noscript> FIRST — BEFORE the stash.
+		// Meta Pixel, GA, Adobe Analytics etc. embed `<img>` beacons inside
+		// `<noscript>` blocks for JS-disabled visitors; those still need to be
+		// consent-gated server-side. process_noscript_tag rewrites the
+		// `<noscript>` block's inner content (img src → data-faz-src + data-faz-
+		// category) but preserves the enclosing `<noscript>` wrapper, so the
+		// stash pass below still finds the (now-processed) block and protects
+		// it from the iframe filter. Running this BEFORE the stash keeps the
+		// matcher's `<noscript>` lookup productive — the original placement
+		// AFTER the stash made this step dead code because every `<noscript>`
+		// had already been replaced with a `__FAZ_NOSCRIPT_STASH_N__` marker.
+		if ( false !== stripos( $html, '<noscript' ) ) {
+			$result = preg_replace_callback(
+				'#<noscript\b[^>]*>(.*?)</noscript>#is',
+				function ( $m ) use ( $providers, $blocked_categories ) {
+					return $this->process_noscript_tag( $m, $providers, $blocked_categories );
+				},
+				$html
+			);
+			if ( null === $result ) {
+				$pcre_failed = true;
+			} else {
+				$html = $result;
+			}
+		}
+
+		// Stash <noscript> blocks BEFORE running the script/iframe/link filters.
+		// <noscript> content only renders when JS is disabled; visitors with JS
+		// (>99% case) never see it. Without stashing, an iframe wrapped in
+		// <noscript> (e.g. theme's "video fallback for non-JS users") would be
+		// rewritten by process_iframe_tag into a consent placeholder that lives
+		// forever in the DOM as a 0×0 phantom — invisible to humans, but found
+		// by document.querySelector. The phantom collides with
+		// `_fazAddPlaceholder()` placeholders for legitimate dynamic iframes
+		// and breaks any `.first()`-style locator. Restore after all filters.
+		// (The tracking-pixel pass above runs FIRST so its noscript matcher is
+		// not defeated by the markers this stash introduces.)
+		$noscript_stash = array();
+		if ( false !== stripos( $html, '<noscript' ) ) {
+			$stash_result = preg_replace_callback(
+				'#<noscript\b[^>]*>.*?</noscript>#is',
+				function ( $m ) use ( &$noscript_stash ) {
+					$key = '__FAZ_NOSCRIPT_STASH_' . count( $noscript_stash ) . '__';
+					$noscript_stash[ $key ] = $m[0];
+					return $key;
+				},
+				$html
+			);
+			if ( null === $stash_result ) {
+				$pcre_failed = true;
+			} else {
+				$html = $stash_result;
+			}
+		}
+
 		// 1. Block <script> tags.
 		if ( false !== stripos( $html, '<script' ) ) {
 			$result = preg_replace_callback(
@@ -1357,21 +1584,9 @@ class Frontend {
 			}
 		}
 
-		// 3. Block tracking pixel <img> inside <noscript> (Meta Pixel, etc.).
-		if ( false !== stripos( $html, '<noscript' ) ) {
-			$result = preg_replace_callback(
-				'#<noscript\b[^>]*>(.*?)</noscript>#is',
-				function ( $m ) use ( $providers, $blocked_categories ) {
-					return $this->process_noscript_tag( $m, $providers, $blocked_categories );
-				},
-				$html
-			);
-			if ( null === $result ) {
-				$pcre_failed = true;
-			} else {
-				$html = $result;
-			}
-		}
+		// 3. (Moved above the stash — see "Block tracking pixel <img> inside
+		//     <noscript>" earlier in this method. Keeping the step-number gap
+		//     to avoid renumbering the rest of the pipeline.)
 
 		// 4. Block <link rel="stylesheet"> (Google Fonts, Adobe Fonts, etc.).
 		if ( false !== stripos( $html, '<link' ) ) {
@@ -1425,6 +1640,11 @@ class Frontend {
 			@ini_set( 'pcre.recursion_limit', (string) $old_recursion ); // phpcs:ignore WordPress.PHP.NoSilencedErrors,Squiz.PHP.DiscouragedFunctions.Discouraged -- restoring the original PCRE recursion_limit value (paired with the temporary raise above).
 		}
 
+		// Restore <noscript> blocks we stashed before the filter pass.
+		if ( ! empty( $noscript_stash ) ) {
+			$html = strtr( $html, $noscript_stash );
+		}
+
 		return $html;
 	}
 
@@ -1440,6 +1660,11 @@ class Frontend {
 		$attrs   = $m[1];
 		$content = $m[2];
 		$full    = $m[0];
+
+		$id = $this->extract_tag_attr( $attrs, 'id' );
+		if ( $this->is_own_inline_script_id( $id ) ) {
+			return $full;
+		}
 
 		// Never block whitelisted scripts.
 		if ( $this->is_whitelisted( $attrs, $content ) ) {
@@ -1747,7 +1972,30 @@ class Frontend {
 			return false !== strpos( ltrim( strtolower( $value ), '/' ), ltrim( strtolower( $pattern ), '/' ) );
 		}
 
-		return false !== stripos( $value, $pattern );
+		// Class and ID values: split by whitespace and require an exact token
+		// match so that pattern "analytics" does not match "faz-analytics-helper".
+		// Also allow hyphen-prefix matching so "faz-cookie-manager" matches
+		// WordPress-generated IDs like "faz-cookie-manager-js-extra" (the
+		// wp_localize_script suffix added automatically by WP core).
+		$tokens        = preg_split( '/\s+/', strtolower( $value ), -1, PREG_SPLIT_NO_EMPTY );
+		$lower_pattern = strtolower( $pattern );
+		$is_prefix     = preg_match( '/[-_]$/', $lower_pattern );
+
+		foreach ( $tokens as $token ) {
+			if ( $token === $lower_pattern ) {
+				return true;
+			}
+			if ( $is_prefix ) {
+				if ( 0 === strpos( $token, $lower_pattern ) ) {
+					return true;
+				}
+			} else {
+				if ( 0 === strpos( $token, $lower_pattern . '-' ) || 0 === strpos( $token, $lower_pattern . '_' ) ) {
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -1763,6 +2011,7 @@ class Frontend {
 		// ── Core infrastructure: WordPress, jQuery, and our own scripts ──
 		$whitelist = array(
 			'faz-cookie-manager',
+			'faz-fw',    // alt-asset mode handle (ad-blocker compatibility)
 			'fazcookie',
 			'fazBannerTemplate',
 			'wp-includes/',
@@ -2769,7 +3018,7 @@ class Frontend {
 			?? array();
 		$data['config']['categoryPreview']['status']  = $config['categoryPreview']['status'] ?? false;
 		$data['config']['categoryPreview']['toggle']  = $config['categoryPreview']['elements']['toggle'] ?? array();
-		$data['config']['videoPlaceholder']['status'] = $config['videoPlaceholder']['status'] ?? false;
+		$data['config']['videoPlaceholder']['status'] = $config['videoPlaceholder']['status'] ?? true;
 		$data['config']['videoPlaceholder']['styles'] = array_merge( $config['videoPlaceholder']['styles'] ?? array(), $config['videoPlaceholder']['elements']['title']['styles'] ?? array() );
 		$data['config']['readMore']                   = $config['notice']['elements']['buttons']['elements']['readMore'] ?? array();
 		$data['config']['showMore']                    = $config['accessibilityOverrides']['elements']['preferenceCenter']['elements']['showMore'] ?? array();
@@ -3159,7 +3408,35 @@ class Frontend {
 		if ( 'faz-fw' === $handle || 0 === strpos( $handle, 'faz-fw-' ) ) {
 			return true;
 		}
+		// Shortcode-specific handles that don't carry the plugin-name prefix.
+		foreach ( array( 'faz-dsar-form', 'faz-dnsmpi-form' ) as $owned_handle ) {
+			if ( $handle === $owned_handle || 0 === strpos( $handle, $owned_handle . '-' ) ) {
+				return true;
+			}
+		}
 		return false;
+	}
+
+	/**
+	 * Detect WP-generated inline script IDs owned by this plugin.
+	 *
+	 * Core appends these suffixes when printing `wp_localize_script()`,
+	 * translations, and before/after inline payloads. The output-buffer
+	 * fallback only sees the rendered `id`, so recover the registered handle
+	 * before applying the own-handle guard.
+	 *
+	 * @param string $id Inline script tag ID.
+	 * @return bool
+	 */
+	private function is_own_inline_script_id( $id ) {
+		if ( ! is_string( $id ) || '' === $id ) {
+			return false;
+		}
+		$handle = preg_replace( '/-js-(extra|translations|before|after)$/', '', $id );
+		if ( $handle === $id || ! is_string( $handle ) ) {
+			return false;
+		}
+		return $this->is_own_script_handle( $handle );
 	}
 
 	/**
@@ -3256,12 +3533,7 @@ class Frontend {
 		if ( '' === $id ) {
 			return $attributes;
 		}
-		$handle = preg_replace( '/-js-(extra|translations|before|after)$/', '', $id );
-		if ( $handle === $id || ! is_string( $handle ) ) {
-			// No matching suffix — not a WP-managed inline-script id we own.
-			return $attributes;
-		}
-		if ( ! $this->is_own_script_handle( $handle ) ) {
+		if ( ! $this->is_own_inline_script_id( $id ) ) {
 			return $attributes;
 		}
 		// Skip if pre-consent blocking has already neutralised the tag.
@@ -3379,6 +3651,26 @@ class Frontend {
 	}
 
 	/**
+	 * WP Rocket inline-content exclude callback. Matches against substrings
+	 * inside inline <script> bodies so DeferJS skips wrapping any tag that
+	 * carries our bootstrap markers.
+	 *
+	 * @param array $excluded Existing inline-content exclusion patterns.
+	 * @return array
+	 */
+	public function rocket_exclude_own_inline( $excluded ) {
+		if ( ! is_array( $excluded ) ) {
+			$excluded = array();
+		}
+		foreach ( array( '_fazConfig', '_fazCfg', '_fazGcm', '_fazTcfConfig' ) as $needle ) {
+			if ( ! in_array( $needle, $excluded, true ) ) {
+				$excluded[] = $needle;
+			}
+		}
+		return $excluded;
+	}
+
+	/**
 	 * Autoptimize exclude callback — accepts a comma-separated string.
 	 *
 	 * @param string $excludes Comma-joined exclusion list.
@@ -3483,6 +3775,16 @@ class Frontend {
 			return $tag;
 		}
 		if ( true === faz_disable_banner() || $this->is_banner_disabled_by_settings() || $this->is_blocking_disabled_for_page() ) {
+			return $tag;
+		}
+		// Guard: never block FAZ's own localize/translation/config inline scripts.
+		// wp_localize_script() emits a <script id="faz-cookie-manager-js-extra"> tag
+		// whose content includes category slugs like "analytics" — which would otherwise
+		// be matched by the provider pattern and blocked, preventing window._fazConfig
+		// from being defined and crashing the entire banner.
+		// The handle covers WP 6.3+; the ID-derived check covers WP 5.7-6.2
+		// and the output-buffer fallback's rendered IDs.
+		if ( $this->is_own_script_handle( $handle ) || $this->is_own_inline_script_id( $id ) ) {
 			return $tag;
 		}
 		// Extract attributes and inline content separately so the whitelist
