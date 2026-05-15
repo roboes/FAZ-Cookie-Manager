@@ -434,6 +434,12 @@ class Admin {
 					'saveFailed'               => __( 'Failed to save settings.', 'faz-cookie-manager' ),
 					'loadFailed'               => __( 'Failed to load settings.', 'faz-cookie-manager' ),
 					'confirmDelete'            => __( 'Are you sure you want to delete this?', 'faz-cookie-manager' ),
+					// Banner page — banner-status toggle (loadBannerEnabledToggle).
+					'banner'                   => array(
+						'enabled'      => __( 'Cookie banner enabled.', 'faz-cookie-manager' ),
+						'disabled'     => __( 'Cookie banner disabled.', 'faz-cookie-manager' ),
+						'toggleFailed' => __( 'Failed to update banner status.', 'faz-cookie-manager' ),
+					),
 					// Cookies page.
 					'cookies'                  => array(
 						// Cookie modal field labels (issue #97 — these used to be

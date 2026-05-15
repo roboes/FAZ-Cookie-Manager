@@ -21,6 +21,27 @@ defined( 'ABSPATH' ) || exit;
 
 	<!-- ─── General ─────────────────────────────────────── -->
 	<div id="tab-general" class="faz-tab-panel active">
+
+		<div class="faz-card">
+			<div class="faz-card-header"><h3><?php esc_html_e( 'Banner Status', 'faz-cookie-manager' ); ?></h3></div>
+			<div class="faz-card-body">
+				<div class="faz-form-group">
+					<label class="faz-toggle">
+						<input type="checkbox" id="faz-b-enabled">
+						<span class="faz-toggle-track"></span>
+						<span class="faz-toggle-label"><?php esc_html_e( 'Enable cookie banner', 'faz-cookie-manager' ); ?></span>
+					</label>
+					<div class="faz-help"><?php
+						/* translators: %s: link to the Settings page where the same toggle can also be found. */
+						printf(
+							esc_html__( 'When disabled, the cookie consent banner will not appear on your site and no scripts will be blocked. This is the same setting available under %s.', 'faz-cookie-manager' ),
+							'<a href="' . esc_url( admin_url( 'admin.php?page=faz-cookie-manager-settings' ) ) . '">' . esc_html__( 'Settings → Banner Control', 'faz-cookie-manager' ) . '</a>'
+						);
+					?></div>
+				</div>
+			</div>
+		</div>
+
 		<div class="faz-card">
 			<div class="faz-card-header"><h3><?php esc_html_e( 'Design Presets', 'faz-cookie-manager' ); ?></h3></div>
 			<div class="faz-card-body">
