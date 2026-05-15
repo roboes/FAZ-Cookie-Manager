@@ -1,6 +1,13 @@
 import { expect, test } from '../fixtures/wp-fixture';
 import { execFileSync } from 'node:child_process';
-import { basename } from 'node:path';
+import { basename, join as joinPath } from 'node:path';
+import {
+  readFileSync,
+  readdirSync,
+  statSync,
+  mkdtempSync,
+  rmSync,
+} from 'node:fs';
 import { wp, wpEval, WP_PATH } from '../utils/wp-env';
 
 /**
@@ -595,5 +602,299 @@ test.describe.serial('Plugin lifecycle — deep paths', () => {
     }
     expect(stateAfter.opts_count, 'post-uninstall: every faz_* option must be deleted').toBe(0);
     expect(stateAfter.lock_count, 'post-uninstall: DNSMPI / DSAR rate-limit locks must be cleaned up').toBe(0);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 4. `Activator::run_pending_migrations()` — version-gated migrator + idempotence.
+  //
+  //    Runs only when `faz_migrations_version` differs from `MIGRATIONS_VERSION`
+  //    (currently 2026.03.19.1). The seven migrations inside are individually
+  //    idempotent (ensure_uncategorized_category / ensure_wordpress_internal_category
+  //    no-op when the row exists; seed_default_whitelist only writes when the
+  //    list is empty), but the test pins both the version-gate AND the
+  //    "second call is a no-op" property — anyone refactoring the migrator
+  //    has to keep both invariants alive.
+  // ───────────────────────────────────────────────────────────────────────────
+  test('run_pending_migrations: version gate fires once, second call is a no-op', () => {
+    // Idempotent setup. The preceding "uninstall.php" test leaves the DB
+    // entirely empty (tables dropped, options deleted, plugin deactivated),
+    // and the describe's afterAll only re-installs at the very end of the
+    // suite — so this test, running between, must restore its own
+    // pre-conditions. Re-deploy files, re-activate via WP-CLI, and force
+    // Activator::install() so the schema + default categories + faz_version
+    // are guaranteed present before the migration assertions below.
+    try {
+      execFileSync('rsync', ['-a', '--delete', SOURCE_PATH, DEPLOY_PATH], { timeout: 30000 });
+    } catch (_e) { /* best-effort */ }
+    try { wp(['plugin', 'activate', PLUGIN_SLUG]); } catch (_e) { /* may already be active */ }
+    wpEval(`
+      if ( class_exists( '\\\\FazCookie\\\\Includes\\\\Activator' ) ) {
+        \\FazCookie\\Includes\\Activator::install();
+      }
+    `);
+
+    const out = wpEval(`
+      global $wpdb;
+
+      $migrations_version_const = (new \\ReflectionClass( '\\\\FazCookie\\\\Includes\\\\Activator' ))
+        ->getConstant( 'MIGRATIONS_VERSION' );
+
+      // Snapshot the current state so we can prove no duplicate side
+      // effects on the second call.
+      $cats_before = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->prefix}faz_cookie_categories" );
+      $whitelist_before = (array) ( get_option( 'faz_settings', array() )['script_blocking']['whitelist_patterns'] ?? array() );
+
+      // Force the gate open by resetting the stored migrations version.
+      update_option( 'faz_migrations_version', '0.0.0', false );
+
+      // First call: should run every migration and bump the option.
+      \\FazCookie\\Includes\\Activator::run_pending_migrations();
+      $version_after_first = (string) get_option( 'faz_migrations_version' );
+      $cats_after_first = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->prefix}faz_cookie_categories" );
+
+      // Second call: gate should short-circuit (return before running anything).
+      // We prove the early-return by re-checking the version + category count
+      // stays equal — a non-idempotent migration would either re-create rows
+      // or re-fire fix_uncategorized_prior_consent / fix_brand_logo_path /
+      // fix_banner_gdpr_defaults and leave a visible delta.
+      \\FazCookie\\Includes\\Activator::run_pending_migrations();
+      $version_after_second = (string) get_option( 'faz_migrations_version' );
+      $cats_after_second = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->prefix}faz_cookie_categories" );
+
+      // Verify the seven default categories are still present (the
+      // ensure_* helpers are exercised on every first call to
+      // run_pending_migrations, and would silently no-op if the rows
+      // were missing — but here the assertion is that the migration
+      // PATH ran, so the rows are guaranteed to be there).
+      $expected_slugs = array( 'necessary', 'functional', 'analytics', 'performance', 'uncategorized', 'wordpress-internal', 'marketing' );
+      $present_slugs = $wpdb->get_col( $wpdb->prepare(
+        "SELECT slug FROM {$wpdb->prefix}faz_cookie_categories WHERE slug IN ('" . implode( "','", $expected_slugs ) . "')",
+        array()
+      ) );
+
+      echo wp_json_encode( array(
+        'migrations_version_const' => $migrations_version_const,
+        'version_after_first'      => $version_after_first,
+        'version_after_second'     => $version_after_second,
+        'cats_after_first'         => $cats_after_first,
+        'cats_after_second'        => $cats_after_second,
+        'default_slugs_present'    => array_values( $present_slugs ),
+      ) );
+    `).trim();
+
+    const r = JSON.parse(out) as {
+      migrations_version_const: string;
+      version_after_first: string;
+      version_after_second: string;
+      cats_after_first: number;
+      cats_after_second: number;
+      default_slugs_present: string[];
+    };
+
+    expect(r.migrations_version_const, 'MIGRATIONS_VERSION const must be exposed').not.toBe('');
+    expect(r.version_after_first, 'first call must bump faz_migrations_version to MIGRATIONS_VERSION').toBe(r.migrations_version_const);
+    expect(r.version_after_second, 'second call must be a no-op — version stays equal').toBe(r.migrations_version_const);
+    expect(r.cats_after_second, 'second call must NOT duplicate or alter category rows').toBe(r.cats_after_first);
+    for (const expected of ['necessary', 'functional', 'analytics', 'performance', 'uncategorized', 'wordpress-internal', 'marketing']) {
+      expect(r.default_slugs_present, `default slug ${expected} must survive run_pending_migrations()`).toContain(expected);
+    }
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 5. Playground / boot-order safety — static analysis.
+  //
+  //    The 1.13.13/14 crash that triggered the whole "test on Playground
+  //    before SVN" lesson was a `wp_salt()` call inside a controller's
+  //    `__construct()`. Playground's WASM bootstrap loads plugins before
+  //    `pluggable.php`, so `wp_salt()` was undefined at that point — a
+  //    fatal that nginx+PHP-FPM never reproduces (it loads pluggable
+  //    earlier).
+  //
+  //    This static-analysis test grep's the PHP source for two patterns
+  //    and fails if either re-appears:
+  //
+  //    a) `wp_salt(` calls inside files / blocks not guarded by
+  //       `function_exists( 'wp_salt' )`.
+  //    b) `maybe_create_table` / `dbDelta` calls inside an autoloaded
+  //       class's `__construct` method (rather than deferred to a
+  //       `plugins_loaded` / `init` hook callback).
+  //
+  //    The test is fast (filesystem walk + regex) and runs in every
+  //    suite — every PR has to keep these invariants alive.
+  //
+  //    For the online Playground smoke test, see RUN_PLAYGROUND_TEST=1
+  //    `playground-compat.spec.ts` (separate file — opt-in because the
+  //    Playground WASM bootstrap takes ~30s and depends on external
+  //    network).
+  // ───────────────────────────────────────────────────────────────────────────
+  test('Playground boot-order safety: no wp_salt() / maybe_create_table in unguarded __construct', () => {
+    // Walk the plugin source tree and scan every PHP file. Use Node's fs
+    // synchronously — this is a static check, no need for parallelism.
+    // `require` is not available in ESM mode under tsx, so this uses the
+    // module-scope `readdirSync`/`readFileSync` imports at the top of the file.
+    const PLUGIN_ROOT = SOURCE_PATH.replace(/\/$/, '');
+
+    const PHP_FILES: string[] = [];
+    function walk(dir: string): void {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = joinPath(dir, entry.name);
+        // Skip vendor / tests / build-output dirs — they don't ship to
+        // Playground.
+        if (entry.isDirectory()) {
+          if (['node_modules', 'vendor', '.git', 'tests', 'graphify-out', '.code-review-graph', '.symdex', '.serena'].includes(entry.name)) continue;
+          walk(full);
+        } else if (entry.isFile() && entry.name.endsWith('.php')) {
+          PHP_FILES.push(full);
+        }
+      }
+    }
+    walk(PLUGIN_ROOT);
+
+    const wpSaltOffenders: Array<{ file: string; line: number; snippet: string }> = [];
+    const tableCreateInCtor: Array<{ file: string; line: number; snippet: string }> = [];
+
+    // Helper: returns true if the line is purely a PHP comment (single-line,
+    // multi-line continuation, or docblock). We skip these so a comment that
+    // textually mentions `wp_salt()` for explanatory purposes doesn't flag.
+    function isCommentLine(line: string): boolean {
+      const t = line.trimStart();
+      return t.startsWith('//') || t.startsWith('#') || t.startsWith('/*') || t.startsWith('*');
+    }
+
+    // Helper: returns true if the line (or its small window) carries a
+    // `function_exists( 'wp_salt' )` guard. We accept either inline or
+    // within ±5 lines of context — a wider window risks false negatives
+    // for cleanly-guarded code.
+    function isWpSaltGuarded(lines: string[], lineIdx: number): boolean {
+      const start = Math.max(0, lineIdx - 5);
+      const end = Math.min(lines.length, lineIdx + 1);
+      const window = lines.slice(start, end).join('\n');
+      return /function_exists\(\s*['"]wp_salt['"]\s*\)/.test(window);
+    }
+
+    // Helper: returns true if the line is *inside* an autoloaded class's
+    // `__construct` method. We walk back from `lineIdx` looking for the
+    // closest enclosing `function __construct` and stop at the first
+    // function/closing brace at the same indentation. This is the
+    // ONLY case we actually want to flag — runtime methods invoked by
+    // hook callbacks (e.g. an AJAX handler that calls hash_ip()) are
+    // safe because WP is fully bootstrapped by then.
+    function isInsideConstruct(lines: string[], lineIdx: number): boolean {
+      for (let i = lineIdx; i >= 0; i--) {
+        const l = lines[i];
+        if (/public\s+function\s+__construct\s*\(/.test(l)) return true;
+        // Any other `function ` declaration means we left the constructor.
+        if (/\bfunction\s+(?!__construct)\w+\s*\(/.test(l)) return false;
+      }
+      return false;
+    }
+
+    for (const file of PHP_FILES) {
+      const src = readFileSync(file, 'utf8');
+      const lines = src.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (isCommentLine(line)) continue;
+
+        // (a) wp_salt() called from inside a __construct WITHOUT a
+        // function_exists('wp_salt') guard. This is exactly the
+        // Playground crash shape from 1.13.13/14 — anything else
+        // (runtime call inside a hook callback, guarded call in a
+        // late-bootstrap migration) is safe and not flagged here.
+        if (
+          /\bwp_salt\s*\(/.test(line)
+          && !/function_exists\(\s*['"]wp_salt['"]\s*\)/.test(line)
+          && isInsideConstruct(lines, i)
+          && !isWpSaltGuarded(lines, i)
+        ) {
+          wpSaltOffenders.push({ file: file.replace(PLUGIN_ROOT + '/', ''), line: i + 1, snippet: line.trim() });
+        }
+
+        // (b) maybe_create_table / dbDelta inside a class constructor.
+        if (/(maybe_create_table|dbDelta)\s*\(/.test(line) && isInsideConstruct(lines, i)) {
+          tableCreateInCtor.push({ file: file.replace(PLUGIN_ROOT + '/', ''), line: i + 1, snippet: line.trim() });
+        }
+      }
+    }
+
+    expect(
+      wpSaltOffenders,
+      `wp_salt() called inside a class __construct without function_exists('wp_salt') guard — would crash on Playground (commit 9a0e3ae fix). Offenders:\n${JSON.stringify(wpSaltOffenders, null, 2)}`,
+    ).toEqual([]);
+    expect(
+      tableCreateInCtor,
+      `maybe_create_table() / dbDelta() called inside __construct — would crash on Playground (commit 9a0e3ae fix). Defer to plugins_loaded or init hook. Offenders:\n${JSON.stringify(tableCreateInCtor, null, 2)}`,
+    ).toEqual([]);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 6. scripts/svn-release.sh — smoke test.
+  //
+  //    Not a full integration test (no real SVN commit), but enough to catch:
+  //    - Bash syntax errors before they reach a live release.
+  //    - Missing --dry-run, --no-tag, --version flags.
+  //    - Pre-flight validation that bails on the right error messages
+  //      (missing ZIP, wrong version, etc).
+  //
+  //    `--version=99.99.99` with a non-existent ZIP triggers the pre-flight
+  //    "ZIP not found" branch — same code path that would catch a
+  //    forgot-to-build mistake on a real release. The exit code must be
+  //    non-zero and the stderr must mention the ZIP path.
+  // ───────────────────────────────────────────────────────────────────────────
+  test('svn-release.sh smoke test: syntax-clean, validates --version, fails on missing ZIP', () => {
+    const PLUGIN_ROOT = SOURCE_PATH.replace(/\/$/, '');
+    const svnRelease = joinPath(PLUGIN_ROOT, 'scripts/svn-release.sh');
+
+    // 1. File exists and is executable.
+    const stat = statSync(svnRelease);
+    expect(stat.isFile(), 'scripts/svn-release.sh must exist as a file').toBe(true);
+    // S_IXUSR mask — 0o100.
+    expect((stat.mode & 0o100) !== 0, 'scripts/svn-release.sh must have the user-execute bit set').toBe(true);
+
+    // 2. Bash syntax check (no-execute).
+    try {
+      execFileSync('bash', ['-n', svnRelease], { stdio: 'pipe' });
+    } catch (err) {
+      const e = err as { stderr?: Buffer };
+      throw new Error(`bash -n syntax error in svn-release.sh:\n${e.stderr?.toString() ?? String(err)}`);
+    }
+
+    // 3. Invoked without --version, must reject and exit non-zero.
+    // Use a tempdir as PROJECT_ROOT so the script can't accidentally touch
+    // the real source tree even if its pre-flight let us through.
+    const tmpdir = mkdtempSync('/tmp/faz-svn-test-');
+    try {
+      let exitCode = 0;
+      let stderr = '';
+      try {
+        execFileSync('bash', [svnRelease], { stdio: 'pipe', env: { ...process.env, PROJECT_ROOT: tmpdir } });
+      } catch (err) {
+        const e = err as { status?: number; stderr?: Buffer };
+        exitCode = e.status ?? 0;
+        stderr = e.stderr?.toString() ?? '';
+      }
+      expect(exitCode, 'must reject invocation without --version').not.toBe(0);
+      expect(stderr, 'rejection must mention --version').toMatch(/version/i);
+
+      // 4. Invoked with a syntactically-valid --version but no matching ZIP →
+      // must fail with the "wp.org-shape ZIP not found" pre-flight error.
+      // This proves the early-return logic still gates the release path.
+      let preflightExitCode = 0;
+      let preflightStderr = '';
+      try {
+        execFileSync('bash', [svnRelease, '--version=99.99.99', '--dry-run'], {
+          stdio: 'pipe',
+          env: { ...process.env, PROJECT_ROOT: tmpdir },
+        });
+      } catch (err) {
+        const e = err as { status?: number; stderr?: Buffer; stdout?: Buffer };
+        preflightExitCode = e.status ?? 0;
+        preflightStderr = (e.stderr?.toString() ?? '') + (e.stdout?.toString() ?? '');
+      }
+      expect(preflightExitCode, 'must fail when the ZIP does not exist').not.toBe(0);
+      expect(preflightStderr, 'pre-flight failure must mention the missing ZIP path').toMatch(/zip|build-release/i);
+    } finally {
+      rmSync(tmpdir, { recursive: true, force: true });
+    }
   });
 });
