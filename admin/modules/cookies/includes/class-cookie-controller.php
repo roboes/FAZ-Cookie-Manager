@@ -333,6 +333,16 @@ class Cookie_Controller extends Base_Controller {
 		if ( false === $result ) {
 			return false;
 		}
+		// 0 === $result is "no row matched" (the caller passed an id that does
+		// not exist in wp_faz_cookies). Skip the cache flush + after-delete
+		// action in that case — emitting `faz_after_delete_cookie` for a
+		// non-event would wake up every listener (Category_Controller cache
+		// invalidation, IAB unmatched-vendor canary, page-cache plugin purge,
+		// …) for nothing, and the cache invalidations are NOT free at the
+		// thousand-cookie scale this plugin ships with.
+		if ( 0 === $result ) {
+			return 0;
+		}
 		$this->delete_cache();
 		do_action( 'faz_after_delete_cookie' );
 	}

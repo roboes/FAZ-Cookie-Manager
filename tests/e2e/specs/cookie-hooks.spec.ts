@@ -137,7 +137,7 @@ test.describe('Cookie lifecycle hooks (F006)', () => {
     // Create a fresh cookie to bulk-update.
     const cookieId: number = await page.evaluate(async () => {
       const nonce = (window as Record<string, unknown> & { fazConfig?: { api?: { nonce?: string } } }).fazConfig?.api?.nonce ?? '';
-      const cats = await fetch('/?rest_route=/faz/v1/categories/', { headers: { 'X-WP-Nonce': nonce } });
+      const cats = await fetch('/?rest_route=/faz/v1/cookies/categories/', { headers: { 'X-WP-Nonce': nonce } });
       const categories = (await cats.json().catch(() => [])) as Array<{ id: number }>;
       const catId = categories.length > 0 ? categories[0].id : 0;
       const resp = await fetch('/?rest_route=/faz/v1/cookies/', {

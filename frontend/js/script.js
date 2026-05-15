@@ -384,6 +384,12 @@ function _fazInitOperations() {
     if (_fazStoredAction === 'age-gate') {
         _fazStoredAction = null;
         ref._fazConsentStore.set("action", "");
+        // Also drop any per-service `svc.<id>` overrides. Without this,
+        // _fazShouldBlockProvider() gives precedence to a stale `svc.<id>:yes`
+        // entry and unblocks individual services before the visitor has
+        // re-confirmed consent — defeating the "treat age-gate as no-
+        // consent-yet" semantics the branch is built around.
+        _fazClearStoredServiceConsent();
     }
     if (!_fazStoredAction || _fazPreviewEnabled()) {
         _fazShowBanner();

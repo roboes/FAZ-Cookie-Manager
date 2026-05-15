@@ -32,10 +32,20 @@ defined( 'ABSPATH' ) || exit;
 						<span class="faz-toggle-label"><?php esc_html_e( 'Enable cookie banner', 'faz-cookie-manager' ); ?></span>
 					</label>
 					<div class="faz-help"><?php
-						/* translators: %s: link to the Settings page where the same toggle can also be found. */
-						printf(
-							esc_html__( 'When disabled, the cookie consent banner will not appear on your site and no scripts will be blocked. This is the same setting available under %s.', 'faz-cookie-manager' ),
-							'<a href="' . esc_url( admin_url( 'admin.php?page=faz-cookie-manager-settings' ) ) . '">' . esc_html__( 'Settings → Banner Control', 'faz-cookie-manager' ) . '</a>'
+						$faz_settings_link = '<a href="' . esc_url( admin_url( 'admin.php?page=faz-cookie-manager-settings' ) ) . '">'
+							. esc_html__( 'Settings → Banner Control', 'faz-cookie-manager' )
+							. '</a>';
+						echo wp_kses(
+							sprintf(
+								/* translators: %s: HTML <a> link to the Settings page (Banner Control card). */
+								__( 'When disabled, the cookie consent banner will not appear on your site and no scripts will be blocked. This is the same setting available under %s.', 'faz-cookie-manager' ),
+								$faz_settings_link
+							),
+							array(
+								'a' => array(
+									'href' => array(),
+								),
+							)
 						);
 					?></div>
 				</div>

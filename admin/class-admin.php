@@ -434,12 +434,10 @@ class Admin {
 					'saveFailed'               => __( 'Failed to save settings.', 'faz-cookie-manager' ),
 					'loadFailed'               => __( 'Failed to load settings.', 'faz-cookie-manager' ),
 					'confirmDelete'            => __( 'Are you sure you want to delete this?', 'faz-cookie-manager' ),
-					// Banner page — banner-status toggle (loadBannerEnabledToggle).
-					'banner'                   => array(
-						'enabled'      => __( 'Cookie banner enabled.', 'faz-cookie-manager' ),
-						'disabled'     => __( 'Cookie banner disabled.', 'faz-cookie-manager' ),
-						'toggleFailed' => __( 'Failed to update banner status.', 'faz-cookie-manager' ),
-					),
+					// (banner-status toggle strings live in the consolidated 'banner'
+				// sub-array further down — kept together to avoid PHP's last-key-wins
+				// silently dropping these entries when a later `'banner' => array(…)`
+				// is appended in the same parent array.)
 					// Cookies page.
 					'cookies'                  => array(
 						// Cookie modal field labels (issue #97 — these used to be
@@ -526,6 +524,10 @@ class Admin {
 						'loadFailed'               => __( 'Failed to load banner settings.', 'faz-cookie-manager' ),
 						'saved'                    => __( 'Banner settings saved.', 'faz-cookie-manager' ),
 						'saveFailed'               => __( 'Failed to save banner settings.', 'faz-cookie-manager' ),
+						// Banner-status toggle (loadBannerEnabledToggle on the Banner page).
+						'enabled'                  => __( 'Cookie banner enabled.', 'faz-cookie-manager' ),
+						'disabled'                 => __( 'Cookie banner disabled.', 'faz-cookie-manager' ),
+						'toggleFailed'             => __( 'Failed to update banner status.', 'faz-cookie-manager' ),
 					),
 					// Settings page.
 					'settings'                 => array(

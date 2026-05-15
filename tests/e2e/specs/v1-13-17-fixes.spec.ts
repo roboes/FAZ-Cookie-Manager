@@ -226,16 +226,15 @@ test.describe('F009 — IAB unmatched-vendors transient', () => {
       $update = has_action( 'faz_after_update_cookie', $cb );
       $create = has_action( 'faz_after_create_cookie', $cb );
       $delete = has_action( 'faz_after_delete_cookie', $cb );
-      // Either the post-F009 shape (all three) OR at least the legacy
-      // update-only shape. Anything else means the listener regressed.
-      $post_fix = ( $update !== false && $create !== false && $delete !== false );
-      $legacy   = ( $update !== false );
-      echo $post_fix ? 'ok' : ( $legacy ? 'legacy_only_pending_F009' : "fail:update=$update,create=$create,delete=$delete" );
+      // Strict: post-F009 shape requires the listener on all three hooks.
+      // The legacy update-only shape (pre-fix) is intentionally NOT accepted
+      // here — masking it would let a regression of the F009 fix sit
+      // undetected in the suite. If the wiring drifts back to update-only
+      // (or worse), this test must fail loudly.
+      $all_three = ( $update !== false && $create !== false && $delete !== false );
+      echo $all_three ? 'ok' : "fail:update=$update,create=$create,delete=$delete";
     `).trim();
-    // 'ok' = full fix landed; 'legacy_only_pending_F009' = still on
-    // pre-F009 shape but at least the legacy hook still works. Both
-    // are non-regressions; only the bare 'fail' shape is a real bug.
-    expect(out, 'Activator must listen on at least faz_after_update_cookie').toMatch(/^(ok|legacy_only_pending_F009)$/);
+    expect(out, 'Activator must listen on faz_after_update_cookie + faz_after_create_cookie + faz_after_delete_cookie (F009 post-fix shape)').toBe('ok');
   });
 });
 
