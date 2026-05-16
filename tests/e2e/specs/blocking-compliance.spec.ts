@@ -1,7 +1,7 @@
 import type { BrowserContext, Page } from '@playwright/test';
 import { expect, test } from '../fixtures/wp-fixture';
 import { clickFirstVisible } from '../utils/ui';
-import { fazApiGet, fazApiPost, openSettingsPage } from '../utils/faz-api';
+import { fazApiGet, fazApiPost, openSettingsPage, type FazApiResponse } from '../utils/faz-api';
 import {
   activatePlugins,
   deactivatePluginsExcept,
@@ -79,14 +79,41 @@ function directCollectUrl(path: string): string {
   return `${WP_BASE}/faz-e2e-provider-collect/${path}`;
 }
 
+// Under suite-wide load `loginAsAdmin` occasionally returns to the test before
+// the WordPress auth cookies have fully propagated into the browser context's
+// request session — the first REST call after the login hands back a 401/403
+// even though the navigation context itself is logged in. Retry once with a
+// short backoff so the session has a chance to settle. The retry is invisible
+// to callers as long as the second attempt succeeds; if both fail the original
+// assertion failure is preserved.
+async function fazApiGetWithRetry<T>(page: Page, nonce: string, route: string): Promise<FazApiResponse<T>> {
+  const first = await fazApiGet<T>(page, nonce, route);
+  if (first.status === 200) return first;
+  if (first.status === 401 || first.status === 403) {
+    await page.waitForTimeout(500);
+    return fazApiGet<T>(page, nonce, route);
+  }
+  return first;
+}
+
+async function fazApiPostWithRetry<T>(page: Page, nonce: string, route: string, data: Record<string, unknown>): Promise<FazApiResponse<T>> {
+  const first = await fazApiPost<T>(page, nonce, route, data);
+  if (first.status === 200) return first;
+  if (first.status === 401 || first.status === 403) {
+    await page.waitForTimeout(500);
+    return fazApiPost<T>(page, nonce, route, data);
+  }
+  return first;
+}
+
 async function getSettings(page: Page, nonce: string): Promise<SettingsPayload> {
-  const response = await fazApiGet<SettingsPayload>(page, nonce, 'settings');
+  const response = await fazApiGetWithRetry<SettingsPayload>(page, nonce, 'settings');
   expect(response.status).toBe(200);
   return response.data;
 }
 
 async function postSettings(page: Page, nonce: string, payload: SettingsPayload): Promise<void> {
-  const response = await fazApiPost<SettingsPayload>(page, nonce, 'settings', payload);
+  const response = await fazApiPostWithRetry<SettingsPayload>(page, nonce, 'settings', payload);
   expect(response.status).toBe(200);
 }
 
