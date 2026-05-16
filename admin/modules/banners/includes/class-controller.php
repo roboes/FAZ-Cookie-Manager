@@ -162,14 +162,16 @@ class Controller extends Base_Controller {
 		$created = $wpdb->insert( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 			$wpdb->prefix . 'faz_banners',
 			array(
-				'name'           => $banner->get_name(),
-				'slug'           => $banner->get_slug(),
-				'status'         => ( true === $banner->get_status() ? 1 : 0 ),
-				'settings'       => wp_json_encode( $banner->get_settings() ),
-				'banner_default' => ( true === $banner->get_default() ? 1 : 0 ),
-				'contents'       => wp_json_encode( $banner->get_contents() ),
-				'date_created'   => $banner->get_date_created(),
-				'date_modified'  => $banner->get_date_modified(),
+				'name'             => $banner->get_name(),
+				'slug'             => $banner->get_slug(),
+				'status'           => ( true === $banner->get_status() ? 1 : 0 ),
+				'settings'         => wp_json_encode( $banner->get_settings() ),
+				'banner_default'   => ( true === $banner->get_default() ? 1 : 0 ),
+				'contents'         => wp_json_encode( $banner->get_contents() ),
+				'target_countries' => wp_json_encode( $banner->get_target_countries() ),
+				'priority'         => $banner->get_priority(),
+				'date_created'     => $banner->get_date_created(),
+				'date_modified'    => $banner->get_date_modified(),
 			),
 			array(
 				'%s',
@@ -178,6 +180,8 @@ class Controller extends Base_Controller {
 				'%s',
 				'%d',
 				'%s',
+				'%s',
+				'%d',
 				'%s',
 				'%s',
 			)
@@ -205,12 +209,14 @@ class Controller extends Base_Controller {
 	public function update_item( $banner ) {
 		global $wpdb;
 		$data = array(
-			'name'           => $banner->get_name(),
-			'slug'           => $banner->get_slug(),
-			'status'         => ( true === $banner->get_status() ? 1 : 0 ),
-			'settings'       => wp_json_encode( $banner->get_settings() ),
-			'banner_default' => ( true === $banner->get_default() ? 1 : 0 ),
-			'contents'       => wp_json_encode( $banner->get_contents() ),
+			'name'             => $banner->get_name(),
+			'slug'             => $banner->get_slug(),
+			'status'           => ( true === $banner->get_status() ? 1 : 0 ),
+			'settings'         => wp_json_encode( $banner->get_settings() ),
+			'banner_default'   => ( true === $banner->get_default() ? 1 : 0 ),
+			'contents'         => wp_json_encode( $banner->get_contents() ),
+			'target_countries' => wp_json_encode( $banner->get_target_countries() ),
+			'priority'         => $banner->get_priority(),
 		);
 		$updated = $wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.NotPrepared
 			$wpdb->prefix . 'faz_banners',
@@ -223,6 +229,8 @@ class Controller extends Base_Controller {
 				'%s',
 				'%d',
 				'%s',
+				'%s',
+				'%d',
 			)
 		);
 		if ( false === $updated ) {
@@ -279,6 +287,15 @@ class Controller extends Base_Controller {
 		$data->contents       = isset( $item->contents ) ? $this->prepare_json( $item->contents ) : array();
 		$data->banner_default = isset( $item->banner_default ) ? absint( $item->banner_default ) : 0;
 		$data->status         = isset( $item->status ) ? absint( $item->status ) : 0;
+		// target_countries is stored as JSON in the DB but Banner::set_data()
+		// expects an array; decode here so the model layer never sees raw JSON.
+		if ( isset( $item->target_countries ) && is_string( $item->target_countries ) ) {
+			$decoded = json_decode( $item->target_countries, true );
+			$data->target_countries = is_array( $decoded ) ? $decoded : array();
+		} else {
+			$data->target_countries = isset( $item->target_countries ) && is_array( $item->target_countries ) ? $item->target_countries : array();
+		}
+		$data->priority = isset( $item->priority ) ? (int) $item->priority : 0;
 		if (isset($data->settings['settings']['type']) && ($data->settings['settings']['type'] === "classic")) {
 			$data->settings['settings']['preferenceCenterType'] = "pushdown";
 		}
@@ -318,16 +335,103 @@ class Controller extends Base_Controller {
 	 * @return object|bool
 	 */
 	public function get_active_banner() {
+		return $this->get_active_banner_for_country( '' );
+	}
+
+	/**
+	 * Get the banner that should be rendered for a visitor in $country.
+	 *
+	 * Selection order (highest match wins, ties broken by priority desc, then
+	 * by lowest banner_id for determinism):
+	 *
+	 *   1. Active banners (status=1) whose target_countries list contains
+	 *      the upper-cased $country code.
+	 *   2. If none match, active banners with an empty target_countries list
+	 *      (the "match-all" rows used by single-banner installs).
+	 *   3. If none match, the banner flagged banner_default=1 — even if
+	 *      status=0 — so a fallback row is always available for visitors
+	 *      from countries the admin has not explicitly mapped.
+	 *
+	 * `$country` is normalised to upper-case A-Z (length 2). Passing an empty
+	 * string or a malformed code skips step 1 and goes straight to the
+	 * empty-list / banner_default fallback chain — preserving the pre-feature
+	 * behaviour of get_active_banner() for callers that have not yet wired
+	 * geolocation into the picker.
+	 *
+	 * @since 1.13.18
+	 * @param string $country Visitor's ISO-3166 alpha-2 country code, or ''.
+	 * @return Banner|false
+	 */
+	public function get_active_banner_for_country( $country = '' ) {
 		$items        = $this->get_items();
 		$current_lang = faz_current_language();
-		foreach ( $items as $key => $item ) {
+		if ( empty( $items ) || ! is_array( $items ) ) {
+			return false;
+		}
+
+		$country = is_string( $country ) ? strtoupper( trim( $country ) ) : '';
+		if ( 1 !== preg_match( '/^[A-Z]{2}$/', $country ) ) {
+			$country = '';
+		}
+
+		$status_match   = array(); // status=1 + targets the country
+		$status_anyland = array(); // status=1 + empty target list
+		$status_default = null;    // banner_default=1 fallback (any status)
+
+		foreach ( $items as $item ) {
 			$banner = new Banner( $item->banner_id );
-			if ( true === $banner->get_status() ) {
-				$banner->set_language( $current_lang );
-				return $banner;
+			$status = (bool) $banner->get_status();
+			$targets = $banner->get_target_countries();
+			$is_default = (bool) $banner->get_default();
+
+			if ( $status ) {
+				if ( '' !== $country && in_array( $country, $targets, true ) ) {
+					$status_match[] = $banner;
+				} elseif ( empty( $targets ) ) {
+					$status_anyland[] = $banner;
+				}
+			}
+
+			if ( $is_default && null === $status_default ) {
+				$status_default = $banner;
 			}
 		}
-		return false;
+
+		$winner = null;
+		if ( ! empty( $status_match ) ) {
+			$winner = self::pick_highest_priority( $status_match );
+		} elseif ( ! empty( $status_anyland ) ) {
+			$winner = self::pick_highest_priority( $status_anyland );
+		} elseif ( null !== $status_default ) {
+			$winner = $status_default;
+		}
+
+		if ( null === $winner ) {
+			return false;
+		}
+
+		$winner->set_language( $current_lang );
+		return $winner;
+	}
+
+	/**
+	 * Pick the Banner with the highest priority from a non-empty list.
+	 * Ties broken by the lowest banner_id for deterministic selection.
+	 *
+	 * @since 1.13.18
+	 * @param Banner[] $banners
+	 * @return Banner
+	 */
+	private static function pick_highest_priority( $banners ) {
+		usort( $banners, function ( $a, $b ) {
+			$pa = (int) $a->get_priority();
+			$pb = (int) $b->get_priority();
+			if ( $pa !== $pb ) {
+				return $pb <=> $pa; // desc
+			}
+			return ( (int) $a->get_id() ) <=> ( (int) $b->get_id() ); // asc
+		} );
+		return $banners[0];
 	}
 
 	/**

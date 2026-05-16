@@ -651,7 +651,16 @@ class Frontend {
 		if ( $this->is_geo_banner_disabled() ) {
 			return;
 		}
-		$this->banner = Controller::get_instance()->get_active_banner();
+		// Multi-banner geo-routing (1.13.18+): pass the visitor's detected
+		// country to the controller so it can pick the right banner profile
+		// (e.g. CCPA-light for US visitors, GDPR-full for EEA visitors). If
+		// the country cannot be resolved or the admin has only configured
+		// one banner with empty target_countries, the picker falls back to
+		// the match-all row or the banner_default=1 row — preserving the
+		// pre-feature behaviour for installs that have not adopted multi-
+		// banner setups.
+		$visitor_country = $this->get_visitor_country();
+		$this->banner    = Controller::get_instance()->get_active_banner_for_country( $visitor_country );
 		if ( false === $this->banner ) {
 			return;
 		}
@@ -713,6 +722,43 @@ class Frontend {
 	 *
 	 * @return bool True if the banner should NOT be shown.
 	 */
+	/**
+	 * Resolve the visitor's ISO-3166 alpha-2 country code using the same
+	 * detection chain that powers is_geo_banner_disabled():
+	 *
+	 *   1. Cloudflare CF-IPCountry header (only when opted-in via filter).
+	 *   2. MaxMind / ip-api.com fallback through Geolocation::get_country().
+	 *
+	 * Returns '' when the country cannot be resolved (no MaxMind DB, no
+	 * Cloudflare, network errors). Callers must treat '' as "no signal" —
+	 * the banner picker falls back to the match-all / banner_default row.
+	 *
+	 * Filterable via `faz_visitor_country` so test fixtures and edge
+	 * deployments (e.g. always-EU staging) can stub a country deterministically.
+	 *
+	 * @since 1.13.18
+	 * @return string Upper-case 2-letter code or '' if unknown.
+	 */
+	private function get_visitor_country() {
+		$country = '';
+		if (
+			apply_filters( 'faz_trust_cf_ipcountry_header', false )
+			&& isset( $_SERVER['HTTP_CF_IPCOUNTRY'] )
+			&& preg_match( '/^[A-Z]{2}$/', sanitize_text_field( wp_unslash( $_SERVER['HTTP_CF_IPCOUNTRY'] ) ) )
+			&& 'XX' !== sanitize_text_field( wp_unslash( $_SERVER['HTTP_CF_IPCOUNTRY'] ) )
+		) {
+			$country = sanitize_text_field( wp_unslash( $_SERVER['HTTP_CF_IPCOUNTRY'] ) );
+		}
+		if ( '' === $country ) {
+			$country = Geolocation::get_country();
+		}
+		$country = is_string( $country ) ? strtoupper( trim( $country ) ) : '';
+		if ( 1 !== preg_match( '/^[A-Z]{2}$/', $country ) ) {
+			$country = '';
+		}
+		return (string) apply_filters( 'faz_visitor_country', $country );
+	}
+
 	private function is_geo_banner_disabled() {
 		$faz_geo_settings = $this->get_faz_settings();
 		if ( empty( $faz_geo_settings['geolocation']['geo_targeting'] ) ) {
