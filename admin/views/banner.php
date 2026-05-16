@@ -17,6 +17,7 @@ defined( 'ABSPATH' ) || exit;
 		<button class="faz-tab" data-tab="buttons"><?php esc_html_e( 'Buttons', 'faz-cookie-manager' ); ?></button>
 		<button class="faz-tab" data-tab="preferences"><?php esc_html_e( 'Preference Center', 'faz-cookie-manager' ); ?></button>
 		<button class="faz-tab" data-tab="advanced"><?php esc_html_e( 'Advanced', 'faz-cookie-manager' ); ?></button>
+		<button class="faz-tab" data-tab="geo"><?php esc_html_e( 'Geo Targeting', 'faz-cookie-manager' ); ?></button>
 	</div>
 
 	<!-- ─── General ─────────────────────────────────────── -->
@@ -596,6 +597,58 @@ defined( 'ABSPATH' ) || exit;
 			</div>
 		</div>
 
+	</div>
+
+	<!-- ─── Tab: Geo Targeting ─────────────────────────────────────── -->
+	<div id="tab-geo" class="faz-tab-panel">
+		<div class="faz-card">
+			<div class="faz-card-header"><h3><?php esc_html_e( 'Region presets', 'faz-cookie-manager' ); ?></h3></div>
+			<div class="faz-card-body">
+				<p class="faz-help" style="margin-bottom:1rem;">
+					<?php esc_html_e( 'Tick the regions where this banner should be shown. A visitor from any country in the selected regions sees this banner. Leave all unchecked to make this banner match every visitor (fallback / single-banner installs).', 'faz-cookie-manager' ); ?>
+				</p>
+				<div class="faz-form-group" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.5rem;">
+					<label class="faz-toggle"><input type="checkbox" class="faz-b-geo-region" value="EU"><span class="faz-toggle-track"></span><span><?php esc_html_e( 'EU / EEA (27 + IS, LI, NO)', 'faz-cookie-manager' ); ?></span></label>
+					<label class="faz-toggle"><input type="checkbox" class="faz-b-geo-region" value="UK"><span class="faz-toggle-track"></span><span><?php esc_html_e( 'United Kingdom', 'faz-cookie-manager' ); ?></span></label>
+					<label class="faz-toggle"><input type="checkbox" class="faz-b-geo-region" value="US"><span class="faz-toggle-track"></span><span><?php esc_html_e( 'United States', 'faz-cookie-manager' ); ?></span></label>
+					<label class="faz-toggle"><input type="checkbox" class="faz-b-geo-region" value="CA"><span class="faz-toggle-track"></span><span><?php esc_html_e( 'Canada', 'faz-cookie-manager' ); ?></span></label>
+					<label class="faz-toggle"><input type="checkbox" class="faz-b-geo-region" value="BR"><span class="faz-toggle-track"></span><span><?php esc_html_e( 'Brazil (LGPD)', 'faz-cookie-manager' ); ?></span></label>
+					<label class="faz-toggle"><input type="checkbox" class="faz-b-geo-region" value="AU"><span class="faz-toggle-track"></span><span><?php esc_html_e( 'Australia', 'faz-cookie-manager' ); ?></span></label>
+					<label class="faz-toggle"><input type="checkbox" class="faz-b-geo-region" value="JP"><span class="faz-toggle-track"></span><span><?php esc_html_e( 'Japan', 'faz-cookie-manager' ); ?></span></label>
+					<label class="faz-toggle"><input type="checkbox" class="faz-b-geo-region" value="CH"><span class="faz-toggle-track"></span><span><?php esc_html_e( 'Switzerland', 'faz-cookie-manager' ); ?></span></label>
+				</div>
+			</div>
+		</div>
+
+		<div class="faz-card">
+			<div class="faz-card-header"><h3><?php esc_html_e( 'Custom country list', 'faz-cookie-manager' ); ?></h3></div>
+			<div class="faz-card-body">
+				<div class="faz-form-group">
+					<label for="faz-b-geo-custom"><?php esc_html_e( 'Additional ISO-3166 alpha-2 country codes', 'faz-cookie-manager' ); ?></label>
+					<input type="text" class="faz-input" id="faz-b-geo-custom" placeholder="e.g. NZ, SG, KR" style="max-width:480px;">
+					<div class="faz-help"><?php esc_html_e( 'Comma-separated, two letters per code. Use this for countries not covered by the region presets above. Codes are normalised to upper-case and deduplicated automatically.', 'faz-cookie-manager' ); ?></div>
+				</div>
+			</div>
+		</div>
+
+		<div class="faz-card">
+			<div class="faz-card-header"><h3><?php esc_html_e( 'Priority &amp; fallback', 'faz-cookie-manager' ); ?></h3></div>
+			<div class="faz-card-body">
+				<div class="faz-form-group">
+					<label for="faz-b-geo-priority"><?php esc_html_e( 'Priority', 'faz-cookie-manager' ); ?></label>
+					<input type="number" class="faz-input faz-input-sm" id="faz-b-geo-priority" min="0" max="9999" step="1" value="0" style="width:140px;">
+					<div class="faz-help"><?php esc_html_e( 'Tie-breaker when multiple banners target the same country. Higher wins. Default 0.', 'faz-cookie-manager' ); ?></div>
+				</div>
+				<div class="faz-form-group">
+					<label class="faz-toggle" id="faz-b-geo-default-toggle">
+						<input type="checkbox" id="faz-b-geo-default">
+						<span class="faz-toggle-track"></span>
+						<span><?php esc_html_e( 'Use this banner as the default fallback', 'faz-cookie-manager' ); ?></span>
+					</label>
+					<div class="faz-help"><?php esc_html_e( 'Shown to visitors from countries no banner targets explicitly. Exactly one banner should be marked as default. Saving this option will clear the flag on every other banner.', 'faz-cookie-manager' ); ?></div>
+				</div>
+			</div>
+		</div>
 	</div>
 
 	<!-- Bottom spacer: room for the fixed preview + save bar -->

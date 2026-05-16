@@ -219,6 +219,7 @@
 				normalizeBannerConfig(bannerData.properties);
 				populateSettings();
 				populateContents(currentLang);
+				populateGeoTargeting();
 			// Init color pickers after populating values
 			FAZ.initColorPickers();
 			// Filter position options for current type
@@ -229,6 +230,89 @@
 		}).catch(function () {
 			FAZ.notify(__('banner.loadFailed', 'Failed to load banner settings.'), 'error');
 		});
+	}
+
+	// ── Geo Targeting (multi-banner geo-routing, 1.13.18+) ────────────────
+	//
+	// Region presets group ISO-3166 alpha-2 codes into clickable bundles. The
+	// EU bundle matches the server-side region_map in is_country_in_regions()
+	// so toggling the EU checkbox here produces the same coverage as toggling
+	// it in Settings → Geolocation.
+	var REGION_PRESETS = {
+		EU: ['AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE','IS','LI','NO'],
+		UK: ['GB'],
+		US: ['US'],
+		CA: ['CA'],
+		BR: ['BR'],
+		AU: ['AU'],
+		JP: ['JP'],
+		CH: ['CH']
+	};
+
+	function normaliseCountryCodes(input) {
+		var out = [];
+		var seen = {};
+		var list = Array.isArray(input) ? input : String(input || '').split(/[,\s]+/);
+		for (var i = 0; i < list.length; i++) {
+			var code = String(list[i] || '').trim().toUpperCase();
+			if (/^[A-Z]{2}$/.test(code) && !seen[code]) {
+				seen[code] = true;
+				out.push(code);
+			}
+		}
+		out.sort();
+		return out;
+	}
+
+	function populateGeoTargeting() {
+		if (!bannerData) return;
+		var targets = normaliseCountryCodes(bannerData.target_countries || []);
+		// Region checkboxes: tick a region if every country in its preset is present in the target list.
+		var regionInputs = document.querySelectorAll('.faz-b-geo-region');
+		for (var i = 0; i < regionInputs.length; i++) {
+			var key = regionInputs[i].value;
+			var preset = REGION_PRESETS[key] || [];
+			var allIn = preset.length > 0 && preset.every(function (c) { return targets.indexOf(c) !== -1; });
+			regionInputs[i].checked = allIn;
+		}
+		// Custom field: codes that are NOT covered by any ticked region preset.
+		var coveredByRegion = {};
+		for (var j = 0; j < regionInputs.length; j++) {
+			if (!regionInputs[j].checked) continue;
+			var p = REGION_PRESETS[regionInputs[j].value] || [];
+			for (var k = 0; k < p.length; k++) coveredByRegion[p[k]] = true;
+		}
+		var leftover = targets.filter(function (c) { return !coveredByRegion[c]; });
+		var customInput = document.getElementById('faz-b-geo-custom');
+		if (customInput) customInput.value = leftover.join(', ');
+		// Priority + default flag.
+		var priorityInput = document.getElementById('faz-b-geo-priority');
+		if (priorityInput) priorityInput.value = (bannerData.priority != null ? bannerData.priority : 0);
+		var defaultInput = document.getElementById('faz-b-geo-default');
+		if (defaultInput) defaultInput.checked = !!bannerData['default'];
+	}
+
+	function collectGeoTargeting() {
+		var collected = [];
+		var regionInputs = document.querySelectorAll('.faz-b-geo-region');
+		for (var i = 0; i < regionInputs.length; i++) {
+			if (!regionInputs[i].checked) continue;
+			var preset = REGION_PRESETS[regionInputs[i].value] || [];
+			collected = collected.concat(preset);
+		}
+		var customInput = document.getElementById('faz-b-geo-custom');
+		if (customInput && customInput.value) {
+			collected = collected.concat(customInput.value.split(/[,\s]+/));
+		}
+		var priorityInput = document.getElementById('faz-b-geo-priority');
+		var priority = priorityInput ? parseInt(priorityInput.value, 10) : 0;
+		if (!isFinite(priority) || priority < 0) priority = 0;
+		var defaultInput = document.getElementById('faz-b-geo-default');
+		return {
+			target_countries: normaliseCountryCodes(collected),
+			priority: priority,
+			'default': defaultInput ? !!defaultInput.checked : false
+		};
 	}
 
 	/**
@@ -955,12 +1039,19 @@
 
 		syncFormToBannerData();
 
+		var geo = collectGeoTargeting();
+		bannerData.target_countries = geo.target_countries;
+		bannerData.priority = geo.priority;
+		bannerData['default'] = geo['default'];
+
 		var payload = {
 			name: bannerData.name,
 			status: bannerData.status,
 			'default': bannerData['default'],
 			properties: bannerData.properties,
 			contents: bannerData.contents,
+			target_countries: bannerData.target_countries,
+			priority: bannerData.priority,
 		};
 
 			FAZ.put('banners/' + bannerId, payload).then(function (updated) {

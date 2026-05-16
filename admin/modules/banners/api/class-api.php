@@ -579,13 +579,16 @@ class Api extends Rest_Controller {
 	 */
 	public function get_formatted_item_data( $object ) {
 		return array(
-			'id'         => $object->get_id(),
-			'slug'       => $object->get_slug(),
-			'name'       => $object->get_name(),
-			'status'     => $object->get_status(),
-			'default'    => $object->get_default(),
-			'properties' => $object->get_settings(),
-			'contents'   => $object->get_contents(),
+			'id'               => $object->get_id(),
+			'slug'             => $object->get_slug(),
+			'name'             => $object->get_name(),
+			'status'           => $object->get_status(),
+			'default'          => $object->get_default(),
+			'properties'       => $object->get_settings(),
+			'contents'         => $object->get_contents(),
+			// Multi-banner geo-routing (1.13.18+).
+			'target_countries' => $object->get_target_countries(),
+			'priority'         => $object->get_priority(),
 		);
 	}
 
@@ -603,6 +606,15 @@ class Api extends Rest_Controller {
 		$object->set_status( $request['status'] );
 		$object->set_settings( $request['properties'] );
 		$object->set_contents( $request['contents'] );
+		// Multi-banner geo-routing (1.13.18+). Both fields are optional in the
+		// request — un-supplied means "leave as-is on update / default on
+		// create", so legacy clients that don't send them keep working.
+		if ( isset( $request['target_countries'] ) ) {
+			$object->set_target_countries( $request['target_countries'] );
+		}
+		if ( isset( $request['priority'] ) ) {
+			$object->set_priority( $request['priority'] );
+		}
 		return $object;
 	}
 
