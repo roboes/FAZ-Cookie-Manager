@@ -625,14 +625,14 @@ defined( 'ABSPATH' ) || exit;
 			<div class="faz-card-body">
 				<div class="faz-form-group">
 					<label for="faz-b-geo-custom"><?php esc_html_e( 'Additional ISO-3166 alpha-2 country codes', 'faz-cookie-manager' ); ?></label>
-					<input type="text" class="faz-input" id="faz-b-geo-custom" placeholder="e.g. NZ, SG, KR" style="max-width:480px;">
+					<input type="text" class="faz-input" id="faz-b-geo-custom" placeholder="<?php esc_attr_e( 'e.g. NZ, SG, KR', 'faz-cookie-manager' ); ?>" style="max-width:480px;">
 					<div class="faz-help"><?php esc_html_e( 'Comma-separated, two letters per code. Use this for countries not covered by the region presets above. Codes are normalised to upper-case and deduplicated automatically.', 'faz-cookie-manager' ); ?></div>
 				</div>
 			</div>
 		</div>
 
 		<div class="faz-card">
-			<div class="faz-card-header"><h3><?php esc_html_e( 'Priority &amp; fallback', 'faz-cookie-manager' ); ?></h3></div>
+			<div class="faz-card-header"><h3><?php esc_html_e( 'Priority & fallback', 'faz-cookie-manager' ); ?></h3></div>
 			<div class="faz-card-body">
 				<div class="faz-form-group">
 					<label for="faz-b-geo-priority"><?php esc_html_e( 'Priority', 'faz-cookie-manager' ); ?></label>

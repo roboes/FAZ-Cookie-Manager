@@ -739,21 +739,61 @@ class Activator {
 		//    Empty JSON array '[]' means "match every visitor" — preserves the
 		//    pre-upgrade behaviour where the banner showed to everyone gated
 		//    only by geo_targeting on/off.
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- table is $wpdb->prefix + literal; one-shot migration write; the only literal value is the static JSON token '[]'.
-		$wpdb->query( "UPDATE `{$table}` SET `target_countries` = '[]' WHERE `target_countries` IS NULL OR `target_countries` = ''" );
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- table identifier is $wpdb->prefix + literal "faz_banners"; values are bound via %s placeholders.
+		$wpdb->query(
+			$wpdb->prepare(
+				"UPDATE `{$table}` SET `target_countries` = %s WHERE `target_countries` IS NULL OR `target_countries` = %s",
+				'[]',
+				''
+			)
+		);
 
-		// 3. Ensure exactly one banner is the fallback default. If none has
-		//    banner_default=1, promote the first row with status=1 (the
-		//    currently-active banner pre-upgrade) so the new selector still
-		//    finds something to serve when no country matches.
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- table is $wpdb->prefix + literal; one-shot read inside an activation migration.
-		$has_default = (int) $wpdb->get_var( "SELECT COUNT(banner_id) FROM `{$table}` WHERE `banner_default` = 1" );
-		if ( 0 === $has_default ) {
-			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- table is $wpdb->prefix + literal; one-shot read of the currently-active banner id.
-			$active_id = (int) $wpdb->get_var( "SELECT banner_id FROM `{$table}` WHERE `status` = 1 ORDER BY banner_id ASC LIMIT 1" );
-			if ( $active_id > 0 ) {
+		// 3. Ensure exactly ONE banner is the fallback default.
+		//    Cases handled:
+		//      - 0 defaults → promote the first status=1 row (the currently
+		//        active banner pre-upgrade); if there's no active banner
+		//        either, promote the lowest banner_id so the selector still
+		//        has something to serve.
+		//      - >1 defaults → reset every default flag, then promote a
+		//        single canonical row (same selection rule as above).
+		//        Multiple defaults make the last-resort fallback non-
+		//        deterministic, so this case must be flattened too.
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- table identifier is $wpdb->prefix + literal "faz_banners"; values are bound via %d placeholder.
+		$has_default = (int) $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT COUNT(banner_id) FROM `{$table}` WHERE `banner_default` = %d",
+				1
+			)
+		);
+		if ( 1 !== $has_default ) {
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- table identifier is $wpdb->prefix + literal "faz_banners"; values are bound via %d placeholders.
+			$fallback_id = (int) $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT banner_id FROM `{$table}` WHERE `status` = %d ORDER BY banner_id ASC LIMIT %d",
+					1,
+					1
+				)
+			);
+			if ( $fallback_id <= 0 ) {
+				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- table identifier is $wpdb->prefix + literal "faz_banners"; value bound via %d placeholder.
+				$fallback_id = (int) $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT banner_id FROM `{$table}` ORDER BY banner_id ASC LIMIT %d",
+						1
+					)
+				);
+			}
+			if ( $fallback_id > 0 ) {
+				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- table identifier is $wpdb->prefix + literal "faz_banners"; value bound via %d placeholder.
+				$wpdb->query(
+					$wpdb->prepare(
+						"UPDATE `{$table}` SET `banner_default` = %d WHERE `banner_default` <> %d",
+						0,
+						0
+					)
+				);
 				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- one-shot migration write to the custom faz_banners table; row identifier is the integer banner_id we just selected.
-				$wpdb->update( $table, array( 'banner_default' => 1 ), array( 'banner_id' => $active_id ), array( '%d' ), array( '%d' ) );
+				$wpdb->update( $table, array( 'banner_default' => 1 ), array( 'banner_id' => $fallback_id ), array( '%d' ), array( '%d' ) );
 			}
 		}
 

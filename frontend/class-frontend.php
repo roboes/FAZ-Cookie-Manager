@@ -756,7 +756,16 @@ class Frontend {
 		if ( 1 !== preg_match( '/^[A-Z]{2}$/', $country ) ) {
 			$country = '';
 		}
-		return (string) apply_filters( 'faz_visitor_country', $country );
+		// Re-validate AFTER the filter so a hook returning lower-case, padded,
+		// or non-ISO values (e.g. 'us', ' US ', 'USA') cannot route into an
+		// unexpected fallback. Invalid filter output collapses to '' (no signal),
+		// which sends the picker to the match-all / banner_default chain.
+		$filtered = (string) apply_filters( 'faz_visitor_country', $country );
+		$filtered = strtoupper( trim( $filtered ) );
+		if ( 1 !== preg_match( '/^[A-Z]{2}$/', $filtered ) ) {
+			return '';
+		}
+		return $filtered;
 	}
 
 	private function is_geo_banner_disabled() {
