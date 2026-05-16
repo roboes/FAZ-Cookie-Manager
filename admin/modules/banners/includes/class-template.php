@@ -518,13 +518,35 @@ class Template {
 	}
 
 	/**
+	 * Return the option-array slot for this banner/language template.
+	 *
+	 * Multi-banner geo-routing can render different banners in the same
+	 * language. The stored template therefore needs to be scoped by banner id as
+	 * well as language; otherwise the first rendered `en` banner can be reused
+	 * for every other `en` banner.
+	 *
+	 * @return string
+	 */
+	private function get_storage_key() {
+		$banner_id = ( $this->banner && is_callable( array( $this->banner, 'get_id' ) ) ) ? absint( $this->banner->get_id() ) : 0;
+		if ( $banner_id > 0 ) {
+			return 'banner_' . $banner_id . ':' . $this->language;
+		}
+		return $this->language;
+	}
+
+	/**
 	 * Retrieve stored template.
 	 *
 	 * @return string
 	 */
 	public function get_stored() {
 		$stored = get_option( $this->get_cache_key(), array() );
-		return isset( $stored[ $this->language ] ) ? $stored[ $this->language ] : array();
+		if ( ! is_array( $stored ) ) {
+			return array();
+		}
+		$storage_key = $this->get_storage_key();
+		return isset( $stored[ $storage_key ] ) ? $stored[ $storage_key ] : array();
 	}
 
 	/**
@@ -537,7 +559,7 @@ class Template {
 		$stored    = get_option( $cache_key, array() );
 		$stored    = is_array( $stored ) && ! empty( $stored ) ? $stored : array();
 
-		$stored[ $this->language ] = array(
+		$stored[ $this->get_storage_key() ] = array(
 			'html'   => wp_kses( $this->html, faz_allowed_html() ),
 			'styles' => wp_kses(
 				$this->styles,

@@ -380,15 +380,15 @@ class Frontend {
 					$consent_lang = 'EN';
 				}
 
-					// gdprApplies: true when visitor is in EU/EEA or country unknown (safe default).
-					$visitor_country = $this->get_visitor_country();
-					$gdpr_applies    = empty( $visitor_country ) || in_array( $visitor_country, Geolocation::$eu_countries, true );
+				// gdprApplies: true when visitor is in EU/EEA or country unknown (safe default).
+				$visitor_country = $this->get_visitor_country();
+				$gdpr_applies    = empty( $visitor_country ) || in_array( $visitor_country, Geolocation::$eu_countries, true );
 
 				// Build TCF config with GVL data if available.
 				$tcf_config = array(
 					'publisherCC'         => $country_code,
 					'consentLanguage'     => $consent_lang,
-						'gdprApplies'         => $gdpr_applies,
+					'gdprApplies'         => $gdpr_applies,
 					'cmpId'               => absint( $this->settings->get( 'iab', 'cmp_id' ) ),
 					'purposeOneTreatment' => (bool) $this->settings->get( 'iab', 'purpose_one_treatment' ),
 				);
@@ -685,7 +685,8 @@ class Frontend {
 			return false;
 		}
 		$settings = $this->banner->get_settings();
-		$rules    = isset( $settings['ruleSet'] ) ? $settings['ruleSet'] : array();
+		$inner    = isset( $settings['settings'] ) && is_array( $settings['settings'] ) ? $settings['settings'] : array();
+		$rules    = isset( $inner['ruleSet'] ) && is_array( $inner['ruleSet'] ) ? $inner['ruleSet'] : array();
 		if ( empty( $rules ) ) {
 			return false;
 		}
