@@ -25,7 +25,15 @@ const WP_CLI_ENV = {
   WP_CLI_PHP_ARGS: '-d error_reporting=E_ERROR -d display_errors=0',
 };
 const WP_CLI_TIMEOUT_ENV = Number(process.env.WP_CLI_TIMEOUT_MS);
-const WP_CLI_TIMEOUT_MS = Number.isFinite(WP_CLI_TIMEOUT_ENV) && WP_CLI_TIMEOUT_ENV > 0 ? WP_CLI_TIMEOUT_ENV : 30_000;
+// Default raised from 30s → 60s. The local test environment has ~38 active
+// plugins (including the WooCommerce stack and analytics/tracker plugins the
+// provider-matrix scanner needs to detect). Each `wp plugin activate X` call
+// bootstraps WordPress, fires plugins_loaded for all of them, and runs the
+// target's activation hooks. Under suite-wide load (PHP-FPM saturated,
+// MySQL pool busy after ~500 tests) the cold path occasionally exceeds 30s
+// and the cascading timeout kills downstream tests with NETWORK_IO_SUSPENDED.
+// 60s leaves headroom while still surfacing real hangs.
+const WP_CLI_TIMEOUT_MS = Number.isFinite(WP_CLI_TIMEOUT_ENV) && WP_CLI_TIMEOUT_ENV > 0 ? WP_CLI_TIMEOUT_ENV : 60_000;
 
 export const SCAN_LAB_PAGE_SLUGS = [
   'faz-lab-js-basic',

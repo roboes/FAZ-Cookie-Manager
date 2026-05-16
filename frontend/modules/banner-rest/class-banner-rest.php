@@ -166,17 +166,10 @@ class Banner_Rest {
 		$orig_banner_lang = $banner->get_language();
 		$banner->set_language( $lang );
 
-		// Build the (possibly cached) template in the requested language.
-		// Template::__construct triggers load() which either generates or
-		// populates the language-specific slot in the faz_banner_template
-		// option. We then read the stored payload directly, avoiding access
-		// to protected props on the Template instance.
-		new Banner_Template( $banner, $lang );
-		$cache_key = apply_filters( 'faz_banner_template_cache_key', 'faz_banner_template' );
-		$stored    = get_option( $cache_key, array() );
-		$entry     = ( is_array( $stored ) && isset( $stored[ $lang ] ) && is_array( $stored[ $lang ] ) ) ? $stored[ $lang ] : array();
-		$html      = isset( $entry['html'] ) ? (string) $entry['html'] : '';
-		$styles    = isset( $entry['styles'] ) ? (string) $entry['styles'] : '';
+		// Build the banner-scoped, language-specific template.
+		$template = new Banner_Template( $banner, $lang );
+		$html     = $template->get_html();
+		$styles   = $template->get_styles();
 
 		// Prepare shortcodes with a fresh instance bound to the language-
 		// switched banner.
