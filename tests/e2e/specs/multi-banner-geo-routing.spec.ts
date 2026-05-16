@@ -49,6 +49,11 @@ test.describe.serial('Multi-banner geo-routing (Controller selector + Banner mod
       if ( ! is_array( $rows ) ) { return; }
       foreach ( $rows as $row ) {
         if ( empty( $row['banner_id'] ) ) { continue; }
+        // Include settings + contents in the restore: GEO-30 mutates
+        // settings.ruleSet[0].code on the active banner. Without this row
+        // the change persists across the afterAll and the next run of GEO-20
+        // (or any other test that asserts on the match-all-only baseline)
+        // sees a stale country code.
         $wpdb->update(
           $wpdb->prefix . 'faz_banners',
           array(
@@ -56,6 +61,8 @@ test.describe.serial('Multi-banner geo-routing (Controller selector + Banner mod
             'banner_default'   => isset( $row['banner_default'] ) ? (int) $row['banner_default'] : 0,
             'target_countries' => isset( $row['target_countries'] ) ? $row['target_countries'] : '[]',
             'priority'         => isset( $row['priority'] ) ? (int) $row['priority'] : 0,
+            'settings'         => isset( $row['settings'] ) ? $row['settings'] : '',
+            'contents'         => isset( $row['contents'] ) ? $row['contents'] : '',
           ),
           array( 'banner_id' => (int) $row['banner_id'] )
         );
