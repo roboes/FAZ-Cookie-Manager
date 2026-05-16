@@ -425,6 +425,11 @@
 		var closeBtn = (config.notice && config.notice.elements && config.notice.elements.closeButton) || {};
 		setChecked('faz-b-close-toggle', typeof closeBtn === 'object' ? getStatus(closeBtn) : true);
 
+		// Per-banner override of the Garante/EDPB dark-pattern auto-hide
+		// (1.14.0+). The flag lives at properties.settings.allowCloseButtonWithReject.
+		var bannerSettings = (bannerData.properties && bannerData.properties.settings) || {};
+		setChecked('faz-b-close-with-reject-toggle', !!bannerSettings.allowCloseButtonWithReject);
+
 		// Audit table
 		var auditTable = config.auditTable || {};
 		setChecked('faz-b-audit-toggle', getStatus(auditTable));
@@ -979,6 +984,11 @@
 		if (!props.config.notice.elements.closeButton) props.config.notice.elements.closeButton = {};
 		if (typeof props.config.notice.elements.closeButton !== 'object') props.config.notice.elements.closeButton = {};
 		props.config.notice.elements.closeButton.status = isChecked('faz-b-close-toggle');
+
+		// Per-banner override of the Garante/EDPB dark-pattern auto-hide.
+		// Lives under properties.settings so it travels with the banner row.
+		if (!props.settings || typeof props.settings !== 'object') props.settings = {};
+		props.settings.allowCloseButtonWithReject = isChecked('faz-b-close-with-reject-toggle');
 
 		// Brand logo
 		ensureObj(props, 'config.notice.elements.brandLogo');

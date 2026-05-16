@@ -479,6 +479,30 @@ defined( 'ABSPATH' ) || exit;
 						<span><?php esc_html_e( 'Show Close Button', 'faz-cookie-manager' ); ?></span>
 					</label>
 				</div>
+				<div class="faz-form-group" style="margin-left:1.5rem;border-left:2px solid var(--faz-border,#e5e7eb);padding-left:1rem;">
+					<label class="faz-toggle" id="faz-b-close-with-reject-toggle">
+						<input type="checkbox" id="faz-b-close-with-reject">
+						<span class="faz-toggle-track"></span>
+						<span><?php esc_html_e( 'Allow Close (X) alongside Reject button', 'faz-cookie-manager' ); ?></span>
+					</label>
+					<div class="faz-help" style="margin-top:.4rem;">
+						<?php echo wp_kses(
+							sprintf(
+								/* translators: %1$s: EDPB Guidelines link, %2$s: Italian Garante Provvedimento link. */
+								__( 'Off by default. The %1$s and the %2$s identify "X close + labelled Reject on the same banner" as a recognised dark pattern (unequal-weight dismissal paths). Leave OFF for banners served to EU/EEA/UK visitors. Safe to enable on banners targeted at US, Brazil, Canada or Australian traffic where this rule does not apply — typically used together with multi-banner geo-routing (Geo Targeting tab) to keep the X on a CCPA-style banner.', 'faz-cookie-manager' ),
+								'<a href="https://edpb.europa.eu/system/files/2023-02/edpb_03-2022_guidelines_on_deceptive_design_patterns_in_social_media_platform_interfaces_v2_en.pdf" target="_blank" rel="noopener noreferrer">EDPB Guidelines 03/2022</a>',
+								'<a href="https://www.garanteprivacy.it/web/guest/home/docweb/-/docweb-display/docweb/9677876" target="_blank" rel="noopener noreferrer">Italian Garante Provv. 10 June 2021</a>'
+							),
+							array(
+								'a' => array(
+									'href'   => array(),
+									'target' => array(),
+									'rel'    => array(),
+								),
+							)
+						); ?>
+					</div>
+				</div>
 			</div>
 		</div>
 	</div>
