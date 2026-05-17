@@ -499,3 +499,71 @@ test.describe('PR104-FU — country→language fallback respects the opt-in filt
     expect(data.on_without_lang, 'fallback on but it NOT in selected → site default (selected_languages gate)').toBe('en');
   });
 });
+
+/* ================================================================== *
+ * 8. has_country_dependent_banners epoch-based invalidation (issue #109)
+ * ================================================================== */
+
+test.describe('PR104-FU — has_country_dependent_banners cache invalidation', () => {
+  test('memoization uses an epoch-versioned cache key that delete_cache bumps deterministically', () => {
+    const result = wpEval(`
+      $ctrl = \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Controller::get_instance();
+
+      // Reset the epoch to a known floor so the assertions don't depend
+      // on whatever value previous tests left behind.
+      update_option( 'faz_banner_cache_epoch', 0, false );
+      $ctrl->delete_cache();
+      $epoch_after_first_delete = (int) get_option( 'faz_banner_cache_epoch', 0 );
+
+      // Seed the cache for the current epoch.
+      $first  = $ctrl->has_country_dependent_banners();
+      $cached_after_first = wp_cache_get( 'faz_has_country_dependent_banners_v' . $epoch_after_first_delete, 'faz_banners' );
+
+      // delete_cache must bump the epoch — the OLD cache key is now
+      // unreferenced (would expire via TTL), and any subsequent read
+      // queries a DIFFERENT key, forcing a recompute on every node.
+      $ctrl->delete_cache();
+      $epoch_after_second_delete = (int) get_option( 'faz_banner_cache_epoch', 0 );
+      $second = $ctrl->has_country_dependent_banners();
+      $cached_under_old_key = wp_cache_get( 'faz_has_country_dependent_banners_v' . $epoch_after_first_delete, 'faz_banners' );
+      $cached_under_new_key = wp_cache_get( 'faz_has_country_dependent_banners_v' . $epoch_after_second_delete, 'faz_banners' );
+
+      echo wp_json_encode( array(
+        'first'                       => (bool) $first,
+        'second'                      => (bool) $second,
+        'epoch_after_first_delete'    => $epoch_after_first_delete,
+        'epoch_after_second_delete'   => $epoch_after_second_delete,
+        'cached_after_first_seed'     => $cached_after_first !== false,
+        'old_key_still_cached'        => $cached_under_old_key !== false,
+        'new_key_freshly_cached'      => $cached_under_new_key !== false,
+      ) );
+    `).trim();
+    const data = JSON.parse(result);
+    expect(data.first, 'first call resolves to a concrete bool').toBe(data.second);
+    expect(data.cached_after_first_seed, 'first call seeded the cache for its epoch').toBe(true);
+    expect(data.epoch_after_second_delete, 'delete_cache bumps the epoch').toBeGreaterThan(data.epoch_after_first_delete);
+    expect(data.new_key_freshly_cached, 'new epoch key carries the post-invalidation value').toBe(true);
+    // Old-key visibility is incidental — wp_cache_set kept it under the old
+    // epoch's key, which is now unreferenced and will TTL out. The
+    // assertion that matters is that the NEW key is independent.
+  });
+
+  test('legacy transient is swept on delete_cache for pre-fix 1.14.0 backward compat', () => {
+    const result = wpEval(`
+      // Plant the legacy transient that pre-fix 1.14.0 wrote.
+      set_transient( 'faz_has_country_dependent_banners', 1, HOUR_IN_SECONDS );
+      $present_before = get_transient( 'faz_has_country_dependent_banners' );
+
+      \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Controller::get_instance()->delete_cache();
+      $present_after = get_transient( 'faz_has_country_dependent_banners' );
+
+      echo wp_json_encode( array(
+        'present_before' => $present_before !== false,
+        'present_after'  => $present_after  !== false,
+      ) );
+    `).trim();
+    const data = JSON.parse(result);
+    expect(data.present_before, 'sanity: legacy transient was seeded').toBe(true);
+    expect(data.present_after, 'delete_cache sweeps the legacy transient').toBe(false);
+  });
+});

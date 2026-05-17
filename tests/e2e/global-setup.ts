@@ -55,28 +55,38 @@ async function globalSetup(): Promise<void> {
         if ( 0 === $category_count && method_exists( $category_controller, 'reinstall' ) ) {
           $category_controller->reinstall();
         }
-        $analytics_id = (int) $wpdb->get_var(
-          $wpdb->prepare(
-            "SELECT category_id FROM {$wpdb->prefix}faz_cookie_categories WHERE slug = %s",
-            'analytics'
-          )
+        $fixture_categories = array(
+          'analytics'     => 'faz_e2e_analytics_probe',
+          'functional'    => 'faz_e2e_functional_probe',
+          'marketing'     => 'faz_e2e_marketing_probe',
+          'performance'   => 'faz_e2e_performance_probe',
+          'uncategorized' => 'faz_e2e_uncategorized_probe',
         );
-        if ( $analytics_id > 0 ) {
+        foreach ( $fixture_categories as $category_slug => $cookie_name ) {
+          $category_id = (int) $wpdb->get_var(
+            $wpdb->prepare(
+              "SELECT category_id FROM {$wpdb->prefix}faz_cookie_categories WHERE slug = %s",
+              $category_slug
+            )
+          );
+          if ( $category_id <= 0 ) {
+            continue;
+          }
           $category_cookie_count = (int) $wpdb->get_var(
             $wpdb->prepare(
               "SELECT COUNT(*) FROM {$wpdb->prefix}faz_cookies WHERE category = %d",
-              $analytics_id
+              $category_id
             )
           );
           if ( 0 === $category_cookie_count ) {
             $now = current_time( 'mysql' );
             $wpdb->insert( $wpdb->prefix . 'faz_cookies', array(
-              'name'          => 'faz_e2e_a11y_probe',
-              'slug'          => 'faz-e2e-a11y-probe',
-              'description'   => wp_json_encode( array( 'en' => 'E2E accessibility probe cookie.' ) ),
+              'name'          => $cookie_name,
+              'slug'          => str_replace( '_', '-', $cookie_name ),
+              'description'   => wp_json_encode( array( 'en' => 'E2E fixture cookie.' ) ),
               'duration'      => wp_json_encode( array( 'en' => 'Session' ) ),
               'domain'        => '127.0.0.1',
-              'category'      => $analytics_id,
+              'category'      => $category_id,
               'type'          => 'HTTP',
               'discovered'    => 0,
               'url_pattern'   => '',

@@ -367,24 +367,25 @@ test.describe('PR104 — F-SEC-03 scope fingerprint integrity check', () => {
  * ================================================================== */
 
 test.describe('PR104 — F-SEC-04 has_country_dependent_banners memoize', () => {
-  test('result is cached in a transient and invalidated by delete_cache()', () => {
+  test('result is cached in wp_cache under an epoch-versioned key and delete_cache invalidates by bumping the epoch (issue #109)', () => {
     const result = wpEval(`
-      delete_transient( 'faz_has_country_dependent_banners' );
-      // First call: populates the transient.
-      $first = \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Controller::get_instance()->has_country_dependent_banners();
-      $cached = get_transient( 'faz_has_country_dependent_banners' );
-      // delete_cache must wipe the transient.
-      \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Controller::get_instance()->delete_cache();
-      $after_invalidate = get_transient( 'faz_has_country_dependent_banners' );
+      $ctrl = \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Controller::get_instance();
+      // First call: populates the cache under the current epoch's key.
+      $epoch_before = (int) get_option( 'faz_banner_cache_epoch', 0 );
+      $first  = $ctrl->has_country_dependent_banners();
+      $cached = wp_cache_get( 'faz_has_country_dependent_banners_v' . $epoch_before, 'faz_banners' );
+      // delete_cache must bump the epoch — multi-node-safe invalidation.
+      $ctrl->delete_cache();
+      $epoch_after = (int) get_option( 'faz_banner_cache_epoch', 0 );
       echo wp_json_encode( array(
-        'first_value' => (bool) $first,
-        'cached_after_first' => $cached !== false,
-        'cached_after_invalidate' => $after_invalidate !== false,
+        'first_value'         => (bool) $first,
+        'cached_after_first'  => $cached !== false,
+        'epoch_bumped'        => $epoch_after > $epoch_before,
       ) );
     `).trim();
     const data = JSON.parse(result);
-    expect(data.cached_after_first, 'first call seeds the transient').toBe(true);
-    expect(data.cached_after_invalidate, 'delete_cache() wipes the transient').toBe(false);
+    expect(data.cached_after_first, 'first call seeds wp_cache under the current epoch key').toBe(true);
+    expect(data.epoch_bumped, 'delete_cache bumps the cache epoch so every node misses the old key').toBe(true);
   });
 });
 

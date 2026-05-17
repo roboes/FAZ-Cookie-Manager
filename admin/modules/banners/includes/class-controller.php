@@ -508,21 +508,32 @@ class Controller extends Base_Controller {
 	 * @return bool
 	 */
 	public function has_country_dependent_banners() {
-		// Memoize via transient — this method runs on every front-end
-		// request once geo-routing is enabled, reading EVERY banner row
-		// each time. On busy installs the per-request DB load was a
-		// real amplifier (F-SEC-04 in the adamsreview report). 5-minute
-		// TTL is short enough that an admin Save-toggling-a-banner
-		// experience stays snappy (delete_cache() below invalidates it
-		// on writes anyway), and long enough that a static page tier
-		// sees this as a near-zero-cost call.
-		$cached = get_transient( 'faz_has_country_dependent_banners' );
+		// Memoize via wp_cache + epoch (issue #109). The previous transient
+		// approach lost correctness on multi-node Redis without replication:
+		// delete_transient only invalidated the local node, so other nodes
+		// served stale geo-routing decisions until the 5-min TTL expired.
+		// Replacement strategy — "cache aside with versioned key":
+		//   1. The cache key embeds an epoch read from an OPTION
+		//      (`faz_banner_cache_epoch`). Options sit in WP's central
+		//      `alloptions` cache which IS replicated/invalidated across
+		//      nodes by every object-cache backend that supports
+		//      wp_cache_set_multiple (WP 6.0+) AND by every backend that
+		//      hooks the `updated_option` action.
+		//   2. delete_cache() bumps the epoch via update_option. All nodes
+		//      immediately read the new epoch on the next request → the
+		//      OLD cache key is never queried again. The stale entry
+		//      under the OLD key expires harmlessly via TTL.
+		// ClassicPress 1.x: wp_cache_get/set + get_option/update_option are
+		// pre-WP 2.x — no compat shim needed.
+		$epoch     = (int) get_option( 'faz_banner_cache_epoch', 0 );
+		$cache_key = 'faz_has_country_dependent_banners_v' . $epoch;
+		$cached    = wp_cache_get( $cache_key, 'faz_banners' );
 		if ( false !== $cached ) {
 			return (bool) $cached;
 		}
 		$items = $this->get_items();
 		if ( empty( $items ) || ! is_array( $items ) ) {
-			set_transient( 'faz_has_country_dependent_banners', 0, 5 * MINUTE_IN_SECONDS );
+			wp_cache_set( $cache_key, 0, 'faz_banners', 5 * MINUTE_IN_SECONDS );
 			return false;
 		}
 		foreach ( $items as $item ) {
@@ -531,7 +542,7 @@ class Controller extends Base_Controller {
 				continue;
 			}
 			if ( ! empty( $banner->get_target_countries() ) ) {
-				set_transient( 'faz_has_country_dependent_banners', 1, 5 * MINUTE_IN_SECONDS );
+				wp_cache_set( $cache_key, 1, 'faz_banners', 5 * MINUTE_IN_SECONDS );
 				return true;
 			}
 			// The ruleSet lives under .settings.ruleSet (see Banner::get_law()
@@ -550,12 +561,12 @@ class Controller extends Base_Controller {
 				}
 				$code = isset( $rule['code'] ) ? strtoupper( (string) $rule['code'] ) : 'ALL';
 				if ( 'ALL' !== $code ) {
-					set_transient( 'faz_has_country_dependent_banners', 1, 5 * MINUTE_IN_SECONDS );
+					wp_cache_set( $cache_key, 1, 'faz_banners', 5 * MINUTE_IN_SECONDS );
 					return true;
 				}
 			}
 		}
-		set_transient( 'faz_has_country_dependent_banners', 0, 5 * MINUTE_IN_SECONDS );
+		wp_cache_set( $cache_key, 0, 'faz_banners', 5 * MINUTE_IN_SECONDS );
 		return false;
 	}
 
@@ -569,6 +580,19 @@ class Controller extends Base_Controller {
 	 * @return void
 	 */
 	public function delete_cache() {
+		// Bump the cache epoch (issue #109). The has_country_dependent_banners
+		// memoization key embeds this epoch, so a bump effectively
+		// invalidates every node's cache simultaneously — the OLD key is
+		// never queried again. Replaces the previous delete_transient
+		// call which only invalidated the local Redis/Memcached node.
+		$epoch = (int) get_option( 'faz_banner_cache_epoch', 0 );
+		// PHP_INT_MAX guard so the option never overflows; reset to 0 is
+		// equivalent to "bumped" from the cache-key perspective (the new
+		// key won't match any prior cached entry).
+		$next  = $epoch >= PHP_INT_MAX - 1 ? 0 : $epoch + 1;
+		update_option( 'faz_banner_cache_epoch', $next, false );
+		// Sweep the legacy transient written by pre-fix 1.14.0 builds.
+		// One-shot cleanup; the call is cheap and idempotent.
 		delete_transient( 'faz_has_country_dependent_banners' );
 		parent::delete_cache();
 	}
