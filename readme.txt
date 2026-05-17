@@ -154,7 +154,7 @@ The plugin source includes several third-party domain names (e.g. `js.stripe.com
 1. **Script-blocking detection patterns** — used to identify analytics, advertising, and tracking scripts that the *site administrator's other plugins* may inject, so we can block them until the visitor has given consent. The plugin itself does **not** load any of these scripts.
 2. **Whitelist defaults** — domains such as `unpkg.com/`, `cdn.jsdelivr.net/`, `fonts.googleapis.com/`, `www.google.com/recaptcha/api`, etc. are seeded as default *whitelist* entries so the script blocker leaves them alone unless the admin explicitly removes them. They are configuration data, not outbound HTTP calls.
 
-The only outbound HTTP requests this plugin makes are the four documented above (Open Cookie Database, IAB GVL, MaxMind, AMP CDN). All four are gated behind explicit administrator action or an enabled feature.
+The only outbound HTTP requests this plugin makes are the five documented above (Open Cookie Database, IAB GVL, MaxMind, ip-api.com fallback, AMP CDN). All five are gated behind explicit administrator action or an enabled feature. The internal `/faz/v1/banner` endpoint described above is hosted by this plugin on the same site — no third-party network call leaves the visitor's browser to a remote service.
 
 == Installation ==
 

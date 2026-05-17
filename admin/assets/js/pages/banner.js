@@ -420,8 +420,8 @@
 		lawSelect.className = 'faz-input';
 		lawSelect.style.width = '100%';
 		[
-			{ value: 'gdpr', label: 'Opt-in — GDPR, UK-GDPR, ePrivacy, LGPD, nFADP, PIPEDA, …' },
-			{ value: 'ccpa', label: 'Opt-out — CCPA/CPRA, Virginia, Colorado, Connecticut, Utah, …' }
+			{ value: 'gdpr', label: __('banner.new.lawOptionGdpr', 'Opt-in — GDPR, UK-GDPR, ePrivacy, LGPD, nFADP, PIPEDA, …') },
+			{ value: 'ccpa', label: __('banner.new.lawOptionCcpa', 'Opt-out — CCPA/CPRA, Virginia, Colorado, Connecticut, Utah, …') }
 		].forEach(function (opt) {
 			var o = document.createElement('option');
 			o.value = opt.value;
@@ -447,14 +447,14 @@
 		var regGrid = document.createElement('div');
 		regGrid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.4rem;';
 		var REGION_LABELS = {
-			EU: 'EU / EEA (27 + IS, LI, NO)',
-			UK: 'United Kingdom (UK-GDPR)',
-			US: 'United States',
-			CA: 'Canada',
-			BR: 'Brazil (LGPD)',
-			AU: 'Australia',
-			JP: 'Japan',
-			CH: 'Switzerland (nFADP)'
+			EU: __('banner.new.regionEu', 'EU / EEA (27 + IS, LI, NO)'),
+			UK: __('banner.new.regionUk', 'United Kingdom (UK-GDPR)'),
+			US: __('banner.new.regionUs', 'United States'),
+			CA: __('banner.new.regionCa', 'Canada'),
+			BR: __('banner.new.regionBr', 'Brazil (LGPD)'),
+			AU: __('banner.new.regionAu', 'Australia'),
+			JP: __('banner.new.regionJp', 'Japan'),
+			CH: __('banner.new.regionCh', 'Switzerland (nFADP)')
 		};
 		Object.keys(REGION_PRESETS).forEach(function (key) {
 			var lbl = document.createElement('label');
@@ -487,7 +487,7 @@
 		customInput.type = 'text';
 		customInput.className = 'faz-input';
 		customInput.style.width = '100%';
-		customInput.placeholder = 'NZ, SG, KR';
+		customInput.placeholder = __('banner.new.customCountriesPlaceholder', 'NZ, SG, KR');
 		customWrap.appendChild(customLabel);
 		customWrap.appendChild(customInput);
 		form.appendChild(customWrap);

@@ -423,57 +423,84 @@ test.describe('Session fixes coverage (codex/verify-report-findings)', () => {
     // surface in popup mode. In classic+pushdown the inner element stays
     // hidden (the inline preference-wrapper is what expands), so focus()
     // is a no-op there. Force popup shape so the assertion exercises the
-    // modal path this test was written for. The active banner shape can
-    // be left in classic+pushdown by earlier specs (e.g. close-button
-    // override tests).
-    wpEval(`
+    // modal path this test was written for. Snapshot the original banner
+    // settings BEFORE mutating so the finally block can restore them —
+    // without this, the type=box / preferenceCenterType=popup change
+    // would leak into every spec that runs after.
+    const originalSettings = wpEval(`
       $banner = \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Controller::get_instance()->get_active_banner();
-      if ( $banner ) {
-        $s = $banner->get_settings();
-        if ( ! is_array( $s['settings'] ) ) { $s['settings'] = array(); }
-        $s['settings']['type'] = 'box';
-        $s['settings']['preferenceCenterType'] = 'popup';
-        $banner->set_settings( $s );
-        $banner->save();
-        delete_option( 'faz_banner_template' );
-        if ( function_exists( 'faz_clear_banner_template_cache' ) ) {
-          faz_clear_banner_template_cache();
+      echo $banner ? base64_encode( wp_json_encode( $banner->get_settings() ) ) : '';
+    `).trim();
+
+    try {
+      wpEval(`
+        $banner = \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Controller::get_instance()->get_active_banner();
+        if ( $banner ) {
+          $s = $banner->get_settings();
+          if ( ! is_array( $s['settings'] ) ) { $s['settings'] = array(); }
+          $s['settings']['type'] = 'box';
+          $s['settings']['preferenceCenterType'] = 'popup';
+          $banner->set_settings( $s );
+          $banner->save();
+          delete_option( 'faz_banner_template' );
+          if ( function_exists( 'faz_clear_banner_template_cache' ) ) {
+            faz_clear_banner_template_cache();
+          }
+          \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Controller::get_instance()->delete_cache();
         }
-        \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Controller::get_instance()->delete_cache();
+      `);
+
+      await page.context().clearCookies();
+      await page.goto('/', { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('[data-faz-tag="notice"]')).toBeVisible();
+
+      await page.locator('[data-faz-tag="settings-button"]').first().click();
+      await expect(page.locator('.faz-preference-center')).toBeVisible();
+
+      // Focus may take several frames to move after the CSS transition on
+      // .faz-preference-center completes. Poll generously so slow CI
+      // workers or single-threaded dev servers don't false-fail without
+      // masking a regression where focus never moves.
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() => {
+              const pref = document.querySelector('.faz-preference-center');
+              return pref !== null && pref.contains(document.activeElement);
+            }),
+          { timeout: 10_000 },
+        )
+        .toBe(true);
+
+      await page.locator('[data-faz-tag="detail-close"]').first().click();
+      await expect(page.locator('.faz-preference-center')).toBeHidden();
+
+      const triggerIsFocused = await page.evaluate(() => {
+        const trigger = document.querySelector('[data-faz-tag="settings-button"] button') as HTMLElement | null
+          ?? document.querySelector('[data-faz-tag="settings-button"]') as HTMLElement | null;
+        return trigger !== null && (trigger === document.activeElement || trigger.contains(document.activeElement));
+      });
+      expect(triggerIsFocused).toBe(true);
+    } finally {
+      // Restore the banner shape so the mutation stays bounded to this
+      // test. Without the restore, every downstream spec inherits the
+      // forced popup mode (and the cleared faz_banner_template cache).
+      if (originalSettings) {
+        wpEval(`
+          $banner = \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Controller::get_instance()->get_active_banner();
+          $restored = json_decode( base64_decode( ${JSON.stringify(originalSettings)} ), true );
+          if ( $banner && is_array( $restored ) ) {
+            $banner->set_settings( $restored );
+            $banner->save();
+            delete_option( 'faz_banner_template' );
+            if ( function_exists( 'faz_clear_banner_template_cache' ) ) {
+              faz_clear_banner_template_cache();
+            }
+            \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Controller::get_instance()->delete_cache();
+          }
+        `);
       }
-    `);
-
-    await page.context().clearCookies();
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('[data-faz-tag="notice"]')).toBeVisible();
-
-    await page.locator('[data-faz-tag="settings-button"]').first().click();
-    await expect(page.locator('.faz-preference-center')).toBeVisible();
-
-    // Focus may take several frames to move after the CSS transition on
-    // .faz-preference-center completes. Poll generously so slow CI
-    // workers or single-threaded dev servers don't false-fail without
-    // masking a regression where focus never moves.
-    await expect
-      .poll(
-        () =>
-          page.evaluate(() => {
-            const pref = document.querySelector('.faz-preference-center');
-            return pref !== null && pref.contains(document.activeElement);
-          }),
-        { timeout: 10_000 },
-      )
-      .toBe(true);
-
-    await page.locator('[data-faz-tag="detail-close"]').first().click();
-    await expect(page.locator('.faz-preference-center')).toBeHidden();
-
-    const triggerIsFocused = await page.evaluate(() => {
-      const trigger = document.querySelector('[data-faz-tag="settings-button"] button') as HTMLElement | null
-        ?? document.querySelector('[data-faz-tag="settings-button"]') as HTMLElement | null;
-      return trigger !== null && (trigger === document.activeElement || trigger.contains(document.activeElement));
-    });
-    expect(triggerIsFocused).toBe(true);
+    }
   });
 
   // --- 9. Gateway pattern caching (Stripe vs analytics) ---

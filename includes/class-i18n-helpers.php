@@ -199,7 +199,11 @@ if ( ! function_exists( 'faz_country_to_language' ) ) {
 			// German
 			'DE' => 'de', 'AT' => 'de', 'LI' => 'de', 'CH' => 'de',
 			// French
-			'FR' => 'fr', 'MC' => 'fr', 'BE' => 'fr', 'LU' => 'fr',
+			// BE: Dutch (Vlaams) is the most-spoken language (~60%); French
+			// (Wallonia, ~38%) and German (East Cantons, ~1%) are also
+			// official. Override via the faz_country_to_language filter for
+			// French- or German-primary Belgian sites.
+			'FR' => 'fr', 'MC' => 'fr', 'BE' => 'nl', 'LU' => 'fr',
 			// Spanish
 			'ES' => 'es', 'MX' => 'es', 'AR' => 'es', 'CL' => 'es', 'CO' => 'es', 'PE' => 'es', 'VE' => 'es', 'UY' => 'es', 'PY' => 'es',
 			// Portuguese

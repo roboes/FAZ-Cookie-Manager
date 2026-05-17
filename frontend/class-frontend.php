@@ -847,6 +847,14 @@ class Frontend {
 		if ( ! faz_is_front_end_request() ) {
 			return;
 		}
+		// Mirror load_banner()'s gating: when banner_control is off (or any
+		// per-page disable filter trips), the page never renders the banner
+		// payload, so emitting Cache-Control: no-store would penalise the
+		// site's full-page cache for nothing. Same check load_banner() uses
+		// at line 651 — keep them aligned.
+		if ( $this->is_banner_disabled_by_settings() ) {
+			return;
+		}
 		if ( ! $this->is_country_dependent_output() || headers_sent() ) {
 			return;
 		}

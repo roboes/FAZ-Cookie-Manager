@@ -209,6 +209,160 @@ test.describe('PR104-FU — faz_country_to_language map', () => {
 });
 
 /* ================================================================== *
+ * 6. promote_fallback_default — at-least-one default invariant
+ * ================================================================== */
+
+test.describe('PR104-FU — promote_fallback_default', () => {
+  test('Controller::update_item promotes a peer when the only default is un-toggled', () => {
+    const result = wpEval(`
+      global $wpdb;
+      $table = $wpdb->prefix . 'faz_banners';
+
+      // Seed: ensure two rows exist and exactly one carries the default
+      // flag. Use direct $wpdb writes so the seed is independent of any
+      // sanitize / model logic that could mask the bug.
+      $active = \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Controller::get_instance()->get_active_banner();
+      if ( ! $active ) { echo wp_json_encode( array( 'error' => 'NO_ACTIVE' ) ); return; }
+      $active_id = (int) $active->get_id();
+      $peer_id   = (int) $wpdb->get_var(
+        $wpdb->prepare(
+          "SELECT banner_id FROM {$table} WHERE banner_id <> %d ORDER BY banner_id ASC LIMIT 1",
+          $active_id
+        )
+      );
+      if ( $peer_id <= 0 ) {
+        $now = current_time( 'mysql' );
+        $wpdb->insert( $table, array(
+          'name'             => 'PR104-FU promote peer',
+          'slug'             => 'pr104-fu-promote-peer',
+          'status'           => 1,
+          'settings'         => wp_json_encode( $active->get_settings() ),
+          'contents'         => wp_json_encode( $active->get_contents() ),
+          'banner_default'   => 0,
+          'target_countries' => wp_json_encode( array() ),
+          'priority'         => 0,
+          'date_created'     => $now,
+          'date_modified'    => $now,
+        ) );
+        $peer_id = (int) $wpdb->insert_id;
+      }
+      // Reset to a clean "active is the sole default" state. Direct $wpdb
+      // writes bypass the Controller cache, so we MUST invalidate it
+      // explicitly — otherwise update_item's "new Banner(id)" snapshot
+      // (which seeds was_default) reads the stale cached value and the
+      // promote branch never fires.
+      $wpdb->query( "UPDATE {$table} SET banner_default = 0" );
+      $wpdb->update( $table, array( 'banner_default' => 1 ), array( 'banner_id' => $active_id ) );
+      \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Controller::get_instance()->delete_cache();
+
+      $defaults_before = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE banner_default = 1" );
+
+      // Now un-toggle the active banner's default flag through update_item.
+      // Pre-fix this left the DB with zero defaults; post-fix the
+      // promote_fallback_default branch promotes the peer.
+      $b = new \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Banner( $active_id );
+      $b->set_default( false );
+      $b->save();
+
+      $defaults_after = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE banner_default = 1" );
+      $peer_default   = (int) $wpdb->get_var( $wpdb->prepare( "SELECT banner_default FROM {$table} WHERE banner_id = %d", $peer_id ) );
+      $active_default = (int) $wpdb->get_var( $wpdb->prepare( "SELECT banner_default FROM {$table} WHERE banner_id = %d", $active_id ) );
+
+      // Restore the canonical (active = default) shape.
+      $wpdb->query( "UPDATE {$table} SET banner_default = 0" );
+      $wpdb->update( $table, array( 'banner_default' => 1 ), array( 'banner_id' => $active_id ) );
+
+      echo wp_json_encode( array(
+        'defaults_before' => $defaults_before,
+        'defaults_after'  => $defaults_after,
+        'peer_default'    => $peer_default,
+        'active_default'  => $active_default,
+      ) );
+    `).trim();
+    const data = JSON.parse(result);
+    expect(data.defaults_before, 'seed: exactly one default').toBe(1);
+    expect(data.defaults_after, 'after un-toggling the sole default, promote_fallback_default kicks in → still exactly one').toBe(1);
+    expect(data.active_default, 'caller row really lost its default flag').toBe(0);
+    expect(data.peer_default, 'the peer row was promoted to default').toBe(1);
+  });
+});
+
+/* ================================================================== *
+ * 7. update_db_350 migration end-to-end (existing install upgrade)
+ * ================================================================== */
+
+test.describe('PR104-FU — update_db_350 migrates existing installs', () => {
+  test('simulates a pre-1.14.0 install (no target_countries, no priority, zero defaults) and confirms the migration repairs every invariant', () => {
+    const result = wpEval(`
+      global $wpdb;
+      $table  = $wpdb->prefix . 'faz_banners';
+      $schema = $wpdb->get_var( 'SELECT DATABASE()' );
+
+      // Simulate the pre-1.14.0 schema: drop both new columns.
+      @$wpdb->query( "ALTER TABLE {$table} DROP COLUMN target_countries" );
+      @$wpdb->query( "ALTER TABLE {$table} DROP COLUMN priority" );
+
+      // Simulate a pre-1.14.0 row-state with NO default banner: the
+      // single-banner installs that pre-date the default-flag invariant
+      // never set banner_default and would fall into the picker's
+      // status_default = null bucket post-upgrade.
+      $wpdb->query( "UPDATE {$table} SET banner_default = 0" );
+
+      $tc_before  = (int) $wpdb->get_var( $wpdb->prepare(
+        'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = %s',
+        $schema, $table, 'target_countries'
+      ) );
+      $pr_before  = (int) $wpdb->get_var( $wpdb->prepare(
+        'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = %s',
+        $schema, $table, 'priority'
+      ) );
+      $def_before = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE banner_default = 1" );
+
+      // Run the migration.
+      \\FazCookie\\Includes\\Activator::update_db_350();
+
+      $tc_after  = (int) $wpdb->get_var( $wpdb->prepare(
+        'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = %s',
+        $schema, $table, 'target_countries'
+      ) );
+      $pr_after  = (int) $wpdb->get_var( $wpdb->prepare(
+        'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = %s',
+        $schema, $table, 'priority'
+      ) );
+      $def_after = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE banner_default = 1" );
+
+      // Backfill: every row should now have target_countries = '[]' (not NULL / not '').
+      $empty_targets = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE target_countries = '[]'" );
+      $null_or_blank = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE target_countries IS NULL OR target_countries = ''" );
+      $total_rows    = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table}" );
+
+      echo wp_json_encode( array(
+        'tc_before' => $tc_before,
+        'pr_before' => $pr_before,
+        'tc_after'  => $tc_after,
+        'pr_after'  => $pr_after,
+        'def_before'   => $def_before,
+        'def_after'    => $def_after,
+        'total'        => $total_rows,
+        'empty_targets'   => $empty_targets,
+        'null_or_blank'   => $null_or_blank,
+      ) );
+    `).trim();
+    const data = JSON.parse(result);
+    expect(data.tc_before, 'simulated install lacks target_countries').toBe(0);
+    expect(data.pr_before, 'simulated install lacks priority').toBe(0);
+    expect(data.def_before, 'simulated install has zero default banners').toBe(0);
+
+    expect(data.tc_after, 'migration added target_countries column').toBe(1);
+    expect(data.pr_after, 'migration added priority column').toBe(1);
+    expect(data.def_after, 'migration promoted exactly one banner to default').toBe(1);
+
+    expect(data.empty_targets, 'every row backfilled with target_countries=[]').toBe(data.total);
+    expect(data.null_or_blank, 'no row left NULL or empty').toBe(0);
+  });
+});
+
+/* ================================================================== *
  * 5. faz_use_country_language_fallback opt-in
  * ================================================================== */
 

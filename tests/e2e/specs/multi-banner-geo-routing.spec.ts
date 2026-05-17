@@ -34,42 +34,69 @@ test.describe.serial('Multi-banner geo-routing (Controller selector + Banner mod
       echo wp_json_encode( $wpdb->get_results( "SELECT * FROM {\$wpdb->prefix}faz_banners" ) );
     `).trim();
 
-    // STEP 2 — Ensure banner_id=2 exists for GEO-01..GEO-30. The whole
-    // suite uses hardcoded banner_id=2 in its $wpdb->update() calls. We
-    // can't rely on residual rows because the auto_increment counter
-    // drifts (CB-OV-10 created banner_id=2, its teardown DELETEd it, the
-    // next INSERT would land at banner_id=3 — and GEO-01's
-    // update(banner_id=2) would silently affect zero rows).
+    // STEP 2 — Force canonical (banner_id=1, banner_id=2) shape. The
+    // suite hardcodes banner_id IN ITS $wpdb->update() calls, so the rows
+    // MUST exist at those exact IDs. ALTER TABLE AUTO_INCREMENT does not
+    // reliably reset the counter below the current MAX (MySQL/MariaDB
+    // ignores the lower value as a duplicate-key safety check), so this
+    // step uses explicit-ID INSERTs after a full table wipe — the only
+    // approach that guarantees the IDs land at 1 and 2 regardless of any
+    // prior auto-increment drift left by earlier specs in the run.
     //
-    // Force the canonical shape: drop every non-active banner, reset
-    // AUTO_INCREMENT to 2, then INSERT — that row WILL be banner_id=2.
-    // The afterAll restore below uses DELETE + explicit-id INSERT, so any
-    // row this step deletes is fully recreated from the snapshot.
+    // The afterAll restore below uses DELETE + explicit-id INSERT from
+    // the snapshot captured at STEP 1, so even rows wiped here are fully
+    // recreated at teardown — no cross-spec leakage.
     wpEval(`
       global $wpdb;
       $table = $wpdb->prefix . 'faz_banners';
       $active = \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Controller::get_instance()->get_active_banner();
-      $active_id = $active ? (int) $active->get_id() : 1;
-      $wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE banner_id <> %d", $active_id ) );
-      $wpdb->query( "ALTER TABLE {$table} AUTO_INCREMENT = 2" );
-      if ( $active ) {
-        $now = current_time( 'mysql' );
-        $wpdb->insert(
-          $table,
-          array(
-            'name'             => 'GEO suite secondary',
-            'slug'             => 'geo-suite-secondary',
-            'status'           => 0,
-            'settings'         => wp_json_encode( $active->get_settings() ),
-            'contents'         => wp_json_encode( $active->get_contents() ),
-            'banner_default'   => 0,
-            'target_countries' => wp_json_encode( array() ),
-            'priority'         => 0,
-            'date_created'     => $now,
-            'date_modified'    => $now,
-          )
-        );
-      }
+      if ( ! $active ) { return; }
+      $primary_settings = wp_json_encode( $active->get_settings() );
+      $primary_contents = wp_json_encode( $active->get_contents() );
+      $primary_name     = $active->get_name();
+      $primary_slug     = $active->get_slug();
+      $now              = current_time( 'mysql' );
+
+      // Full wipe → explicit-ID INSERTs. banner_id=1 carries the original
+      // active banner's content so the rest of the suite sees a
+      // realistically-shaped banner, not an empty shell.
+      $wpdb->query( "DELETE FROM {$table}" );
+      $wpdb->insert(
+        $table,
+        array(
+          'banner_id'        => 1,
+          'name'             => $primary_name ?: 'GEO suite primary',
+          'slug'             => $primary_slug ?: 'geo-suite-primary',
+          'status'           => 1,
+          'settings'         => $primary_settings,
+          'contents'         => $primary_contents,
+          'banner_default'   => 1,
+          'target_countries' => wp_json_encode( array() ),
+          'priority'         => 0,
+          'date_created'     => $now,
+          'date_modified'    => $now,
+        )
+      );
+      $wpdb->insert(
+        $table,
+        array(
+          'banner_id'        => 2,
+          'name'             => 'GEO suite secondary',
+          'slug'             => 'geo-suite-secondary',
+          'status'           => 0,
+          'settings'         => $primary_settings,
+          'contents'         => $primary_contents,
+          'banner_default'   => 0,
+          'target_countries' => wp_json_encode( array() ),
+          'priority'         => 0,
+          'date_created'     => $now,
+          'date_modified'    => $now,
+        )
+      );
+      // Belt-and-suspenders: bump AUTO_INCREMENT so any spec that inserts
+      // an additional row mid-suite gets banner_id >= 3.
+      $wpdb->query( "ALTER TABLE {$table} AUTO_INCREMENT = 3" );
+      \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Controller::get_instance()->delete_cache();
     `);
   });
 

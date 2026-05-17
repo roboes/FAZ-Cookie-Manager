@@ -220,6 +220,16 @@ class Controller extends Base_Controller {
 	 */
 	public function update_item( $banner ) {
 		global $wpdb;
+		// Capture the pre-update default state so we can detect the
+		// "was default → now not" transition AFTER the UPDATE succeeds.
+		// Without this, an admin un-toggling the flag on the only
+		// banner_default=1 row leaves the DB with zero defaults, breaking
+		// the picker's status_default fallback.
+		$was_default = false;
+		if ( $banner->get_id() > 0 ) {
+			$existing    = new Banner( $banner->get_id() );
+			$was_default = (bool) $existing->get_default();
+		}
 		$data = array(
 			'name'             => $banner->get_name(),
 			'slug'             => $banner->get_slug(),
@@ -248,11 +258,19 @@ class Controller extends Base_Controller {
 		if ( false === $updated ) {
 			return;
 		}
-		// Enforce single-default invariant AFTER the current row's UPDATE
-		// succeeded — clearing peer rows first would leave the DB without
-		// any banner_default=1 if our own UPDATE then failed.
+		// Default-flag invariants. Both branches run AFTER the current
+		// row's UPDATE so a failed UPDATE never leaves the DB in a worse
+		// state than before:
+		//   - default=true  → clear peers (at-most-one invariant)
+		//   - default=false but was_default=true → promote a peer to
+		//     default (at-least-one invariant). Otherwise the install
+		//     ends up with zero banner_default=1 rows and
+		//     get_active_banner_for_country() loses its last-resort
+		//     fallback for unmatched countries.
 		if ( true === $banner->get_default() ) {
 			$this->clear_default_on_others( $banner->get_id() );
+		} elseif ( $was_default ) {
+			$this->promote_fallback_default( $banner->get_id() );
 		}
 		if ( $updated > 0 ) {
 			$this->delete_cache();
@@ -570,6 +588,61 @@ class Controller extends Base_Controller {
 			)
 		);
 		$this->delete_cache();
+	}
+
+	/**
+	 * Promote a peer banner to banner_default=1 when the caller is about
+	 * to leave the install with zero default rows.
+	 *
+	 * Enforces the at-least-one-default invariant the multi-banner picker
+	 * relies on: get_active_banner_for_country() falls back to
+	 * banner_default=1 when no targeted / match-all banner matches the
+	 * visitor's country, and a zero-default install loses that path.
+	 *
+	 * Selection preference (deterministic):
+	 *   1. status=1 row with the lowest banner_id (other than $exclude_id)
+	 *   2. any row with the lowest banner_id (other than $exclude_id)
+	 *
+	 * No-op when no other row exists — the caller's row is the only one
+	 * left and removing its default flag is a legitimate "I want zero
+	 * banners on this install" state.
+	 *
+	 * @since 1.14.0
+	 * @param int $exclude_id Row that just lost its default flag; never re-promoted to itself.
+	 * @return void
+	 */
+	public function promote_fallback_default( $exclude_id = 0 ) {
+		global $wpdb;
+		$exclude_id = absint( $exclude_id );
+		// Prefer a status=1 row first; fall back to any row only if no
+		// active banner exists. Both queries exclude the caller's row.
+		$fallback_id = (int) $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$wpdb->prepare(
+				"SELECT banner_id FROM `{$wpdb->prefix}faz_banners` WHERE `status` = %d AND `banner_id` <> %d ORDER BY `banner_id` ASC LIMIT %d",
+				1,
+				$exclude_id,
+				1
+			)
+		);
+		if ( $fallback_id <= 0 ) {
+			$fallback_id = (int) $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				$wpdb->prepare(
+					"SELECT banner_id FROM `{$wpdb->prefix}faz_banners` WHERE `banner_id` <> %d ORDER BY `banner_id` ASC LIMIT %d",
+					$exclude_id,
+					1
+				)
+			);
+		}
+		if ( $fallback_id > 0 ) {
+			$wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				$wpdb->prefix . 'faz_banners',
+				array( 'banner_default' => 1 ),
+				array( 'banner_id' => $fallback_id ),
+				array( '%d' ),
+				array( '%d' )
+			);
+			$this->delete_cache();
+		}
 	}
 
 	/**

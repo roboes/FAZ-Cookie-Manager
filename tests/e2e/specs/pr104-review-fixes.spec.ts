@@ -419,22 +419,28 @@ test.describe.serial('PR104 — CR-06 IAB TCF marks output country-dependent', (
   test('is_country_dependent_output returns true when IAB is enabled even on single-banner installs', () => {
     const result = wpEval(`
       $prev = get_option( 'faz_settings', null );
-      $s = get_option( 'faz_settings', array() );
-      if ( ! is_array( $s ) ) { $s = array(); }
+      $s = is_array( $prev ) ? $prev : array();
       if ( ! isset( $s['iab'] ) ) { $s['iab'] = array(); }
-      // Baseline — IAB off, default settings.
+
+      // Baseline — IAB off. Use a FRESH Frontend instance each invocation:
+      // is_country_dependent_output() reads through the instance-level
+      // settings_option_cache memoization, so a single instance would return
+      // the same value both times even after update_option flipped it.
       $s['iab']['enabled'] = false;
       update_option( 'faz_settings', $s );
-      $fe = new \\FazCookie\\Frontend\\Frontend( 'faz-cookie-manager', '1.0' );
-      $ref = new ReflectionClass( $fe );
-      $m = $ref->getMethod( 'is_country_dependent_output' );
-      $m->setAccessible( true );
-      $before = $m->invoke( $fe );
+      $fe_before = new \\FazCookie\\Frontend\\Frontend( 'faz-cookie-manager', '1.0' );
+      $m_before  = ( new ReflectionClass( $fe_before ) )->getMethod( 'is_country_dependent_output' );
+      $m_before->setAccessible( true );
+      $before = $m_before->invoke( $fe_before );
 
-      // Enable IAB.
+      // Enable IAB → fresh Frontend instance + fresh method handle so the
+      // instance-level cache is rebuilt against the just-written option.
       $s['iab']['enabled'] = true;
       update_option( 'faz_settings', $s );
-      $after = $m->invoke( $fe );
+      $fe_after = new \\FazCookie\\Frontend\\Frontend( 'faz-cookie-manager', '1.0' );
+      $m_after  = ( new ReflectionClass( $fe_after ) )->getMethod( 'is_country_dependent_output' );
+      $m_after->setAccessible( true );
+      $after = $m_after->invoke( $fe_after );
 
       // Restore.
       if ( null === $prev ) { delete_option( 'faz_settings' ); } else { update_option( 'faz_settings', $prev ); }
@@ -652,8 +658,8 @@ test.describe('PR104 — F-UX-02/03/05/06 admin UI elements present', () => {
 });
 
 test.describe('PR104 — F-UX-01 multi-banner switcher', () => {
-  test('switcher card is hidden on a single-banner install and visible with 2+ banners', async ({ page, loginAsAdmin }) => {
-    // Snapshot count; the test does not mutate banner state.
+  test('switcher dropdown is hidden on a single-banner install and visible with 2+ banners', async ({ page, loginAsAdmin }) => {
+    // Snapshot count BEFORE visiting so we know which branch to assert.
     const beforeCount = parseInt(wpEval(`
       global $wpdb;
       echo (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->prefix}faz_banners" );
@@ -661,18 +667,38 @@ test.describe('PR104 — F-UX-01 multi-banner switcher', () => {
 
     await loginAsAdmin(page);
     await page.goto(`${WP_BASE}/wp-admin/admin.php?page=faz-cookie-manager-banner`, { waitUntil: 'domcontentloaded' });
-    // Give the switcher's async FAZ.get('banners') call a moment to land.
-    await page.waitForFunction(() => {
-      const el = document.getElementById('faz-b-switcher');
-      return el && (el.style.display !== '' || el.dataset.fazSwitcherChecked === '1');
-    }, undefined, { timeout: 10_000 }).catch(() => {});
 
+    // The switcher container itself is ALWAYS visible (1.14.0+) — it
+    // hosts the inline banner-name rename input which needs to be there
+    // even on single-banner installs. Wait for the async FAZ.get('banners')
+    // call to land before sampling the dropdown.
     const switcher = page.locator('#faz-b-switcher');
-    await expect(switcher, 'switcher markup is rendered server-side').toBeAttached();
+    await expect(switcher, 'switcher container is rendered and visible').toBeVisible({ timeout: 10_000 });
+
+    // The DROPDOWN (and the delete button) collapses only when count <= 1.
+    // Wait for the populate cycle (the dropdown only gets options once
+    // FAZ.get('banners') resolves) so the visibility sample is stable.
+    const dropdown = page.locator('#faz-b-switcher-select');
+    await page.waitForFunction(
+      () => (document.querySelectorAll('#faz-b-switcher-select option').length > 0)
+        || (document.getElementById('faz-b-switcher-select')?.style.display === 'none'),
+      undefined,
+      { timeout: 10_000 },
+    ).catch(() => {});
+
     if (beforeCount >= 2) {
-      await expect(switcher, 'switcher is visible when ≥2 banners exist').toBeVisible();
-      const optionCount = await page.locator('#faz-b-switcher-select option').count();
-      expect(optionCount, 'switcher dropdown lists every banner row').toBeGreaterThanOrEqual(2);
+      await expect(dropdown, 'dropdown visible when ≥2 banners exist').toBeVisible();
+      const optionCount = await dropdown.locator('option').count();
+      expect(optionCount, 'dropdown lists every banner row').toBeGreaterThanOrEqual(2);
+    } else {
+      // SINGLE-BANNER install: dropdown collapses, delete button hides.
+      // Without this branch (pre-fix) the test reported "passed" without
+      // actually validating the hidden state.
+      await expect(dropdown, 'dropdown hidden on a single-banner install').toBeHidden();
+      const delBtn = page.locator('#faz-b-switcher-delete');
+      await expect(delBtn, 'delete button hidden on a single-banner install').toBeHidden();
+      // The rename input must still be present + visible.
+      await expect(page.locator('#faz-b-name-inline'), 'inline rename input stays visible on single-banner installs').toBeVisible();
     }
   });
 });
