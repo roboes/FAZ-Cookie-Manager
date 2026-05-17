@@ -251,44 +251,79 @@
 	// from the current one, and delete the current banner (except the
 	// last remaining row).
 	function populateSwitcher() {
-		var wrap   = document.getElementById('faz-b-switcher');
-		var select = document.getElementById('faz-b-switcher-select');
-		var newBtn = document.getElementById('faz-b-switcher-new');
-		var delBtn = document.getElementById('faz-b-switcher-delete');
+		var wrap    = document.getElementById('faz-b-switcher');
+		var select  = document.getElementById('faz-b-switcher-select');
+		var newBtn  = document.getElementById('faz-b-switcher-new');
+		var delBtn  = document.getElementById('faz-b-switcher-delete');
+		var nameIn  = document.getElementById('faz-b-name-inline');
 		if (!wrap || !select || !newBtn) return;
+
+		// Populate the inline name input from the current banner so the
+		// admin can rename it directly from the toolbar.
+		if (nameIn && bannerData && typeof bannerData.name === 'string') {
+			nameIn.value = bannerData.name;
+		}
 
 		FAZ.get('banners').then(function (data) {
 			var rows = Array.isArray(data) ? data : [];
-			// Hide the entire switcher card when only one banner exists —
-			// keeps the UI clean for single-banner installs (the
-			// overwhelming majority).
-			// 'flex' (not '') so the compact toolbar lays out inline —
-			// the markup uses display:flex via inline style; clearing
-			// the inline property would fall back to block.
-			wrap.style.display = rows.length <= 1 ? 'none' : 'flex';
-			// Always populate (the dropdown stays accurate even for the
-			// edge case where rows.length === 1 and the admin clicks
-			// "+ New banner" to add a second one).
+			// Toolbar is always visible (single-banner installs still need
+			// the rename input). Only the dropdown collapses on solo rows.
+			select.style.display = rows.length <= 1 ? 'none' : '';
 			while (select.firstChild) { select.removeChild(select.firstChild); }
 			rows.forEach(function (b) {
 				var opt = document.createElement('option');
 				opt.value = String(b.id);
 				var label = b.name || ('Banner #' + b.id);
-				if (Number(b['default']) === 1) label += ' ★'; // ★
+				if (Number(b['default']) === 1) label += ' ★';
 				if (Number(b.status) !== 1) label += ' (' + __('banner.inactive', 'inactive') + ')';
 				opt.textContent = label;
 				if (Number(b.id) === Number(bannerId)) opt.selected = true;
 				select.appendChild(opt);
 			});
-			// Show delete only when there's more than one row AND this
-			// banner isn't the system default — deleting the default would
-			// leave the picker with no fallback row.
 			if (delBtn) {
 				var current = rows.filter(function (b) { return Number(b.id) === Number(bannerId); })[0];
 				var canDelete = rows.length > 1 && current && Number(current['default']) !== 1;
 				delBtn.style.display = canDelete ? '' : 'none';
 			}
 		}).catch(function () { /* network glitch — switcher just doesn't appear */ });
+
+		// Inline name editor: PUT the new name on blur or Enter. Skips
+		// when value is unchanged or empty. Updates the local bannerData
+		// so subsequent saves don't revert it.
+		if (nameIn && !nameIn.dataset.fazNameBound) {
+			var commitName = function () {
+				if (!bannerData) return;
+				var next = (nameIn.value || '').trim();
+				if (!next) { nameIn.value = bannerData.name || ''; return; }
+				if (next === bannerData.name) return;
+				FAZ.put('banners/' + bannerId, {
+					name: next,
+					status: bannerData.status,
+					'default': bannerData['default'],
+					properties: bannerData.properties,
+					contents: bannerData.contents
+				}).then(function () {
+					bannerData.name = next;
+					FAZ.notify(__('banner.renamed', 'Banner renamed.'));
+					var opt = select.querySelector('option[value="' + bannerId + '"]');
+					if (opt) {
+						var label = next;
+						if (Number(bannerData['default']) === 1) label += ' ★';
+						if (Number(bannerData.status) !== 1) label += ' (' + __('banner.inactive', 'inactive') + ')';
+						opt.textContent = label;
+					}
+				}).catch(function () {
+					FAZ.notify(__('banner.renameFailed', 'Failed to save the new name.'), 'error');
+					nameIn.value = bannerData.name || '';
+				});
+			};
+			nameIn.addEventListener('blur', commitName);
+			nameIn.addEventListener('keydown', function (e) {
+				if (e.key === 'Enter') { e.preventDefault(); nameIn.blur(); }
+				if (e.key === 'Escape') { nameIn.value = bannerData ? (bannerData.name || '') : ''; nameIn.blur(); }
+			});
+			nameIn.dataset.fazNameBound = '1';
+		}
 
 		if (!select.dataset.fazSwitcherBound) {
 			select.addEventListener('change', function () {
@@ -307,12 +342,38 @@
 		if (delBtn && !delBtn.dataset.fazSwitcherBound) {
 			delBtn.addEventListener('click', function () {
 				if (!window.confirm(__('banner.deleteConfirm', 'Delete this banner permanently? This cannot be undone.'))) return;
-				FAZ.del('banners/' + bannerId).then(function () {
-					var base = window.location.href.split('?')[0];
-					var page = (window.location.search.match(/page=([^&]+)/) || [null, 'faz-cookie-manager-banner'])[1];
-					window.location.href = base + '?page=' + encodeURIComponent(page);
-				}).catch(function () {
-					FAZ.notify(__('banner.deleteFailed', 'Failed to delete banner.'), 'error');
+				delBtn.disabled = true;
+				FAZ.del('banners/' + bannerId).then(function (resp) {
+					// REST returns the deleted row count from $wpdb->delete.
+					// 0 means the id didn't match anything — surface that
+					// instead of "succeeding" silently and reloading.
+					var n = (typeof resp === 'number') ? resp : (resp && typeof resp.deleted === 'number' ? resp.deleted : 1);
+					if (!n) {
+						delBtn.disabled = false;
+						FAZ.notify(__('banner.deleteFailed', 'Failed to delete banner.') + ' (no row affected — id=' + bannerId + ')', 'error');
+						return;
+					}
+					// Verify with a second GET so we don't reload to a
+					// cached page that still shows the deleted banner.
+					return FAZ.get('banners').then(function (rows) {
+						var still = Array.isArray(rows) && rows.some(function (b) { return Number(b.id) === Number(bannerId); });
+						if (still) {
+							delBtn.disabled = false;
+							FAZ.notify(__('banner.deleteFailed', 'Failed to delete banner.') + ' (server still lists id=' + bannerId + ')', 'error');
+							return;
+						}
+						FAZ.notify(__('banner.deleted', 'Banner deleted.'));
+						var base = window.location.href.split('?')[0];
+						var page = (window.location.search.match(/page=([^&]+)/) || [null, 'faz-cookie-manager-banner'])[1];
+						window.location.href = base + '?page=' + encodeURIComponent(page);
+					});
+				}).catch(function (err) {
+					delBtn.disabled = false;
+					var detail = '';
+					if (err && err.code) detail = ' [' + err.code + ']';
+					else if (err && err.message) detail = ' [' + err.message + ']';
+					FAZ.notify(__('banner.deleteFailed', 'Failed to delete banner.') + detail, 'error');
+					if (window.console && console.error) console.error('FAZ delete banner failed', err);
 				});
 			});
 			delBtn.dataset.fazSwitcherBound = '1';

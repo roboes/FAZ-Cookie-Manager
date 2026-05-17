@@ -16,12 +16,13 @@ defined( 'ABSPATH' ) || exit;
 	     a clone of the current banner and reloads the page on the new id.
 	     The active banner_id is taken from the ?banner_id= query string
 	     and falls back to the system-default banner when absent. -->
-	<div id="faz-b-switcher" style="display:none;align-items:center;gap:.5rem;margin-bottom:.75rem;font-size:13px;">
-		<label for="faz-b-switcher-select" style="color:#6b7280;white-space:nowrap;">
+	<div id="faz-b-switcher" style="display:flex;align-items:center;gap:.5rem;margin-bottom:.75rem;font-size:13px;flex-wrap:wrap;">
+		<label for="faz-b-name-inline" style="color:#6b7280;white-space:nowrap;">
 			<?php esc_html_e( 'Banner:', 'faz-cookie-manager' ); ?>
 		</label>
-		<select id="faz-b-switcher-select" class="faz-input faz-input-sm" style="width:auto;max-width:240px;padding:.25rem .5rem;font-size:13px;"></select>
-		<button type="button" class="faz-btn faz-btn-sm faz-btn-secondary" id="faz-b-switcher-new" title="<?php esc_attr_e( 'Create a new banner cloned from the current one', 'faz-cookie-manager' ); ?>" style="padding:.25rem .6rem;font-size:13px;line-height:1;">
+		<input type="text" id="faz-b-name-inline" class="faz-input faz-input-sm" style="width:200px;padding:.25rem .5rem;font-size:13px;" placeholder="<?php esc_attr_e( 'Banner name', 'faz-cookie-manager' ); ?>" title="<?php esc_attr_e( 'Press Enter or click outside to save the name.', 'faz-cookie-manager' ); ?>" />
+		<select id="faz-b-switcher-select" class="faz-input faz-input-sm" style="display:none;width:auto;max-width:200px;padding:.25rem .5rem;font-size:13px;" title="<?php esc_attr_e( 'Switch to another banner', 'faz-cookie-manager' ); ?>"></select>
+		<button type="button" class="faz-btn faz-btn-sm faz-btn-secondary" id="faz-b-switcher-new" title="<?php esc_attr_e( 'Create a new banner', 'faz-cookie-manager' ); ?>" style="padding:.25rem .6rem;font-size:13px;line-height:1;">
 			+ <?php esc_html_e( 'New', 'faz-cookie-manager' ); ?>
 		</button>
 		<button type="button" class="faz-btn faz-btn-sm faz-btn-secondary" id="faz-b-switcher-delete" title="<?php esc_attr_e( 'Delete this banner', 'faz-cookie-manager' ); ?>" style="display:none;padding:.25rem .5rem;font-size:13px;line-height:1;color:#b91c1c;border-color:#fecaca;" aria-label="<?php esc_attr_e( 'Delete this banner', 'faz-cookie-manager' ); ?>">
