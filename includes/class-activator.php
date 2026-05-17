@@ -720,7 +720,7 @@ class Activator {
 	 * already exist; the backfill step only touches rows whose target_countries
 	 * is NULL or empty string (i.e. rows the column-add just introduced).
 	 *
-	 * @since 1.13.18
+	 * @since 1.14.0
 	 * @return void
 	 */
 	public static function update_db_350() {

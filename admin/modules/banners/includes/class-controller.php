@@ -130,7 +130,12 @@ class Controller extends Base_Controller {
 		if ( isset( $args['id'] ) && '' !== $args['id'] ) {
 			$results = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM `{$wpdb->prefix}faz_banners` WHERE `banner_id` = %d", absint( $args['id'] ) ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 		} else {
-			$results = $wpdb->get_results( "SELECT * FROM `{$wpdb->prefix}faz_banners`" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			// ORDER BY banner_id ASC so the multi-banner picker
+			// (get_active_banner_for_country) sees a deterministic row
+			// order. Without it, the status_default fallback was the
+			// first banner_default=1 row in MySQL's unspecified order —
+			// non-deterministic across replicas and after row reorders.
+			$results = $wpdb->get_results( "SELECT * FROM `{$wpdb->prefix}faz_banners` ORDER BY `banner_id` ASC" ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery
 		}
 		if ( isset( $results ) && ! empty( $results ) ) {
 			if ( true === is_array( $results ) ) {
@@ -190,6 +195,13 @@ class Controller extends Base_Controller {
 			return;
 		}
 		$id = $wpdb->insert_id;
+		// Enforce single-default invariant on create too (mirrors update_item).
+		// The insert above has already written banner_default=1 for the new
+		// row; clear the flag on every other row so the just-inserted row is
+		// the sole default after this call returns.
+		if ( true === $banner->get_default() ) {
+			$this->clear_default_on_others( $id );
+		}
 		$banner->set_id( $id );
 		$banner->set_slug( $banner->get_name() );
 		$slug = $banner->get_slug() . '-' . $id; // Append ID to the slug of the each banner.
@@ -208,6 +220,13 @@ class Controller extends Base_Controller {
 	 */
 	public function update_item( $banner ) {
 		global $wpdb;
+		// Enforce single-default invariant the admin help text promises
+		// ("Saving this option will clear the flag on every other banner").
+		// Without this, multiple banners can simultaneously hold
+		// banner_default=1 and the picker fallback becomes non-deterministic.
+		if ( true === $banner->get_default() ) {
+			$this->clear_default_on_others( $banner->get_id() );
+		}
 		$data = array(
 			'name'             => $banner->get_name(),
 			'slug'             => $banner->get_slug(),
@@ -358,7 +377,7 @@ class Controller extends Base_Controller {
 	 * behaviour of get_active_banner() for callers that have not yet wired
 	 * geolocation into the picker.
 	 *
-	 * @since 1.13.18
+	 * @since 1.14.0
 	 * @param string $country Visitor's ISO-3166 alpha-2 country code, or ''.
 	 * @return Banner|false
 	 */
@@ -374,9 +393,10 @@ class Controller extends Base_Controller {
 			$country = '';
 		}
 
-		$status_match   = array(); // status=1 + targets the country
-		$status_anyland = array(); // status=1 + empty target list
-		$status_default = null;    // banner_default=1 fallback (any status)
+		$status_match    = array(); // status=1 + targets the country
+		$status_anyland  = array(); // status=1 + empty target list
+		$status_targeted = array(); // status=1 + non-empty targets (fallback)
+		$status_default  = null;    // banner_default=1 fallback (any status)
 
 		foreach ( $items as $item ) {
 			$banner = new Banner( $item->banner_id );
@@ -389,6 +409,14 @@ class Controller extends Base_Controller {
 					$status_match[] = $banner;
 				} elseif ( empty( $targets ) ) {
 					$status_anyland[] = $banner;
+				} else {
+					// status=1 with non-empty targets but doesn't match $country.
+					// Kept as a last-resort fallback so legacy single-banner
+					// callers of get_active_banner() (which passes '') still
+					// receive a status=1 banner instead of false when no
+					// match-all or banner_default row exists. Mirrors the
+					// pre-1.14.0 behaviour of "first status=1 wins".
+					$status_targeted[] = $banner;
 				}
 			}
 
@@ -404,6 +432,14 @@ class Controller extends Base_Controller {
 			$winner = self::pick_highest_priority( $status_anyland );
 		} elseif ( null !== $status_default ) {
 			$winner = $status_default;
+		} elseif ( ! empty( $status_targeted ) ) {
+			// Pre-1.14.0 contract preservation: third-party callers of
+			// get_active_banner() (which passes country='') must still get
+			// a status=1 banner back when one exists, even if its
+			// target_countries doesn't match — otherwise an install with a
+			// single status=1, country-targeted, non-default banner returns
+			// false where pre-1.14.0 it returned that banner.
+			$winner = self::pick_highest_priority( $status_targeted );
 		}
 
 		if ( null === $winner ) {
@@ -418,7 +454,7 @@ class Controller extends Base_Controller {
 	 * Pick the Banner with the highest priority from a non-empty list.
 	 * Ties broken by the lowest banner_id for deterministic selection.
 	 *
-	 * @since 1.13.18
+	 * @since 1.14.0
 	 * @param Banner[] $banners
 	 * @return Banner
 	 */
@@ -441,7 +477,7 @@ class Controller extends Base_Controller {
 	 * same URL can legitimately render a different banner for a different
 	 * country, so full-page caches must not reuse the response globally.
 	 *
-	 * @since 1.13.18
+	 * @since 1.14.0
 	 * @return bool
 	 */
 	public function has_country_dependent_banners() {
@@ -458,19 +494,53 @@ class Controller extends Base_Controller {
 				return true;
 			}
 			// The ruleSet lives under .settings.ruleSet (see Banner::get_law()
-			// for the same nesting pattern). A non-empty entry whose code is
-			// not the wildcard "ALL" gates the banner on visitor country and
-			// therefore makes the rendered output country-dependent.
+			// for the same nesting pattern). ANY entry whose code is not the
+			// wildcard "ALL" gates the banner on visitor country and therefore
+			// makes the rendered output country-dependent — iterate the whole
+			// ruleSet, not just the first entry, otherwise a ruleSet like
+			// [{code:ALL}, {code:US}] is silently classified as country-
+			// independent and the cache headers never fire.
 			$settings = $banner->get_settings();
 			$inner    = isset( $settings['settings'] ) && is_array( $settings['settings'] ) ? $settings['settings'] : array();
 			$rules    = isset( $inner['ruleSet'] ) && is_array( $inner['ruleSet'] ) ? $inner['ruleSet'] : array();
-			$rule     = isset( $rules[0] ) && is_array( $rules[0] ) ? $rules[0] : array();
-			$code     = isset( $rule['code'] ) ? strtoupper( (string) $rule['code'] ) : 'ALL';
-			if ( 'ALL' !== $code ) {
-				return true;
+			foreach ( $rules as $rule ) {
+				if ( ! is_array( $rule ) ) {
+					continue;
+				}
+				$code = isset( $rule['code'] ) ? strtoupper( (string) $rule['code'] ) : 'ALL';
+				if ( 'ALL' !== $code ) {
+					return true;
+				}
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * Zero out banner_default on every row except $keep_id.
+	 *
+	 * Enforces the single-default invariant the admin help text promises
+	 * ("Saving this option will clear the flag on every other banner").
+	 * Called from create_item / update_item when the banner being saved
+	 * has banner_default=1.
+	 *
+	 * @since 1.14.0
+	 * @param int $keep_id Banner id whose banner_default flag must be preserved.
+	 * @return void
+	 */
+	public function clear_default_on_others( $keep_id ) {
+		global $wpdb;
+		$keep_id = absint( $keep_id );
+		if ( $keep_id <= 0 ) {
+			return;
+		}
+		$wpdb->query( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$wpdb->prepare(
+				"UPDATE `{$wpdb->prefix}faz_banners` SET `banner_default` = 0 WHERE `banner_default` = 1 AND `banner_id` <> %d",
+				$keep_id
+			)
+		);
+		$this->delete_cache();
 	}
 
 	/**

@@ -199,7 +199,7 @@ class Banner extends Store {
 	 * Stored as a normalised array of ISO-3166 alpha-2 codes. An empty array
 	 * means "match every visitor" (the pre-1.13.18 default behaviour).
 	 *
-	 * @since 1.13.18
+	 * @since 1.14.0
 	 * @param array|string $countries Array of country codes, or a JSON string.
 	 * @return void
 	 */
@@ -231,7 +231,7 @@ class Banner extends Store {
 	 * Set the priority used to break ties when multiple banners target the
 	 * same country. Higher wins.
 	 *
-	 * @since 1.13.18
+	 * @since 1.14.0
 	 * @param int $priority Non-negative integer; negative values are clamped to 0.
 	 * @return void
 	 */
@@ -346,7 +346,7 @@ class Banner extends Store {
 	 * get_active_banner_for_country() consumes this to pick the right banner
 	 * for the visitor's detected country.
 	 *
-	 * @since 1.13.18
+	 * @since 1.14.0
 	 * @return array
 	 */
 	public function get_target_countries() {
@@ -361,7 +361,7 @@ class Banner extends Store {
 	/**
 	 * Get the tie-break priority for this banner. Higher wins.
 	 *
-	 * @since 1.13.18
+	 * @since 1.14.0
 	 * @return int
 	 */
 	public function get_priority() {

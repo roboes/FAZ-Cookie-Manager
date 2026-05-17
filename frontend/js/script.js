@@ -155,11 +155,23 @@ function _fazConsentScopeChanged() {
     if (!_fazHasConsentCookie || !_fazStore || !_fazStore._geoRouting) return false;
     const currentBannerSlug = _fazCurrentBannerSlug();
     const currentLaw = _fazCurrentLaw();
-    const storedBannerSlug = ref._fazGetFromStore("banner") || fazcookieConsentMap.banner || "";
-    const storedLaw = ref._fazGetFromStore("law") || fazcookieConsentMap.law || "";
+    // Read directly from fazcookieConsentMap — this function runs at module
+    // init, BEFORE the ref._fazConsentStore Map is populated from the
+    // cookie (the populate loop is below this call site). The primary
+    // lookup via ref._fazGetFromStore() would always return "" at this
+    // point, leaving only the fallback path.
+    const storedBannerSlug = fazcookieConsentMap.banner || "";
+    const storedLaw = fazcookieConsentMap.law || "";
+    // Pre-1.14.0 cookies have no `banner`/`law` keys — treat that as
+    // "upgrade case, no scope info known" and let the existing consent
+    // stand. Without this guard, every returning visitor on an install
+    // that enables _geoRouting would be invalidated on first page load
+    // after upgrade — a UX regression and an unnecessary GDPR-
+    // accountability dent (the prior valid consent gets discarded).
+    if (!storedBannerSlug && !storedLaw) return false;
     return !!(
-        (currentBannerSlug && storedBannerSlug !== currentBannerSlug) ||
-        (currentLaw && storedLaw !== currentLaw)
+        (currentBannerSlug && storedBannerSlug && storedBannerSlug !== currentBannerSlug) ||
+        (currentLaw && storedLaw && storedLaw !== currentLaw)
     );
 }
 function _fazInvalidateStoredConsent() {

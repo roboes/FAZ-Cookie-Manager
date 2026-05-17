@@ -24,38 +24,40 @@ test.describe.serial('Multi-banner geo-routing (Controller selector + Banner mod
   let snapshot: string = '';
 
   test.beforeAll(() => {
-    // Ensure a secondary banner row exists for GEO-01..GEO-30. The suite
-    // mutates banner_id=2 to target US, asserts the picker resolves it,
-    // and restores the row in afterAll. On a fresh install (or after a
-    // CB-OV-10 teardown that deletes its secondary), banner_id=2 simply
-    // doesn't exist — create it from the active banner's shape so the
-    // restore at teardown is a meaningful no-op rather than a row-not-
-    // found that quietly fails GEO-01..GEO-30. Idempotent: skipped when
-    // a second row already exists from a prior run.
+    // Ensure banner_id=2 exists for GEO-01..GEO-30. The whole suite uses
+    // hardcoded banner_id=2 in its $wpdb->update() calls. We can't rely on
+    // residual rows from prior runs because the auto_increment counter
+    // drifts (CB-OV-10 created banner_id=2, its teardown DELETEd it, the
+    // next INSERT would land at banner_id=3 — and GEO-01's update(banner_id=2)
+    // would silently affect zero rows).
+    //
+    // Force the canonical shape: drop every non-active banner, reset
+    // AUTO_INCREMENT to 2, then INSERT — that row WILL be banner_id=2.
+    // Idempotent under repeat runs.
     wpEval(`
       global $wpdb;
       $table = $wpdb->prefix . 'faz_banners';
-      $count = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table}" );
-      if ( $count < 2 ) {
-        $active = \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Controller::get_instance()->get_active_banner();
-        if ( $active ) {
-          $now = current_time( 'mysql' );
-          $wpdb->insert(
-            $table,
-            array(
-              'name'             => 'GEO suite secondary',
-              'slug'             => 'geo-suite-secondary',
-              'status'           => 0,
-              'settings'         => wp_json_encode( $active->get_settings() ),
-              'contents'         => wp_json_encode( $active->get_contents() ),
-              'banner_default'   => 0,
-              'target_countries' => wp_json_encode( array() ),
-              'priority'         => 0,
-              'date_created'     => $now,
-              'date_modified'    => $now,
-            )
-          );
-        }
+      $active = \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Controller::get_instance()->get_active_banner();
+      $active_id = $active ? (int) $active->get_id() : 1;
+      $wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE banner_id <> %d", $active_id ) );
+      $wpdb->query( "ALTER TABLE {$table} AUTO_INCREMENT = 2" );
+      if ( $active ) {
+        $now = current_time( 'mysql' );
+        $wpdb->insert(
+          $table,
+          array(
+            'name'             => 'GEO suite secondary',
+            'slug'             => 'geo-suite-secondary',
+            'status'           => 0,
+            'settings'         => wp_json_encode( $active->get_settings() ),
+            'contents'         => wp_json_encode( $active->get_contents() ),
+            'banner_default'   => 0,
+            'target_countries' => wp_json_encode( array() ),
+            'priority'         => 0,
+            'date_created'     => $now,
+            'date_modified'    => $now,
+          )
+        );
       }
     `);
 

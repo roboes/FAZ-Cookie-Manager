@@ -731,7 +731,7 @@ class Frontend {
 	 * Filterable via `faz_visitor_country` so test fixtures and edge
 	 * deployments (e.g. always-EU staging) can stub a country deterministically.
 	 *
-	 * @since 1.13.18
+	 * @since 1.14.0
 	 * @return string Upper-case 2-letter code or '' if unknown.
 	 */
 	private function get_visitor_country() {
@@ -789,6 +789,14 @@ class Frontend {
 	 */
 	public function send_geo_cache_headers() {
 		if ( is_admin() || wp_doing_ajax() || wp_doing_cron() || true === faz_disable_banner() ) {
+			return;
+		}
+		// Match the same scope every other frontend hook in this class uses
+		// (enqueue_scripts gates on faz_is_front_end_request too). Without
+		// this guard send_headers fires on REST API, heartbeat, sitemap,
+		// robots.txt etc., each running the DB-hitting is_country_dependent
+		// chain pointlessly.
+		if ( ! faz_is_front_end_request() ) {
 			return;
 		}
 		if ( ! $this->is_country_dependent_output() || headers_sent() ) {

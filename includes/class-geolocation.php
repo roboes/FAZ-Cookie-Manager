@@ -84,7 +84,7 @@ class Geolocation {
 	 * deployments can override the value without letting malformed output route
 	 * into an arbitrary banner bucket.
 	 *
-	 * @since 1.13.18
+	 * @since 1.14.0
 	 * @return string Upper-case ISO 3166-1 alpha-2 country code, or empty string.
 	 */
 	public static function get_visitor_country() {
