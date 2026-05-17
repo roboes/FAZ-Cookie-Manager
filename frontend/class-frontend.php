@@ -1043,9 +1043,18 @@ class Frontend {
 			'_publicURL'    => set_url_scheme( get_site_url() ),
 			'_expiry'       => max( 1, isset( $banner_settings['settings']['consentExpiry']['value'] ) ? absint( $banner_settings['settings']['consentExpiry']['value'] ) : 180 ),
 			'_categories'   => $this->get_cookie_groups(),
-			'_activeLaw'    => $banner->get_law(),
-			'_bannerSlug'   => $banner->get_slug(),
-			'_geoRouting'   => $this->is_country_dependent_output(),
+			'_activeLaw'         => $banner->get_law(),
+			'_bannerSlug'        => $banner->get_slug(),
+			'_geoRouting'        => $this->is_country_dependent_output(),
+			// Server-side fingerprint of the active scope, keyed by
+			// wp_salt('auth'). Used by _fazConsentScopeChanged() to detect
+			// cookie tampering: a visitor who hand-edits __scope.banner /
+			// __scope.law to match the current scope cannot also forge a
+			// matching __scope.fp without knowing the salt, so any
+			// tampering attempt invalidates and re-prompts. Truncated to
+			// 32 hex chars — enough collision resistance for an integrity
+			// check, short enough to stay light in the cookie.
+			'_scopeFingerprint'  => substr( wp_hash( $banner->get_slug() . '|' . $banner->get_law(), 'auth' ), 0, 32 ),
 			'_rootDomain'   => $this->get_cookie_domain(),
 			'_block'        => true,
 			'_showBanner'   => true,
