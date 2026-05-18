@@ -206,8 +206,16 @@ class Controller extends Base_Controller {
 		$banner->set_slug( $banner->get_name() );
 		$slug = $banner->get_slug() . '-' . $id; // Append ID to the slug of the each banner.
 		$banner->set_slug( $slug );
+		// Persist the freshly-generated slug. We MUST NOT re-read
+		// $wpdb->insert_id after save(): save() goes through the update
+		// path (the row exists from line 167's $wpdb->insert) and the
+		// downstream cache/option writes triggered by do_action(
+		// 'faz_after_update_banner' ) or transients can pollute
+		// $wpdb->insert_id with the auto-increment of an unrelated table
+		// (wp_options.auto_increment often runs in the millions on busy
+		// sites — pre-fix this surfaced as banner IDs like 2,513,570 in
+		// admin redirect URLs, breaking the post-create deep link).
 		$banner->save();
-		$banner->set_id( $wpdb->insert_id );
 		$this->delete_cache();
 		do_action( 'faz_after_update_banner' );
 	}
