@@ -566,18 +566,23 @@ class Api extends Rest_Controller {
 				$now     = time();
 				if ( $last_ts > 0 && ( $now - $last_ts ) < $throttle_seconds ) {
 					$retry_after = $throttle_seconds - ( $now - $last_ts );
-					$err = new WP_Error(
-						'fazcookie_rest_too_many_requests',
-						__( 'Too many requests. Please slow down.', 'faz-cookie-manager' ),
+					// Build the response directly as WP_REST_Response — going
+					// through `rest_ensure_response( $wp_error )` would return
+					// the WP_Error untouched (rest_ensure_response only wraps
+					// arrays/objects, not WP_Errors), losing the Retry-After
+					// header we need to set on the way out.
+					$resp = new WP_REST_Response(
 						array(
-							'status'      => 429,
-							'retry_after' => $retry_after,
-						)
+							'code'    => 'fazcookie_rest_too_many_requests',
+							'message' => __( 'Too many requests. Please slow down.', 'faz-cookie-manager' ),
+							'data'    => array(
+								'status'      => 429,
+								'retry_after' => $retry_after,
+							),
+						),
+						429
 					);
-					$resp = rest_ensure_response( $err );
-					if ( $resp instanceof WP_REST_Response ) {
-						$resp->header( 'Retry-After', (string) $retry_after );
-					}
+					$resp->header( 'Retry-After', (string) $retry_after );
 					return $resp;
 				}
 				// Stamp the current second; TTL 60s is generous — even if
