@@ -56,6 +56,7 @@ async function globalSetup(): Promise<void> {
           $category_controller->reinstall();
         }
         $fixture_categories = array(
+          'necessary'     => 'faz_e2e_necessary_probe',
           'analytics'     => 'faz_e2e_analytics_probe',
           'functional'    => 'faz_e2e_functional_probe',
           'marketing'     => 'faz_e2e_marketing_probe',
@@ -100,7 +101,18 @@ async function globalSetup(): Promise<void> {
         $cookie_controller->delete_cache();
 
         $controller = \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Controller::get_instance();
-        $banner = $controller->get_active_banner();
+        $wpdb->query(
+          $wpdb->prepare(
+            "DELETE FROM {$wpdb->prefix}faz_banners WHERE slug LIKE %s",
+            'pr104-fu-%'
+          )
+        );
+        $default_id = (int) $wpdb->get_var( "SELECT banner_id FROM {$wpdb->prefix}faz_banners WHERE banner_default = 1 ORDER BY banner_id ASC LIMIT 1" );
+        if ( $default_id <= 0 ) {
+          $controller->promote_fallback_default( 0 );
+          $default_id = (int) $wpdb->get_var( "SELECT banner_id FROM {$wpdb->prefix}faz_banners WHERE banner_default = 1 ORDER BY banner_id ASC LIMIT 1" );
+        }
+        $banner = $default_id > 0 ? new \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Banner( $default_id ) : $controller->get_active_banner();
         if ( $banner ) {
           $s = $banner->get_settings();
           if ( ! is_array( $s ) ) { $s = array(); }
@@ -109,6 +121,8 @@ async function globalSetup(): Promise<void> {
           $s['settings']['preferenceCenterType'] = 'popup';
           $s['settings']['allowCloseButtonWithReject'] = false;
           $banner->set_settings( $s );
+          $banner->set_status( true );
+          $banner->set_default( true );
           // Also reset row-level geo columns (target_countries / priority live
           // on the wp_faz_banners row, NOT inside settings — earlier code
           // unset them from settings, which was a no-op).

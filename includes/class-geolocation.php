@@ -145,11 +145,17 @@ class Geolocation {
 	 * @return string Two-letter country code or empty string.
 	 */
 	private static function detect_country( $ip ) {
+		// Collect every source's vote so we can both (a) return the first
+		// non-empty value (existing priority order) and (b) compare them
+		// for the consensus check below. The associative shape preserves
+		// source attribution for the disagreement log line.
+		$votes = array();
+
 		// 1. Cloudflare CF-IPCountry header.
 		if ( apply_filters( 'faz_trust_cf_ipcountry_header', false ) && ! empty( $_SERVER['HTTP_CF_IPCOUNTRY'] ) ) {
 			$code = strtoupper( sanitize_text_field( wp_unslash( $_SERVER['HTTP_CF_IPCOUNTRY'] ) ) );
 			if ( self::is_valid_country_code( $code ) && 'XX' !== $code ) {
-				return $code;
+				$votes['cf']  = $code;
 			}
 		}
 
@@ -165,7 +171,7 @@ class Geolocation {
 		) {
 			$code = strtoupper( sanitize_text_field( wp_unslash( $_SERVER['GEOIP_COUNTRY_CODE'] ) ) );
 			if ( self::is_valid_country_code( $code ) && 'XX' !== $code ) {
-				return $code;
+				$votes['geoip'] = $code;
 			}
 		}
 
@@ -175,17 +181,56 @@ class Geolocation {
 			if ( $code ) {
 				$code = strtoupper( $code );
 				if ( self::is_valid_country_code( $code ) ) {
-					return $code;
+					$votes['php_geoip'] = $code;
 				}
 			}
 		}
 
 		// 4. MaxMind GeoLite2 MMDB database (local, no external API calls).
-		$code = self::lookup_mmdb( $ip );
-		if ( ! empty( $code ) ) {
-			return $code;
+		$mmdb = self::lookup_mmdb( $ip );
+		if ( ! empty( $mmdb ) ) {
+			$votes['mmdb'] = $mmdb;
 		}
 
+		// Issue #110 — multi-source disagreement detection.
+		// When ≥2 sources resolved a country and they disagree, log a
+		// debug-level warning (only when WP_DEBUG / WP_DEBUG_LOG is on,
+		// to avoid polluting production logs) AND optionally enforce
+		// consensus via the faz_country_detection_consensus filter.
+		if ( count( $votes ) >= 2 ) {
+			$unique = array_unique( array_values( $votes ) );
+			if ( count( $unique ) > 1 ) {
+				if ( defined( 'WP_DEBUG' ) && WP_DEBUG && defined( 'WP_DEBUG_LOG' ) && WP_DEBUG_LOG ) {
+					$pairs = array();
+					foreach ( $votes as $src => $code ) {
+						$pairs[] = $src . '=' . $code;
+					}
+					error_log( 'FAZ geolocation source disagreement: ' . implode( ', ', $pairs ) ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+				}
+				/**
+				 * Require agreement between detection sources before
+				 * returning a country. When this filter resolves to true
+				 * AND ≥2 sources disagree, detect_country() returns ''
+				 * (the fail-open default — banner is shown to everyone).
+				 * Off by default to preserve the CF-first priority order.
+				 *
+				 * @since 1.14.0
+				 * @param bool   $require_consensus Default false.
+				 * @param array  $votes             Per-source country votes (cf, geoip, php_geoip, mmdb).
+				 * @param string $ip                Visitor IP address.
+				 */
+				if ( apply_filters( 'faz_country_detection_consensus', false, $votes, $ip ) ) {
+					return '';
+				}
+			}
+		}
+
+		// Priority order preserved: CF → GEOIP header → PHP ext → MMDB.
+		foreach ( array( 'cf', 'geoip', 'php_geoip', 'mmdb' ) as $src ) {
+			if ( ! empty( $votes[ $src ] ) ) {
+				return $votes[ $src ];
+			}
+		}
 		return '';
 	}
 

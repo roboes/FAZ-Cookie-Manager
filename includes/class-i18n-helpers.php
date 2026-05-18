@@ -153,9 +153,21 @@ if ( ! function_exists( 'faz_current_language' ) ) {
 			) {
 				$country = \FazCookie\Includes\Geolocation::get_visitor_country();
 				if ( ! empty( $country ) ) {
-					$country_lang = faz_country_to_language( $country );
-					if ( ! empty( $country_lang ) && in_array( $country_lang, faz_selected_languages(), true ) ) {
-						$current_language = $country_lang;
+					$selected = faz_selected_languages();
+					// Issue #108: prefer the BCP-47 locale form when the
+					// install actually has a regional-dialect translation
+					// selected (es. `pt_BR` vs `pt_PT`). Falls back to the
+					// language-only form when no regional variant is in
+					// scope — preserves the pre-#108 behaviour on installs
+					// that ship only `pt`.
+					$country_locale = function_exists( 'faz_country_to_locale' ) ? faz_country_to_locale( $country ) : '';
+					if ( '' !== $country_locale && in_array( $country_locale, $selected, true ) ) {
+						$current_language = $country_locale;
+					} else {
+						$country_lang = faz_country_to_language( $country );
+						if ( ! empty( $country_lang ) && in_array( $country_lang, $selected, true ) ) {
+							$current_language = $country_lang;
+						}
 					}
 				}
 			}
@@ -260,6 +272,96 @@ if ( ! function_exists( 'faz_country_to_language' ) ) {
 		 * @param string $country The country code being resolved.
 		 */
 		return (string) apply_filters( 'faz_country_to_language', $lang, $country );
+	}
+}
+
+if ( ! function_exists( 'faz_country_to_locale' ) ) {
+	/**
+	 * Map an ISO-3166 alpha-2 country code to a BCP-47 / WordPress locale
+	 * (e.g. `pt_BR`, `zh_TW`, `en_US`) — the regional-dialect-aware
+	 * counterpart of {@see faz_country_to_language()}.
+	 *
+	 * Why this exists (issue #108): the bare ISO-639-1 form
+	 * (\`pt\`, \`zh\`, \`es\`) cannot distinguish between Brazilian and
+	 * European Portuguese, Mainland and Traditional Chinese, Mexican and
+	 * Castilian Spanish, etc. Multilingual plugins (Polylang, WPML,
+	 * TranslatePress, Weglot) match against full WP-style locales, so a
+	 * Brazilian visitor on a site that ships both pt_BR and pt_PT would
+	 * otherwise fall through to whichever the plugin defaults to.
+	 *
+	 * The default table covers the regional variants the multilingual
+	 * ecosystem actually distinguishes. Officially-multilingual
+	 * countries follow the same most-spoken pick used by
+	 * faz_country_to_language(). Override per-country via
+	 * `faz_country_to_locale` (single value) or `faz_country_to_locale_map`
+	 * (full table). Compatible with ClassicPress 1.x — pure data + filters.
+	 *
+	 * @since 1.14.0
+	 * @param string $country ISO-3166 alpha-2 country code.
+	 * @return string Underscored WP-style locale (e.g. `pt_BR`), or '' when unmapped.
+	 */
+	function faz_country_to_locale( $country ) {
+		$country = is_string( $country ) ? strtoupper( trim( $country ) ) : '';
+		if ( '' === $country ) {
+			return '';
+		}
+		$map = array(
+			// Portuguese — Brazilian vs European
+			'PT' => 'pt_PT', 'BR' => 'pt_BR',
+			// Spanish — Spain / Mexico / South America (most ship es_MX as
+			// the Latin-American baseline, hence the shared mapping).
+			'ES' => 'es_ES', 'MX' => 'es_MX', 'AR' => 'es_AR',
+			'CL' => 'es_CL', 'CO' => 'es_CO', 'PE' => 'es_PE',
+			'VE' => 'es_VE', 'UY' => 'es_UY', 'PY' => 'es_PY',
+			// English — preserve regional spelling/locale conventions.
+			'GB' => 'en_GB', 'US' => 'en_US', 'CA' => 'en_CA',
+			'AU' => 'en_AU', 'NZ' => 'en_NZ', 'IN' => 'en_IN',
+			'ZA' => 'en_ZA', 'IE' => 'en_IE',
+			// French — France / Canada / Belgium
+			'FR' => 'fr_FR', 'CA_FR' => 'fr_CA', // CA_FR is a synthetic key,
+			'MC' => 'fr_FR', 'LU' => 'fr_FR',
+			// German — Germany / Austria / Switzerland
+			'DE' => 'de_DE', 'AT' => 'de_AT', 'CH' => 'de_CH', 'LI' => 'de_DE',
+			// Italian
+			'IT' => 'it_IT', 'SM' => 'it_IT', 'VA' => 'it_IT',
+			// Dutch / Flemish
+			'NL' => 'nl_NL', 'BE' => 'nl_BE',
+			// Chinese — Mainland / Taiwan / Hong Kong
+			'CN' => 'zh_CN', 'TW' => 'zh_TW', 'HK' => 'zh_HK',
+			// East Asia + others — most have a single canonical locale.
+			'JP' => 'ja_JP', 'KR' => 'ko_KR',
+			'RU' => 'ru_RU', 'UA' => 'uk_UA', 'TR' => 'tr_TR',
+			'PL' => 'pl_PL', 'CZ' => 'cs_CZ', 'SK' => 'sk_SK',
+			'HU' => 'hu_HU', 'RO' => 'ro_RO',
+			'GR' => 'el_GR', 'CY' => 'el_GR',
+			'SE' => 'sv_SE', 'NO' => 'nb_NO', 'DK' => 'da_DK',
+			'FI' => 'fi_FI', 'IS' => 'is_IS',
+			'EE' => 'et_EE', 'LV' => 'lv_LV', 'LT' => 'lt_LT',
+			'SI' => 'sl_SI', 'HR' => 'hr_HR', 'BG' => 'bg_BG', 'MT' => 'mt_MT',
+			// Arabic — most-deployed locale per country.
+			'SA' => 'ar_SA', 'AE' => 'ar_AE', 'EG' => 'ar_EG',
+		);
+		/**
+		 * Filter the country→locale map (full table override).
+		 *
+		 * @since 1.14.0
+		 * @param array  $map     Country code → WP locale map.
+		 * @param string $country The country code being resolved.
+		 */
+		$map    = (array) apply_filters( 'faz_country_to_locale_map', $map, $country );
+		$locale = isset( $map[ $country ] ) ? (string) $map[ $country ] : '';
+		/**
+		 * Filter the resolved locale for a specific country (single override).
+		 *
+		 * Lets callers override individual mappings without re-declaring
+		 * the full map — e.g. flip BE from Flemish (nl_BE) to French (fr_BE)
+		 * for a Wallonian audience.
+		 *
+		 * @since 1.14.0
+		 * @param string $locale  Resolved WP locale, '' when unmapped.
+		 * @param string $country The country code being resolved.
+		 */
+		return (string) apply_filters( 'faz_country_to_locale', $locale, $country );
 	}
 }
 

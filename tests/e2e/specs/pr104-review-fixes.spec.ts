@@ -73,6 +73,38 @@ function restoreDefaultTo(activeId: number): void {
   `);
 }
 
+/** Snapshot every banner row so tests that mutate row-level geo/status fields can restore them. */
+function snapshotBannerRows(): string {
+  return wpEval(`
+    global $wpdb;
+    $table = $wpdb->prefix . 'faz_banners';
+    $rows = $wpdb->get_results( "SELECT * FROM {$table} ORDER BY banner_id ASC", ARRAY_A );
+    echo base64_encode( wp_json_encode( $rows ) );
+  `).trim();
+}
+
+function restoreBannerRows(snapshot: string): void {
+  wpEval(`
+    global $wpdb;
+    $table = $wpdb->prefix . 'faz_banners';
+    $rows = json_decode( base64_decode( '${snapshot}' ), true );
+    if ( ! is_array( $rows ) ) {
+      return;
+    }
+    $wpdb->query( "DELETE FROM {$table}" );
+    foreach ( $rows as $row ) {
+      if ( ! is_array( $row ) ) {
+        continue;
+      }
+      $wpdb->insert( $table, $row );
+    }
+    if ( function_exists( 'faz_clear_banner_template_cache' ) ) {
+      faz_clear_banner_template_cache();
+    }
+    \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Controller::get_instance()->delete_cache();
+  `);
+}
+
 /* ================================================================== *
  * F-COR-01 / CR-02 — banner_default mutual exclusion server-side
  * ================================================================== */
@@ -80,15 +112,17 @@ function restoreDefaultTo(activeId: number): void {
 test.describe.serial('PR104 — F-COR-01 / CR-02 banner_default single-default invariant', () => {
   let active = 0;
   let secondary = 0;
+  let bannerSnapshot = '';
 
   test.beforeAll(() => {
+    bannerSnapshot = snapshotBannerRows();
     const ids = ensureTwoBanners();
     active = ids.active;
     secondary = ids.secondary;
   });
 
   test.afterAll(() => {
-    restoreDefaultTo(active);
+    restoreBannerRows(bannerSnapshot);
   });
 
   test('F-COR-01-01: clear_default_on_others zeroes every peer row', () => {
@@ -161,15 +195,17 @@ test.describe('PR104 — F-COR-03 get_items() ORDER BY banner_id', () => {
 test.describe.serial('PR104 — F-COR-04 get_active_banner() preserves pre-1.14.0 contract', () => {
   let active = 0;
   let secondary = 0;
+  let bannerSnapshot = '';
 
   test.beforeAll(() => {
+    bannerSnapshot = snapshotBannerRows();
     const ids = ensureTwoBanners();
     active = ids.active;
     secondary = ids.secondary;
   });
 
   test.afterAll(() => {
-    restoreDefaultTo(active);
+    restoreBannerRows(bannerSnapshot);
   });
 
   test('returns a status=1 country-targeted banner when no default + no match-all exists', () => {

@@ -544,11 +544,47 @@ class Api extends Rest_Controller {
 	}
 
 	/**
-	 * Load default banner configs
+	 * Load default banner configs.
+	 *
+	 * Per-user rate-limited (issue #111): admins / scripted callers can hit
+	 * this endpoint at most once every `faz_configs_rate_limit_seconds`
+	 * seconds. Default 5s — enough for the "+ New banner" modal to fetch
+	 * the configs on open, fast enough not to interfere with rapid
+	 * back-to-back creates. Override (or disable, returning 0) via the
+	 * filter for staging boxes that hammer the endpoint from CI.
+	 * Compatible with ClassicPress 1.x (transients + filters only).
 	 *
 	 * @return WP_Error|WP_REST_Response
 	 */
 	public function get_configs() {
+		$throttle_seconds = (int) apply_filters( 'faz_configs_rate_limit_seconds', 5 );
+		if ( $throttle_seconds > 0 ) {
+			$user_id = get_current_user_id();
+			if ( $user_id > 0 ) {
+				$rl_key  = 'faz_configs_rl_' . $user_id;
+				$last_ts = (int) get_transient( $rl_key );
+				$now     = time();
+				if ( $last_ts > 0 && ( $now - $last_ts ) < $throttle_seconds ) {
+					$retry_after = $throttle_seconds - ( $now - $last_ts );
+					$err = new WP_Error(
+						'fazcookie_rest_too_many_requests',
+						__( 'Too many requests. Please slow down.', 'faz-cookie-manager' ),
+						array(
+							'status'      => 429,
+							'retry_after' => $retry_after,
+						)
+					);
+					$resp = rest_ensure_response( $err );
+					if ( $resp instanceof WP_REST_Response ) {
+						$resp->header( 'Retry-After', (string) $retry_after );
+					}
+					return $resp;
+				}
+				// Stamp the current second; TTL 60s is generous — even if
+				// the user idles between calls, the transient self-expires.
+				set_transient( $rl_key, $now, 60 );
+			}
+		}
 		$configs = array(
 			'gdpr' => $this->controller->get_default_configs(),
 			'ccpa' => $this->controller->get_default_configs( 'ccpa' ),

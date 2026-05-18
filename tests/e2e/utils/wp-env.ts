@@ -110,6 +110,28 @@ export function listActivePlugins(): string[] {
     .filter(Boolean);
 }
 
+export function listActivePluginFiles(): string[] {
+  const raw = wpEval(`echo wp_json_encode( array_values( (array) get_option( 'active_plugins', array() ) ) );`);
+  const parsed = JSON.parse(raw) as unknown;
+  return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string') : [];
+}
+
+export function restoreActivePluginFiles(pluginFiles: string[]): void {
+  const encoded = Buffer.from(JSON.stringify(pluginFiles), 'utf8').toString('base64');
+  wpEval(`
+    $plugins = json_decode( base64_decode( '${encoded}' ), true );
+    if ( ! is_array( $plugins ) ) {
+      $plugins = array();
+    }
+    $plugins = array_values( array_filter( $plugins, function ( $plugin ) {
+      return is_string( $plugin ) && file_exists( WP_PLUGIN_DIR . '/' . $plugin );
+    } ) );
+    update_option( 'active_plugins', $plugins );
+    delete_site_transient( 'update_plugins' );
+    wp_cache_delete( 'plugins', 'plugins' );
+  `);
+}
+
 export function deactivatePluginsExcept(allowedSlugs: string[]): void {
   const allowed = new Set(allowedSlugs);
   const extraActive = listActivePlugins().filter((slug) => !allowed.has(slug));

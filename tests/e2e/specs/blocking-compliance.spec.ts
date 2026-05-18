@@ -8,9 +8,10 @@ import {
   ensureFixturePlugin,
   ensureProviderMatrixPage,
   ensureScanLabPages,
-  listActivePlugins,
+  listActivePluginFiles,
   readProviderMatrixHits,
   readProviderMatrixUrl,
+  restoreActivePluginFiles,
   resetProviderMatrixState,
   wpEval,
 } from '../utils/wp-env';
@@ -283,21 +284,13 @@ test.describe('Blocking compliance coverage', () => {
   let matrixPageId = 0;
   let matrixPagePattern = '';
   let iframeLabUrl = '';
-  // Snapshot of every active plugin at the moment the suite starts.
-  // The afterAll restores this exact set so co-running test files
-  // that depend on third-party plugins (cache adapters, analytics
-  // sniffers, etc.) see the same environment they did before. A
-  // prior refactor renamed this from `deactivatedPlugins` (filter of
-  // pre-snapshot minus allowlist) to `initialActivePlugins` (full
-  // snapshot) and updated the afterAll but forgot to rename the
-  // declaration here — that's why the afterAll was throwing
-  // `ReferenceError: initialActivePlugins is not defined`.
-  let initialActivePlugins: string[] = [];
+  // Snapshot of every active plugin file at the moment the suite starts.
+  // The afterAll restores the exact option value without firing third-party
+  // activation hooks, which avoids plugin redirects during WP-CLI cleanup.
   let initialActivePluginFiles: string[] = [];
 
   test.beforeAll(async () => {
-    initialActivePlugins = listActivePlugins();
-    initialActivePluginFiles = JSON.parse(wpEval(`echo wp_json_encode( array_values( (array) get_option( 'active_plugins', array() ) ) );`));
+    initialActivePluginFiles = listActivePluginFiles();
     deactivatePluginsExcept([
       'faz-cookie-manager',
       'faz-e2e-provider-matrix',
@@ -322,19 +315,7 @@ test.describe('Blocking compliance coverage', () => {
   });
 
   test.afterAll(async () => {
-    const encoded = JSON.stringify(initialActivePluginFiles);
-    wpEval(`
-      $plugins = json_decode( '${encoded.replace(/'/g, "\\'")}', true );
-      if ( ! is_array( $plugins ) ) {
-        $plugins = array();
-      }
-      $plugins = array_values( array_filter( $plugins, function ( $plugin ) {
-        return is_string( $plugin ) && file_exists( WP_PLUGIN_DIR . '/' . $plugin );
-      } ) );
-      update_option( 'active_plugins', $plugins );
-      delete_site_transient( 'update_plugins' );
-      wp_cache_delete( 'plugins', 'plugins' );
-    `);
+    restoreActivePluginFiles(initialActivePluginFiles);
   });
 
   test.beforeEach(async () => {

@@ -95,6 +95,30 @@ if ( $faz_force_remove_all || faz_should_remove_on_uninstall() || is_multisite()
 				}
 			}
 
+			// Clean up site transients owned by the plugin. On single-site
+			// installs these are stored in wp_options, but delete_transient()
+			// does not remove the _site_transient_* variants.
+			$site_transient_prefixes = array(
+				$wpdb->esc_like( '_site_transient_faz' ) . '%',
+				$wpdb->esc_like( '_site_transient_timeout_faz' ) . '%',
+			);
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$site_transient_keys = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
+					$site_transient_prefixes[0],
+					$site_transient_prefixes[1]
+				)
+			);
+			foreach ( $site_transient_keys as $site_transient_key ) {
+				if ( 0 === strpos( $site_transient_key, '_site_transient_timeout_' ) ) {
+					$site_transient_key = substr( $site_transient_key, strlen( '_site_transient_timeout_' ) );
+				} elseif ( 0 === strpos( $site_transient_key, '_site_transient_' ) ) {
+					$site_transient_key = substr( $site_transient_key, strlen( '_site_transient_' ) );
+				}
+				delete_site_transient( $site_transient_key );
+			}
+
 			// Delete DSAR request posts — they contain personal data (name, email, request
 			// type) and must be erased on uninstall to honour GDPR Article 17.
 			// Enumerate every status WordPress recognises (including auto-draft and
@@ -188,6 +212,20 @@ if ( $faz_force_remove_all || faz_should_remove_on_uninstall() || is_multisite()
 			);
 			foreach ( $lang_variants as $variant ) {
 				delete_option( $variant );
+			}
+
+			// Final catch-all for plugin-prefixed options introduced by newer
+			// migrations/caches. When remove_data_on_uninstall is enabled the
+			// explicit contract is to leave no FAZ-owned option behind.
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$remaining_faz_options = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s",
+					$wpdb->esc_like( 'faz_' ) . '%'
+				)
+			);
+			foreach ( $remaining_faz_options as $remaining_faz_option ) {
+				delete_option( $remaining_faz_option );
 			}
 
 			// Remove plugin upload directories (recursive to handle dotfiles and subdirectories).

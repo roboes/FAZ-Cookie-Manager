@@ -306,6 +306,7 @@ test.describe('PR104-FU — promote_fallback_default', () => {
           $active_id
         )
       );
+      $created_peer = false;
       if ( $peer_id <= 0 ) {
         $now = current_time( 'mysql' );
         $wpdb->insert( $table, array(
@@ -321,6 +322,7 @@ test.describe('PR104-FU — promote_fallback_default', () => {
           'date_modified'    => $now,
         ) );
         $peer_id = (int) $wpdb->insert_id;
+        $created_peer = true;
       }
       // Reset to a clean "active is the sole default" state. Direct $wpdb
       // writes bypass the Controller cache, so we MUST invalidate it
@@ -347,6 +349,10 @@ test.describe('PR104-FU — promote_fallback_default', () => {
       // Restore the canonical (active = default) shape.
       $wpdb->query( "UPDATE {$table} SET banner_default = 0" );
       $wpdb->update( $table, array( 'banner_default' => 1 ), array( 'banner_id' => $active_id ) );
+      if ( $created_peer ) {
+        $wpdb->delete( $table, array( 'banner_id' => $peer_id ), array( '%d' ) );
+      }
+      \\FazCookie\\Admin\\Modules\\Banners\\Includes\\Controller::get_instance()->delete_cache();
 
       echo wp_json_encode( array(
         'defaults_before' => $defaults_before,

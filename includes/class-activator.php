@@ -350,6 +350,7 @@ class Activator {
 		if ( true === faz_first_time_install() ) {
 			add_option( 'faz_first_time_activated_plugin', 'true' );
 		}
+		self::ensure_default_settings();
 		self::install_all_tables();
 		self::maybe_update_db();
 		// Ensure required default categories always exist, even on re-activation
@@ -378,6 +379,25 @@ class Activator {
 		// silently skipping the migration forever.
 		update_option( 'faz_version', FAZ_VERSION );
 		self::update_db_version();
+	}
+
+	/**
+	 * Seed default settings during the activation lifecycle on first installs.
+	 *
+	 * The Settings admin module also performs this work when it is loaded, but
+	 * activation can run in contexts where that module is not instantiated
+	 * first (for example WP-CLI or a deferred admin load). The activator owns
+	 * the fresh-install contract, so it must leave faz_settings complete.
+	 *
+	 * @return void
+	 */
+	private static function ensure_default_settings() {
+		if ( true !== faz_first_time_install() || false !== get_option( 'faz_settings', false ) ) {
+			return;
+		}
+
+		$settings = new \FazCookie\Admin\Modules\Settings\Includes\Settings();
+		$settings->update( $settings->get_defaults(), false );
 	}
 
 	/**

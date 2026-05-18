@@ -319,9 +319,24 @@ ref._fazSetCookie = function (name, value, days = 0, domain = _fazStore._rootDom
         days === 0 ? 0 : date.setTime(date.getTime() + days * 24 * 60 * 60 * 1000);
     const secure = location.protocol === 'https:' ? ' Secure;' : '';
     const cookieValue = name === "fazcookie-consent" ? encodeURIComponent(value) : value;
-    document.cookie = `${name}=${cookieValue}; expires=${new Date(
+    const cookieStr = `${name}=${cookieValue}; expires=${new Date(
         toSetTime
     ).toUTCString()}; path=/;${domain}; SameSite=Lax;${secure}`;
+    // Issue #112: warn when the encoded consent cookie grows past 3.5 KB
+    // (browsers enforce a 4 KB per-cookie limit; ~3500 bytes leaves head-
+    // room for the attribute envelope). Triggered by very large category
+    // sets (>40 categories) combined with many active locales. Console-
+    // only — the cookie is still written; this is an observability
+    // signal for the publisher to consider chunking / server-side scope
+    // storage (tracked in issue #112).
+    if (name === "fazcookie-consent" && cookieValue.length > 3500 && typeof console !== "undefined" && console.warn) {
+        console.warn(
+            "[FAZ Cookie Manager] fazcookie-consent cookie is " + cookieValue.length +
+            " bytes (URL-encoded), approaching the 4096-byte browser limit. " +
+            "Consider reducing the active category count or splitting localized banners."
+        );
+    }
+    document.cookie = cookieStr;
 }
 
 function _fazSetConsentID() {

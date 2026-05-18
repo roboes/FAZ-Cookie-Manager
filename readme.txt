@@ -156,6 +156,33 @@ The plugin source includes several third-party domain names (e.g. `js.stripe.com
 
 The only outbound HTTP requests this plugin makes are the five documented above (Open Cookie Database, IAB GVL, MaxMind, ip-api.com fallback, AMP CDN). All five are gated behind explicit administrator action or an enabled feature. The internal `/faz/v1/banner` endpoint described above is hosted by this plugin on the same site — no third-party network call leaves the visitor's browser to a remote service.
 
+== Cache Plugin Compatibility ==
+
+When multi-banner geo-routing (1.14.0+) is active, the rendered HTML can legitimately vary by visitor country. This plugin asks the page-cache layer to bypass caching on those requests by emitting:
+
+* `Cache-Control: no-store, no-cache, must-revalidate, max-age=0`
+* `Pragma: no-cache`
+* `X-LiteSpeed-Cache-Control: no-cache`
+* `Vary: CF-IPCountry` (when the trust filter `faz_trust_cf_ipcountry_header` is enabled)
+* `DONOTCACHEPAGE`, `DONOTCACHEOBJECT`, `DONOTCACHEDB` PHP constants (industry-standard bypass hints)
+* `do_action( 'litespeed_control_set_nocache', ... )` when LiteSpeed Cache is installed
+
+= Verified compatible (no extra configuration needed) =
+
+* **LiteSpeed Cache** — uses the explicit `litespeed_control_set_nocache` action + `X-LiteSpeed-Cache-Control` header.
+* **WP Rocket** — honors `DONOTCACHEPAGE` natively.
+* **W3 Total Cache** — honors `DONOTCACHEPAGE` / `DONOTCACHEOBJECT` natively.
+* **WP Super Cache** — honors `DONOTCACHEPAGE` natively.
+* **Hummingbird (WPMU DEV)** — honors `DONOTCACHEPAGE` natively.
+* **Cloudflare APO** — honors the `Cache-Control: no-store` header. With CF in front, also enable the trust filter so the `Vary: CF-IPCountry` header is emitted and CF caches per-country variants instead of bypassing entirely.
+
+= Known limitations =
+
+* **CDNs without origin Cache-Control honoring** (e.g. some legacy CloudFront configurations) — verify the response Cache-Control header reaches the edge. If not, add a CF-IPCountry or country-based cache key rule at the CDN level.
+* **Minor / regional cache plugins** (Comet Cache, Cachify, Swift Performance Lite) — not formally tested. Most still honor `DONOTCACHEPAGE`; verify by inspecting the response Cache-Control on a country-targeted page.
+
+Override the bypass logic per request via the `faz_country_dependent_banner_output` filter (return false to force the cache to ignore the country dimension on a specific URL).
+
 == Installation ==
 
 = From the WordPress.org plugin directory (recommended) =
