@@ -790,12 +790,12 @@ class Activator {
 				// universally supported (MySQL 8.0.13+ / MariaDB 10.2.7+);
 				// fall back to an explicit UPDATE to backfill the
 				// canonical empty-array value after the ALTER.
-				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- one-shot DDL on the plugin's custom table; column type is a fixed literal, no user input.
+				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- one-shot DDL on the plugin's custom table; $table = $wpdb->prefix . 'faz_banners' (no user input), column type is a fixed literal.
 				$wpdb->query( "ALTER TABLE `{$table}` ADD COLUMN `target_countries` longtext NOT NULL" );
 				// Backfill existing rows with the empty-array JSON so the
 				// NOT NULL constraint is satisfied. Skipped automatically
 				// when the table is empty.
-				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter
 				$wpdb->query( "UPDATE `{$table}` SET `target_countries` = '[]' WHERE `target_countries` = '' OR `target_countries` IS NULL" );
 			}
 			$pr_exists = (int) $wpdb->get_var(

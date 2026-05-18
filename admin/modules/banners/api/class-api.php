@@ -319,22 +319,28 @@ class Api extends Rest_Controller {
 				array( 'status' => 400 )
 			);
 		}
-		// Existence probe — see banner_exists() for the rationale. Without
-		// it, deleting a phantom id silently returns "0 rows affected" and
-		// the admin UI surfaces it as a generic failure even though the
-		// banner was simply already gone. The structured 404 lets the JS
-		// distinguish "already deleted → refresh" from "real failure →
-		// surface as error".
-		if ( ! $this->banner_exists( $banner_id ) ) {
+		// F017 fix: don't probe existence separately before calling
+		// $controller->delete_item(). The two-statement pattern was a
+		// classic check-then-act TOCTOU — between the probe and the
+		// DELETE, another admin session could remove the row, and the
+		// REST response would still claim 200/deleted=1 (since the
+		// controller's own delete now returns the atomic count). By
+		// dropping the probe and trusting the controller's atomic
+		// DELETE ... RETURNING (from F016), we get the right answer in
+		// a single round-trip with zero race window: the controller
+		// returns 0 when the row didn't exist, which we surface as
+		// 404; >0 when it actually deleted something; false on a
+		// driver/SQL error.
+		$data = $this->controller->delete_item( $banner_id );
+		if ( false === $data ) {
+			return new WP_Error( 'fazcookie_rest_db_error', __( 'Failed to delete banner.', 'faz-cookie-manager' ), array( 'status' => 500 ) );
+		}
+		if ( 0 === (int) $data ) {
 			return new WP_Error(
 				'fazcookie_rest_invalid_id',
 				__( 'Banner not found.', 'faz-cookie-manager' ),
 				array( 'status' => 404 )
 			);
-		}
-		$data = $this->controller->delete_item( $banner_id );
-		if ( false === $data ) {
-			return new WP_Error( 'fazcookie_rest_db_error', __( 'Failed to delete banner.', 'faz-cookie-manager' ), array( 'status' => 500 ) );
 		}
 		return rest_ensure_response( $data );
 	}

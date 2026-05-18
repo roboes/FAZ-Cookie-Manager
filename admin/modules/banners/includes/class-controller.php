@@ -299,46 +299,53 @@ class Controller extends Base_Controller {
 	public function delete_item( $id ) {
 		global $wpdb;
 		$id = absint( $id );
-		// F016 fix: read was_default + DELETE atomically via a single
-		// `DELETE ... RETURNING banner_default` statement on MySQL 8.0.21+
-		// / MariaDB 10.0.5+. The previous SELECT-then-DELETE pair was a
-		// classic check-then-act race: two admin sessions could each see
-		// was_default=1 on the same row and both call
-		// promote_fallback_default after their DELETEs, ending with TWO
-		// default rows. The atomic form binds the read to the same row
-		// the DELETE removes, so only one session sees was_default=1
-		// even when both target the same banner_id concurrently.
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery.NoCaching
-		$returned = $wpdb->get_var(
+		// F016 fix v2: serialize read+delete via an InnoDB transaction
+		// (`SELECT ... FOR UPDATE` + DELETE + COMMIT). The first attempt
+		// at this used `DELETE ... RETURNING banner_default` which is
+		// MariaDB-only — MySQL never implemented RETURNING through 9.x —
+		// so on stock MySQL the pre-fix race window was still wide open
+		// via the fallback path. Transaction-based locking covers both
+		// engines uniformly and works on every MySQL ≥ 5.6 (ClassicPress
+		// floor) as long as the storage engine is InnoDB, which
+		// install_tables() guarantees.
+		//
+		// The FOR UPDATE clause acquires a row-level X-lock that any
+		// concurrent SELECT/DELETE on the same banner_id must wait on
+		// until COMMIT. Two admin sessions deleting the same row
+		// therefore see exactly one was_default=1; the loser's SELECT
+		// either finds null (row already gone) and rolls back, or
+		// returns the post-DELETE state (impossible — DELETE acquires
+		// the same X-lock).
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$wpdb->query( 'START TRANSACTION' );
+		$was_default_raw = $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$wpdb->prepare(
-				"DELETE FROM `{$wpdb->prefix}faz_banners` WHERE `banner_id` = %d RETURNING `banner_default`",
+				"SELECT `banner_default` FROM `{$wpdb->prefix}faz_banners` WHERE `banner_id` = %d FOR UPDATE",
 				$id
 			)
 		);
-		if ( null === $returned ) {
-			// Older MySQL (<8.0.21) or MariaDB (<10.0.5) without RETURNING
-			// support, OR a no-op delete (row didn't exist). Fall back to
-			// the legacy SELECT-then-DELETE path. The fallback path still
-			// has the race window, but the upgrade path means new MySQL
-			// installs get the safe atomic form for free.
-			$was_default = (int) $wpdb->get_var( // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-				$wpdb->prepare(
-					"SELECT `banner_default` FROM `{$wpdb->prefix}faz_banners` WHERE `banner_id` = %d",
-					$id
-				)
-			);
-			$status = $wpdb->delete( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
-				$wpdb->prefix . 'faz_banners',
-				array( 'banner_id' => $id ),
-				array( '%d' )
-			);
-			if ( false === $status ) {
-				return false;
-			}
-		} else {
-			$was_default = (int) $returned;
-			$status      = 1;
+		if ( null === $was_default_raw ) {
+			// Row didn't exist at the start of the transaction. Close it
+			// cleanly and report 0 affected to the caller — the REST
+			// handler turns that into a 404.
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$wpdb->query( 'COMMIT' );
+			do_action( 'faz_after_update_banner' );
+			return 0;
 		}
+		$was_default = (int) $was_default_raw;
+		$status      = $wpdb->delete( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$wpdb->prefix . 'faz_banners',
+			array( 'banner_id' => $id ),
+			array( '%d' )
+		);
+		if ( false === $status ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$wpdb->query( 'ROLLBACK' );
+			return false;
+		}
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		$wpdb->query( 'COMMIT' );
 		if ( $status > 0 ) {
 			if ( 1 === $was_default ) {
 				$this->promote_fallback_default( $id );
@@ -454,22 +461,36 @@ class Controller extends Base_Controller {
 			$country = '';
 		}
 
-		$status_match    = array(); // status=1 + targets the country
-		$status_anyland  = array(); // status=1 + empty target list
-		$status_targeted = array(); // status=1 + non-empty targets (fallback)
-		$status_default  = null;    // banner_default=1 fallback (any status)
+		// F010 fix: classify against the raw stdClass rows produced by
+		// prepare_item() instead of instantiating a Banner per iteration.
+		// prepare_item() already decodes target_countries, normalises
+		// status / banner_default, and exposes priority — every field this
+		// classifier needs. The pre-fix `new Banner( $item->banner_id )`
+		// per row turned a single get_active_banner_for_country() call
+		// into N Controller round-trips + N full sanitize_settings
+		// cascades (each re-resolving defaults against gdpr.json/ccpa.json).
+		// On a 10-banner install that's 10 DB reads and ~50 ms of CPU per
+		// front-end page load; this drops to one DB read (the cached
+		// get_items()) and a single Banner instantiation for the winning
+		// row at the bottom of the function.
+		$status_match_ids    = array(); // status=1 + targets the country
+		$status_anyland_ids  = array(); // status=1 + empty target list
+		$status_targeted_ids = array(); // status=1 + non-empty targets (fallback)
+		$status_default_id   = null;    // banner_default=1 fallback (any status)
 
 		foreach ( $items as $item ) {
-			$banner = new Banner( $item->banner_id );
-			$status = (bool) $banner->get_status();
-			$targets = $banner->get_target_countries();
-			$is_default = (bool) $banner->get_default();
+			$iid        = (int) $item->banner_id;
+			$status     = 1 === (int) $item->status;
+			$targets    = is_array( $item->target_countries ) ? $item->target_countries : array();
+			$is_default = 1 === (int) $item->banner_default;
+			$priority   = isset( $item->priority ) ? (int) $item->priority : 0;
 
 			if ( $status ) {
+				$entry = array( 'id' => $iid, 'priority' => $priority );
 				if ( '' !== $country && in_array( $country, $targets, true ) ) {
-					$status_match[] = $banner;
+					$status_match_ids[] = $entry;
 				} elseif ( empty( $targets ) ) {
-					$status_anyland[] = $banner;
+					$status_anyland_ids[] = $entry;
 				} else {
 					// status=1 with non-empty targets but doesn't match $country.
 					// Kept as a last-resort fallback so legacy single-banner
@@ -477,38 +498,64 @@ class Controller extends Base_Controller {
 					// receive a status=1 banner instead of false when no
 					// match-all or banner_default row exists. Mirrors the
 					// pre-1.14.0 behaviour of "first status=1 wins".
-					$status_targeted[] = $banner;
+					$status_targeted_ids[] = $entry;
 				}
 			}
 
-			if ( $is_default && null === $status_default ) {
-				$status_default = $banner;
+			if ( $is_default && null === $status_default_id ) {
+				$status_default_id = $iid;
 			}
 		}
 
-		$winner = null;
-		if ( ! empty( $status_match ) ) {
-			$winner = self::pick_highest_priority( $status_match );
-		} elseif ( ! empty( $status_anyland ) ) {
-			$winner = self::pick_highest_priority( $status_anyland );
-		} elseif ( null !== $status_default ) {
-			$winner = $status_default;
-		} elseif ( ! empty( $status_targeted ) ) {
+		$winner_id = null;
+		if ( ! empty( $status_match_ids ) ) {
+			$winner_id = self::pick_highest_priority_id( $status_match_ids );
+		} elseif ( ! empty( $status_anyland_ids ) ) {
+			$winner_id = self::pick_highest_priority_id( $status_anyland_ids );
+		} elseif ( null !== $status_default_id ) {
+			$winner_id = $status_default_id;
+		} elseif ( ! empty( $status_targeted_ids ) ) {
 			// Pre-1.14.0 contract preservation: third-party callers of
 			// get_active_banner() (which passes country='') must still get
 			// a status=1 banner back when one exists, even if its
 			// target_countries doesn't match — otherwise an install with a
 			// single status=1, country-targeted, non-default banner returns
 			// false where pre-1.14.0 it returned that banner.
-			$winner = self::pick_highest_priority( $status_targeted );
+			$winner_id = self::pick_highest_priority_id( $status_targeted_ids );
 		}
 
-		if ( null === $winner ) {
+		if ( null === $winner_id ) {
 			return false;
 		}
 
+		// Only NOW instantiate a Banner — once, for the winner. This is the
+		// single point where prepare_item()'s shallow shape isn't enough
+		// (the caller wants get_law() / get_settings() / sanitize_settings
+		// guarantees etc.).
+		$winner = new Banner( $winner_id );
 		$winner->set_language( $current_lang );
 		return $winner;
+	}
+
+	/**
+	 * Variant of pick_highest_priority() that operates on raw
+	 * {id, priority} pairs instead of Banner instances. Lets the caller
+	 * defer Banner instantiation until after the winner is known —
+	 * critical for get_active_banner_for_country() which previously paid
+	 * an N+1 Banner construction cost per page load.
+	 *
+	 * @since 1.14.2
+	 * @param array<int, array{id:int, priority:int}> $entries
+	 * @return int
+	 */
+	private static function pick_highest_priority_id( $entries ) {
+		usort( $entries, function ( $a, $b ) {
+			if ( $a['priority'] !== $b['priority'] ) {
+				return $b['priority'] <=> $a['priority']; // desc
+			}
+			return $a['id'] <=> $b['id']; // asc tie-break
+		} );
+		return (int) $entries[0]['id'];
 	}
 
 	/**
