@@ -161,6 +161,14 @@ if ( ! function_exists( 'faz_current_language' ) ) {
 					// scope — preserves the pre-#108 behaviour on installs
 					// that ship only `pt`.
 					$country_locale = function_exists( 'faz_country_to_locale' ) ? faz_country_to_locale( $country ) : '';
+					// Normalise WP-style locale (`pt_BR`) to the plugin-internal
+					// hyphenated lowercase form (`pt-br`) — that's the shape
+					// faz_selected_languages() returns. Without this the
+					// regional-variant branch could never match (CodeRabbit
+					// review, 1.14.2).
+					if ( '' !== $country_locale ) {
+						$country_locale = strtolower( str_replace( '_', '-', $country_locale ) );
+					}
 					if ( '' !== $country_locale && in_array( $country_locale, $selected, true ) ) {
 						$current_language = $country_locale;
 					} else {

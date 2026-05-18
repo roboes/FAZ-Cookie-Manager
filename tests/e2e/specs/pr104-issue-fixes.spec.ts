@@ -94,11 +94,14 @@ test.describe('PR104 — #108 country→locale BCP-47 mapping', () => {
       // The Languages helpers read $settings['languages']['selected'] for
       // the available list and $settings['languages']['default'] for the
       // baseline. Both branches under test (locale form vs bare-lang form)
-      // must be candidates, so we ship en (default) and pt_BR (regional).
+      // must be candidates, so we ship en (default) and pt-br (regional).
+      // Plugin-internal language codes are hyphenated lowercase (faz_wp_locale
+      // map: 'pt-br' => 'pt_BR'); faz_country_to_locale() returns the
+      // WP-style form pt_BR and faz_current_language() normalises it.
       $faked = is_array( $orig_settings ) ? $orig_settings : array();
       $faked['languages'] = array(
         'default'  => 'en',
-        'selected' => array( 'en', 'pt_BR' ),
+        'selected' => array( 'en', 'pt-br' ),
       );
       update_option( 'faz_settings', $faked );
 
@@ -130,13 +133,15 @@ test.describe('PR104 — #108 country→locale BCP-47 mapping', () => {
       echo wp_json_encode( array( 'resolved' => $resolved ) );
     `).trim();
     const r = JSON.parse(raw);
-    // The headline assertion: when the install ships pt_BR alongside the
+    // The headline assertion: when the install ships pt-br alongside the
     // bare-language default, the locale-form (BCP-47) candidate wins over
-    // the bare-language fallback. This is the core promise of issue #108.
+    // the bare-language fallback. Plugin-internal locale codes are
+    // hyphenated lowercase (`pt-br`), normalised from the WP-style `pt_BR`
+    // returned by faz_country_to_locale().
     expect(
       r.resolved,
-      `country=BR + selected_languages=['en','pt_BR'] should resolve to 'pt_BR'`
-    ).toBe('pt_BR');
+      `country=BR + selected_languages=['en','pt-br'] should resolve to 'pt-br'`
+    ).toBe('pt-br');
   });
 });
 

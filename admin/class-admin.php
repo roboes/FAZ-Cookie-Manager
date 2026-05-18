@@ -79,6 +79,13 @@ class Admin {
 			add_action( 'network_admin_menu', array( $this, 'register_network_menu' ) );
 		}
 		add_action( 'admin_init', array( $this, 'load_plugin' ) );
+		// Emit no-cache headers EARLY on every plugin admin page — runs in
+		// admin_init (priority 1) before any module can produce output that
+		// flips headers_sent() to true. Previously this lived only inside
+		// render_page() which fires too late: pages that boot a list-table
+		// or print a notice on admin_init already sent their headers by the
+		// time render_page() tried to add the LSCache opt-out.
+		add_action( 'admin_init', array( $this, 'send_admin_nocache_headers' ), 1 );
 		add_action( 'activated_plugin', array( $this, 'handle_activation_redirect' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'deregister_api_fetch' ), 0 );
 		add_filter( 'admin_body_class', array( $this, 'admin_body_classes' ) );
@@ -1027,20 +1034,36 @@ class Admin {
 	 *
 	 * @return void
 	 */
-	public function render_page() {
-		// Defensive no-cache headers for every plugin admin page.
-		// Reported on prod (fabiodalez.it 2026-05-18, 1.14.1): after creating
-		// or deleting banners, the admin would still see the previous state.
-		// Root cause: LiteSpeed Cache (and any opportunistic upstream cache —
-		// some cPanel reverse proxies, Cloudflare on misconfigured zones)
-		// occasionally caches /wp-admin/ responses despite WordPress core
-		// emitting nocache headers, because the upstream's cache key ignores
-		// the WordPress cookie set. We re-emit nocache_headers() AND add the
-		// LiteSpeed-specific opt-out (X-LiteSpeed-Cache-Control: no-cache +
-		// the litespeed_control_set_nocache action) so the page never lands
-		// in a shared cache regardless of admin-page caching policy. Same
-		// pattern the frontend uses for country-dependent banners (see
-		// Frontend::send_geo_cache_headers).
+	/**
+	 * Emit the no-cache stack on every plugin admin page.
+	 *
+	 * Reported on prod (fabiodalez.it 2026-05-18, 1.14.1): after creating /
+	 * deleting banners, the admin would still see the previous state.
+	 * LiteSpeed (and Cloudflare "cache everything" misconfigurations,
+	 * varnish 4.x, etc.) can cache /wp-admin/ responses when the
+	 * cookie-keyed exemption fails. We force-opt-out with the full stack:
+	 *   - nocache_headers()  (WP core re-affirm)
+	 *   - explicit Cache-Control: no-store
+	 *   - X-LiteSpeed-Cache-Control: no-cache  (LSCache request-time opt-out)
+	 *   - DONOTCACHE* constants
+	 *   - litespeed_control_set_nocache action
+	 *
+	 * Hooked on admin_init priority 1 so it runs before any module's
+	 * admin_init listeners that might produce output and flip
+	 * headers_sent() to true (the prior placement inside render_page() was
+	 * too late on pages that boot a list-table or admin notice early —
+	 * three pages, consent-logs / gcm / languages, never received the
+	 * header pre-fix).
+	 *
+	 * @return void
+	 */
+	public function send_admin_nocache_headers() {
+		// Only act on the plugin's own admin pages — avoids touching
+		// unrelated /wp-admin/ responses.
+		$page = isset( $_GET['page'] ) ? sanitize_text_field( wp_unslash( $_GET['page'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		if ( '' === $page || false === strpos( $page, self::ADMIN_SLUG ) ) {
+			return;
+		}
 		nocache_headers();
 		if ( ! headers_sent() ) {
 			header( 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0', true );
@@ -1055,9 +1078,15 @@ class Admin {
 		if ( ! defined( 'DONOTCACHEDB' ) ) {
 			define( 'DONOTCACHEDB', true );
 		}
-		// LiteSpeed-specific opt-out trigger — honoured by litespeed-cache
-		// >= 3.x even when admin pages would otherwise be eligible.
 		do_action( 'litespeed_control_set_nocache', 'FAZ Cookie Manager admin page' );
+	}
+
+	public function render_page() {
+		// Defensive double-emit of the no-cache stack — admin_init priority 1
+		// already did this (send_admin_nocache_headers), but some bootstrap
+		// orderings (e.g. plugins that filter the admin_init queue) could
+		// theoretically skip it; re-emitting here is cheap and idempotent.
+		$this->send_admin_nocache_headers();
 
 		$this->ensure_pages_loaded();
 		$current_page = isset( $_GET['page'] ) ? sanitize_text_field( wp_unslash( $_GET['page'] ) ) : self::ADMIN_SLUG; // phpcs:ignore WordPress.Security.NonceVerification
@@ -1396,7 +1425,11 @@ class Admin {
 				$route = $request->get_route();
 				// Exclude /faz/v1/banner/* — those routes set their own
 				// Cache-Control: public, max-age=300 for CDN caching.
-				if ( 0 === strpos( $route, '/faz/v1' ) && 0 !== strpos( $route, '/faz/v1/banner' ) ) {
+				if (
+					0 === strpos( $route, '/faz/v1' )
+					&& 0 !== strpos( $route, '/faz/v1/banner' )
+					&& ! headers_sent()
+				) {
 					header( 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0' );
 					header( 'Pragma: no-cache' );
 					header( 'X-LiteSpeed-Cache-Control: no-cache' );

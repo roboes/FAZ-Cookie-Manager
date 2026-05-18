@@ -59,10 +59,15 @@ test.describe('PR104 — admin pages emit no-cache headers', () => {
         cc,
         `${slug}: Cache-Control should set max-age=0 (got "${cc}")`,
       ).toContain('max-age=0');
+      // LSCache accepts comma-separated tokens (no-cache, no-vary, no-store, …).
+      // We assert ONLY that the no-cache directive is present — the rest may
+      // legitimately vary (e.g. when the rest_pre_dispatch hook appends
+      // no-vary on REST namespaces or when Frontend::send_geo_cache_headers
+      // contributes extra directives on country-dependent installs).
       expect(
         ls,
-        `${slug}: X-LiteSpeed-Cache-Control should be "no-cache" (got "${ls}")`,
-      ).toBe('no-cache');
+        `${slug}: X-LiteSpeed-Cache-Control must include "no-cache" (got "${ls}")`,
+      ).toContain('no-cache');
     }
   });
 });

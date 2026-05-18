@@ -398,10 +398,32 @@
 				// editor mounts on the default banner. Used by both the
 				// happy-path post-delete reload and the "already gone"
 				// recovery path triggered by a 404 from a stale tab.
+				// CodeRabbit feedback: use location.replace() so the back
+				// button doesn't return to a dead banner_id state.
 				var redirectToDefault = function () {
 					var base = window.location.href.split('?')[0];
 					var page = (window.location.search.match(/page=([^&]+)/) || [null, 'faz-cookie-manager-banner'])[1];
-					window.location.href = base + '?page=' + encodeURIComponent(page);
+					window.location.replace(base + '?page=' + encodeURIComponent(page));
+				};
+				// "Already gone" recovery: longer delay than the happy-path
+				// reload so the admin has time to perceive the toast, and
+				// the user can cancel by interacting (mouse/keyboard).
+				// Doubles further when prefers-reduced-motion is set.
+				var redirectWithGrace = function () {
+					var delay = 1500;
+					try {
+						if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+							delay = 2000;
+						}
+					} catch (e) { /* matchMedia unavailable on very old IE; keep default */ }
+					var timer = setTimeout(redirectToDefault, delay);
+					var cancelOnce = function () {
+						clearTimeout(timer);
+						window.removeEventListener('pointermove', cancelOnce);
+						window.removeEventListener('keydown', cancelOnce);
+					};
+					window.addEventListener('pointermove', cancelOnce, { once: true });
+					window.addEventListener('keydown', cancelOnce, { once: true });
 				};
 				FAZ.del('banners/' + bannerId).then(function (resp) {
 					// REST returns the deleted row count from $wpdb->delete.
@@ -414,7 +436,7 @@
 					var n = (typeof resp === 'number') ? resp : (resp && typeof resp.deleted === 'number' ? resp.deleted : 1);
 					if (!n) {
 						FAZ.notify(__('banner.alreadyDeleted', 'This banner was already removed. Reloading…'));
-						setTimeout(redirectToDefault, 700);
+						redirectWithGrace();
 						return;
 					}
 					// Verify with a second GET so we don't reload to a
@@ -444,7 +466,7 @@
 					);
 					if ( alreadyGone ) {
 						FAZ.notify(__('banner.alreadyDeleted', 'This banner was already removed. Reloading…'));
-						setTimeout(redirectToDefault, 700);
+						redirectWithGrace();
 						return;
 					}
 					delBtn.disabled = false;

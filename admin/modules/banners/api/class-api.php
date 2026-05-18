@@ -101,8 +101,9 @@ class Api extends Rest_Controller {
 			array(
 				'args' => array(
 					'id' => array(
-						'description' => __( 'Unique identifier for the resource.', 'faz-cookie-manager' ),
-						'type'        => 'integer',
+						'description'       => __( 'Unique identifier for the resource.', 'faz-cookie-manager' ),
+						'type'              => 'integer',
+						'sanitize_callback' => 'absint',
 					),
 				),
 				array(
@@ -202,30 +203,51 @@ class Api extends Rest_Controller {
 	 * @return WP_Error|WP_REST_Response
 	 */
 	public function get_item( $request ) {
-		global $wpdb;
 		$id = (int) $request['id'];
 		if ( $id <= 0 ) {
 			return new WP_Error( 'fazcookie_rest_invalid_id', __( 'Invalid ID.', 'faz-cookie-manager' ), array( 'status' => 404 ) );
 		}
-		// The legacy "0 === $object->get_id()" check below couldn't catch a
-		// non-existent row: Banner::__construct unconditionally calls
-		// set_id( $id ) BEFORE attempting the DB read, so the resulting
-		// object always reports the requested id even when the row is gone.
-		// Pre-1.14.1 fix this surfaced as GET /banners/{phantom_id} → 200
-		// with an empty banner — the admin editor would happily render
-		// "Settings" for a row that didn't exist. Replaced with an
-		// explicit existence probe against the faz_banners table.
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.SlowDBQuery
-		$exists = (int) $wpdb->get_var( $wpdb->prepare(
-			"SELECT COUNT(*) FROM {$wpdb->prefix}faz_banners WHERE banner_id = %d",
-			$id
-		) );
-		if ( 0 === $exists ) {
+		// Banner::__construct unconditionally calls set_id( $id ) BEFORE the
+		// DB read, so the legacy `0 === $object->get_id()` check couldn't
+		// catch a non-existent row — pre-1.14.1 this surfaced as
+		// GET /banners/{phantom_id} → 200 with an empty payload. The DB
+		// existence probe lives in banner_exists() so create / get / delete
+		// share a single contract (see CodeRabbit review feedback on the
+		// duplicated COUNT(*) probes — extracted as DRY helper + switched
+		// to EXISTS() for an index-only plan).
+		if ( ! $this->banner_exists( $id ) ) {
 			return new WP_Error( 'fazcookie_rest_invalid_id', __( 'Banner not found.', 'faz-cookie-manager' ), array( 'status' => 404 ) );
 		}
 		$object = new Banner( $id );
 		$data   = $this->prepare_item_for_response( $object, $request );
 		return rest_ensure_response( $data );
+	}
+
+	/**
+	 * Cheap existence check for a banner row.
+	 *
+	 * Uses EXISTS(SELECT 1 ...) instead of COUNT(*): MySQL can short-circuit
+	 * on the first match and the optimiser picks an index-only plan on the
+	 * banner_id primary key. Centralises the contract used by get_item() and
+	 * delete_item() so any future tweak (e.g. soft-delete column) lives in
+	 * one place.
+	 *
+	 * @since 1.14.2
+	 * @param int $id Banner ID.
+	 * @return bool
+	 */
+	private function banner_exists( $id ) {
+		$id = (int) $id;
+		if ( $id <= 0 ) {
+			return false;
+		}
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.SlowDBQuery
+		$exists = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT EXISTS(SELECT 1 FROM {$wpdb->prefix}faz_banners WHERE banner_id = %d)",
+			$id
+		) );
+		return 1 === $exists;
 	}
 
 	/**
@@ -285,7 +307,6 @@ class Api extends Rest_Controller {
 	 * @return WP_Error|WP_REST_Response
 	 */
 	public function delete_item( $request ) {
-		global $wpdb;
 		$banner_id = (int) $request['id'];
 		if ( $banner_id <= 0 ) {
 			return new WP_Error(
@@ -294,18 +315,13 @@ class Api extends Rest_Controller {
 				array( 'status' => 400 )
 			);
 		}
-		// Existence probe — same pattern as get_item(). Without it, deleting
-		// a phantom id silently returns "0 rows affected" and the admin UI
-		// surfaces it as a generic failure ("Failed to delete banner —
-		// id=4"), even though the banner was simply already gone. Returning
-		// a structured 404 lets the JS distinguish "already deleted —
-		// refresh the page" from "real failure — surface as error".
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.SlowDBQuery
-		$exists = (int) $wpdb->get_var( $wpdb->prepare(
-			"SELECT COUNT(*) FROM {$wpdb->prefix}faz_banners WHERE banner_id = %d",
-			$banner_id
-		) );
-		if ( 0 === $exists ) {
+		// Existence probe — see banner_exists() for the rationale. Without
+		// it, deleting a phantom id silently returns "0 rows affected" and
+		// the admin UI surfaces it as a generic failure even though the
+		// banner was simply already gone. The structured 404 lets the JS
+		// distinguish "already deleted → refresh" from "real failure →
+		// surface as error".
+		if ( ! $this->banner_exists( $banner_id ) ) {
 			return new WP_Error(
 				'fazcookie_rest_invalid_id',
 				__( 'Banner not found.', 'faz-cookie-manager' ),

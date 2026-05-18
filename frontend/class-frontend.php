@@ -784,6 +784,23 @@ class Frontend {
 		$settings  = $this->get_faz_settings();
 		$dependent = false;
 
+		// Country→language fallback (CodeRabbit review, 1.14.2): when the
+		// install has NO URL-based multilingual plugin AND the publisher
+		// opted in via the faz_use_country_language_fallback filter,
+		// faz_current_language() picks the banner language from the
+		// visitor's detected country (an IT visitor sees "it" content on
+		// /en/). A cached HTML response for an EN visitor would then
+		// silently serve the wrong language to an IT visitor. Mark the
+		// output as country-dependent in that combination so the page
+		// cache stays per-country.
+		if (
+			function_exists( 'faz_i18n_is_multilingual' )
+			&& ! faz_i18n_is_multilingual()
+			&& apply_filters( 'faz_use_country_language_fallback', false )
+		) {
+			$dependent = true;
+		}
+
 		// IAB TCF: _fazTcfConfig.gdprApplies is derived from the visitor
 		// country at render time (Geolocation::is_eu_visitor()). A cached
 		// page served to a non-EU visitor that originally rendered for an

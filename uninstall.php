@@ -96,8 +96,10 @@ if ( $faz_force_remove_all || faz_should_remove_on_uninstall() || is_multisite()
 			}
 
 			// Clean up site transients owned by the plugin. On single-site
-			// installs these are stored in wp_options, but delete_transient()
-			// does not remove the _site_transient_* variants.
+			// installs these are stored in wp_options; the loop below covers
+			// that path. Multisite is handled separately AFTER this per-blog
+			// loop completes (site transients on multisite live in
+			// wp_sitemeta, not in the per-blog options table).
 			$site_transient_prefixes = array(
 				$wpdb->esc_like( '_site_transient_faz' ) . '%',
 				$wpdb->esc_like( '_site_transient_timeout_faz' ) . '%',
@@ -280,6 +282,34 @@ if ( $faz_force_remove_all || faz_should_remove_on_uninstall() || is_multisite()
 			}
 			$faz_offset += $faz_batch;
 		} while ( count( $faz_site_ids ) === $faz_batch );
+
+		// Multisite-network site transients (CodeRabbit review, 1.14.2):
+		// site transients on multisite are stored in wp_sitemeta, NOT in
+		// per-blog wp_options — the faz_cleanup_site_data() loop above
+		// queries wp_options and therefore misses every network-level
+		// site_transient. Sweep them here in one pass on the primary
+		// network.
+		global $wpdb;
+		$faz_sitemeta_prefixes = array(
+			$wpdb->esc_like( '_site_transient_faz' ) . '%',
+			$wpdb->esc_like( '_site_transient_timeout_faz' ) . '%',
+		);
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$faz_network_transients = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT meta_key FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s OR meta_key LIKE %s",
+				$faz_sitemeta_prefixes[0],
+				$faz_sitemeta_prefixes[1]
+			)
+		);
+		foreach ( $faz_network_transients as $faz_network_transient ) {
+			if ( 0 === strpos( $faz_network_transient, '_site_transient_timeout_' ) ) {
+				$faz_network_transient = substr( $faz_network_transient, strlen( '_site_transient_timeout_' ) );
+			} elseif ( 0 === strpos( $faz_network_transient, '_site_transient_' ) ) {
+				$faz_network_transient = substr( $faz_network_transient, strlen( '_site_transient_' ) );
+			}
+			delete_site_transient( $faz_network_transient );
+		}
 	} elseif ( faz_should_remove_on_uninstall() ) {
 		faz_cleanup_site_data();
 	}

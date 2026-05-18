@@ -23,6 +23,18 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Cache extends Modules {
 
 	/**
+	 * Guard against double registration of the cache services in exotic
+	 * boot orders (e.g. a plugin that re-instantiates the FAZ Admin
+	 * module loader, or test fixtures that call init() twice). Without
+	 * this flag, load_services() could fire twice and each adapter would
+	 * add_action() its clear_cache twice → cache plugins purge twice per
+	 * banner CRUD.
+	 *
+	 * @var bool
+	 */
+	private $loaded = false;
+
+	/**
 	 * Constructor.
 	 *
 	 * Cache-service registration runs on `plugins_loaded` so third-party
@@ -38,14 +50,33 @@ class Cache extends Modules {
 	 * load_services() never fired.
 	 *
 	 * Fix: detect the post-plugins_loaded race and run load_services
-	 * immediately, otherwise queue it as before.
+	 * immediately, otherwise queue it as before. The `$loaded` flag
+	 * ensures the registration is exactly-once regardless of boot path.
 	 */
 	public function init() {
 		if ( did_action( 'plugins_loaded' ) ) {
-			$this->load_services();
+			$this->load_services_once();
 			return;
 		}
-		add_action( 'plugins_loaded', array( $this, 'load_services' ) );
+		add_action( 'plugins_loaded', array( $this, 'load_services_once' ) );
+	}
+
+	/**
+	 * Idempotent wrapper around load_services().
+	 *
+	 * Public because WordPress's add_action() needs a public method to
+	 * dispatch to. External callers should NOT invoke this directly —
+	 * use load_services() instead if you genuinely need to re-register.
+	 *
+	 * @since 1.14.2
+	 * @return void
+	 */
+	public function load_services_once() {
+		if ( $this->loaded ) {
+			return;
+		}
+		$this->loaded = true;
+		$this->load_services();
 	}
 
 	/**
