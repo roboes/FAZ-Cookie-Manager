@@ -253,11 +253,31 @@ class Controller extends Base_Controller {
 			// between INSERT and UPDATE). The row exists with a stale
 			// slug; rather than leave a half-baked state, run the same
 			// invariants + notifications the pre-fix tail used to.
-			if ( true === $banner->get_default() ) {
-				$this->clear_default_on_others( $id );
+			//
+			// CodeRabbit#2 (1.14.4): before falling back to the
+			// invariant-only tail, attempt one focused slug UPDATE.
+			// The happy path is "intermittent UPDATE failure on
+			// otherwise-valid data" — recoverable by a direct, narrow
+			// patch. If the patch sticks, we keep slug uniqueness on
+			// the row WITHOUT changing the external API. Only if the
+			// patch ALSO fails (false = SQL error; 0 affected = row
+			// vanished or already had the value) do we drop into the
+			// cache+hook safety net to keep observability and the
+			// at-most-one-default invariant intact.
+			$patched = $wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+				$wpdb->prefix . 'faz_banners',
+				array( 'slug' => $slug ),
+				array( 'banner_id' => $id ),
+				array( '%s' ),
+				array( '%d' )
+			);
+			if ( false === $patched || 0 === (int) $patched ) {
+				if ( true === $banner->get_default() ) {
+					$this->clear_default_on_others( $id );
+				}
+				$this->delete_cache();
+				do_action( 'faz_after_update_banner' );
 			}
-			$this->delete_cache();
-			do_action( 'faz_after_update_banner' );
 		}
 	}
 
@@ -734,10 +754,17 @@ class Controller extends Base_Controller {
 		// stop working. The cache-key embedding code casts to (string)
 		// regardless, so storing the raw microtime string costs nothing.
 		//
-		// Concurrency: microtime(true) gives sub-millisecond resolution —
-		// two real-world concurrent admin sessions always land on
-		// different epochs, even on shared hosting.
-		$next = (string) microtime( true );
+		// Concurrency: sprintf with %.6F forces 6-decimal microsecond
+		// resolution. A bare (string) cast follows PHP's default
+		// precision=14 ini, which on float values near 1.75e9 actually
+		// emits only ~4 decimal digits (~100μs resolution). Two
+		// concurrent admin saves landing within ~100μs would collapse
+		// to the same epoch string and cache invalidation would
+		// silently fail. %.6F is locale-independent and always emits
+		// exactly 6 decimals, restoring true sub-millisecond
+		// uniqueness without depending on the host's precision ini.
+		// (F305 fix, 1.14.4 — supersedes the F104/F015 implementation.)
+		$next = sprintf( '%.6F', microtime( true ) );
 		// F107 fix: autoload=false (was true in the F011 fix). The
 		// option is written on every banner create/update/delete —
 		// every hot-write would force a full wp_load_alloptions()
