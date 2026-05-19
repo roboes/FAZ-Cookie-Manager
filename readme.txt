@@ -60,6 +60,16 @@ This plugin assists consent and privacy workflows. It does not itself create, pr
 
 Core banner functionality runs on your WordPress site. Optional update/download features may contact GitHub, IAB Europe, MaxMind, or the AMP CDN depending on which features you enable and use.
 
+= Multi-banner geo-routing vs multilingual content (1.14.0+) =
+
+These are two **orthogonal** features that combine freely — multi-banner is per **country**, multilingual content is per **language inside each banner**.
+
+* **Multi-banner geo-routing** picks WHICH banner profile to serve based on the visitor's country. Typical setup: a strict GDPR banner for EU/EEA/UK and a CCPA opt-out banner for California (or any other per-region compliance profile). Country resolution chain: Cloudflare `CF-IPCountry` header (opt-in via the `faz_trust_cf_ipcountry_header` filter) → MaxMind GeoLite2 → ip-api.com fallback. Each banner row carries its own `target_countries` list and a `priority` integer for overlap resolution.
+
+* **Multilingual content** lives INSIDE each banner. A single banner stores translations of its title, description and button labels for as many languages as you enable on the Languages page. The language displayed to the visitor is resolved CLIENT-SIDE from `navigator.languages` so a country-targeted banner can still be served from a full-page cache (LiteSpeed / WP Rocket / Cloudflare APO) and the right language renders on hydration.
+
+Practical example: an install needs only TWO banner rows, not eight. One EU-targeted GDPR banner with English + Italian + German + French + Polish translations inside, and one US-targeted CCPA banner with English + Spanish translations inside. The country selects the banner; the browser selects the translation inside the banner. Visitors hitting the right cache key get the right banner + the right language.
+
 == External Services ==
 
 = GitHub / Raw GitHubusercontent (Open Cookie Database) =
@@ -227,7 +237,11 @@ Yes. Every consent action (accept, reject, customize) is recorded in a local dat
 
 = Does it support multiple languages? =
 
-Yes. The Languages page lets you select from 180+ available languages. The banner text is automatically translated based on the visitor's browser language, and you can customize every string.
+Yes. The Languages page lets you select from 180+ available languages. Each banner you create carries its own translations for every language you enable — the banner text (title, description, button labels) is stored per-language inside the banner row, and the language displayed to the visitor is resolved client-side from `navigator.languages`. WPML / Polylang URL-based language switching is auto-detected and always cache-safe.
+
+= Does multi-banner mean one banner per language? =
+
+No — multi-banner routing is per visitor **country** (e.g. GDPR vs CCPA, EU vs US), not per language. Each banner row carries its OWN multilingual content: title, description and button labels translated for every language you support. The visitor's country selects the banner; the visitor's browser language then selects which translated strings to render inside that banner. So an install with one EU-targeted GDPR banner (carrying English + Italian + German + French translations) and one US-targeted CCPA banner (carrying English + Spanish translations) needs only TWO banner rows, not eight. See the "Multi-banner geo-routing vs multilingual content" section in the Description for the full architecture.
 
 = Can users change their consent after accepting? =
 
