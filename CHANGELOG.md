@@ -6,16 +6,13 @@ All notable changes to FAZ Cookie Manager are documented in this file.
 
 ### Added
 
+- **`faz_country_detection_consensus` filter** (`$require_consensus`, `$votes`). When the filter resolves to `true` AND at least two detection sources disagree on the visitor country, `Geolocation::detect_country()` returns an empty string (fail-open — banner is shown to everyone). Off by default to preserve the CF-first priority order. Plugins that legitimately need the visitor IP should hook `faz_visitor_country` instead, which exposes it for trusted overrides and test fixtures.
 - **Multi-banner geo-routing** (closes #103). New schema columns `target_countries` and `priority` on `wp_faz_banners` let admins serve different banners per visitor country — e.g. a Reject-mandatory GDPR banner to EU/EEA/UK and a CCPA-style banner with the close (X) button to US visitors. Routing is owned by `Controller::get_active_banner_for_country()` and picks up the visitor country from the Cloudflare `CF-IPCountry` header (opt-in via the `faz_trust_cf_ipcountry_header` filter) or the MaxMind / ip-api.com fallback chain.
 - **Per-banner close-button override**: `settings.allowCloseButtonWithReject` toggles the EDPB/Garante dark-pattern auto-hide on a per-banner basis. Default `false` preserves the compliance behaviour; opting in is documented as an EU/EEA/UK violation but unblocks non-EU jurisdictions.
 - **Country-dependent cache busting** via `DONOTCACHEPAGE` / `DONOTCACHEOBJECT` / `DONOTCACHEDB` constants + `Cache-Control: no-store` + `Vary: CF-IPCountry` (with the trust filter on).
 - **Country-aware AMP `<amp-consent>` resolver** via `Geolocation::get_visitor_country()`.
 - **Scope-change consent invalidation**: consent cookies now carry `__scope.banner` and `__scope.law` so a visitor that crosses a jurisdiction (CCPA → GDPR) re-prompts instead of inheriting consent from a different legal regime.
 - **Missing-banner notice** in admin when `?banner_id=…` does not resolve — the editor body is hidden and a recovery CTA points at the install's default banner.
-
-### Changed
-
-- **BREAKING**: the `faz_country_detection_consensus` filter now receives **2 arguments** (`$require_consensus`, `$votes`) instead of the 3 it received in 1.14.0–1.14.2. The third argument (raw IP in 1.14.0, `wp_hash()`-derived IP token in 1.14.2) has been removed because both forms remained PII-equivalent for correlation. Plugins that registered with `add_filter('faz_country_detection_consensus', $cb, 10, 3)` continue to work (PHP silently passes `null` for the missing arg), but the third parameter is now always `null` and should not be relied upon. Plugins that legitimately need the visitor IP should hook `faz_visitor_country` instead, which exposes it for trusted overrides and test fixtures.
 
 ### Fixed
 
