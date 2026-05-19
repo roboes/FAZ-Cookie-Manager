@@ -251,33 +251,40 @@ class Controller extends Base_Controller {
 		if ( $persisted_slug !== $slug ) {
 			// update_item early-returned (UPDATE failed or row vanished
 			// between INSERT and UPDATE). The row exists with a stale
-			// slug; rather than leave a half-baked state, run the same
-			// invariants + notifications the pre-fix tail used to.
+			// slug; rather than leave a half-baked state, run the
+			// invariant tail unconditionally, then attempt the focused
+			// slug UPDATE.
 			//
-			// CodeRabbit#2 (1.14.4): before falling back to the
-			// invariant-only tail, attempt one focused slug UPDATE.
-			// The happy path is "intermittent UPDATE failure on
-			// otherwise-valid data" — recoverable by a direct, narrow
-			// patch. If the patch sticks, we keep slug uniqueness on
-			// the row WITHOUT changing the external API. Only if the
-			// patch ALSO fails (false = SQL error; 0 affected = row
-			// vanished or already had the value) do we drop into the
-			// cache+hook safety net to keep observability and the
-			// at-most-one-default invariant intact.
-			$patched = $wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			// R4-S002 fix (1.14.4): the prior shape gated the invariant
+			// tail (clear_default_on_others + delete_cache + do_action)
+			// on the focused slug UPDATE FAILING. That conflated two
+			// orthogonal concerns — slug persistence and the
+			// at-most-one-default invariant. If save() failed AND the
+			// focused UPDATE happens to succeed, the invariant could
+			// still be violated (multiple banner_default=1 rows from
+			// the failed save's pre-state), AND the listener event +
+			// cache flush would be skipped. Run the invariant tail
+			// unconditionally so the recovery is complete regardless
+			// of the slug-patch outcome.
+			//
+			// CodeRabbit#2 (1.14.4): the focused slug UPDATE still runs
+			// — it keeps slug uniqueness on the row when the original
+			// save() suffered an intermittent UPDATE failure on
+			// otherwise-valid data. Just no longer gates the invariant
+			// recovery.
+			if ( true === $banner->get_default() ) {
+				$this->clear_default_on_others( $id );
+			}
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$wpdb->update(
 				$wpdb->prefix . 'faz_banners',
 				array( 'slug' => $slug ),
 				array( 'banner_id' => $id ),
 				array( '%s' ),
 				array( '%d' )
 			);
-			if ( false === $patched || 0 === (int) $patched ) {
-				if ( true === $banner->get_default() ) {
-					$this->clear_default_on_others( $id );
-				}
-				$this->delete_cache();
-				do_action( 'faz_after_update_banner' );
-			}
+			$this->delete_cache();
+			do_action( 'faz_after_update_banner' );
 		}
 	}
 
@@ -309,6 +316,16 @@ class Controller extends Base_Controller {
 			'target_countries' => wp_json_encode( $banner->get_target_countries() ),
 			'priority'         => $banner->get_priority(),
 		);
+		// R4-S001 fix (1.14.4): wrap UPDATE + invariant branches in
+		// a transaction so the FOR UPDATE lock that
+		// promote_fallback_default acquires actually serializes
+		// concurrent callers. Without this wrapper, update_item runs
+		// in MySQL autocommit mode → each FOR UPDATE statement
+		// releases its row lock at end-of-statement, BEFORE the
+		// subsequent UPDATE runs. Mirrors the transaction wrapper
+		// delete_item has carried since F112.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		$wpdb->query( 'START TRANSACTION' );
 		$updated = $wpdb->update( // phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.PreparedSQL.NotPrepared
 			$wpdb->prefix . 'faz_banners',
 			$data,
@@ -325,6 +342,8 @@ class Controller extends Base_Controller {
 			)
 		);
 		if ( false === $updated ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$wpdb->query( 'ROLLBACK' );
 			return;
 		}
 		// Default-flag invariants. Both branches run AFTER the current
@@ -336,12 +355,22 @@ class Controller extends Base_Controller {
 		//     ends up with zero banner_default=1 rows and
 		//     get_active_banner_for_country() loses its last-resort
 		//     fallback for unmatched countries.
+		//
+		// R4-S003 fix: track whether an invariant branch fired so the
+		// post-COMMIT delete_cache also flushes when peer rows changed
+		// but the current row's UPDATE was a no-op ($updated === 0
+		// from $wpdb->update means "identical data, 0 rows affected").
+		$invariant_fired = false;
 		if ( true === $banner->get_default() ) {
 			$this->clear_default_on_others( $banner->get_id() );
+			$invariant_fired = true;
 		} elseif ( $was_default ) {
 			$this->promote_fallback_default( $banner->get_id() );
+			$invariant_fired = true;
 		}
-		if ( $updated > 0 ) {
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		$wpdb->query( 'COMMIT' );
+		if ( $updated > 0 || $invariant_fired ) {
 			$this->delete_cache();
 		}
 		if ( defined( 'FAZ_BULK_REQUEST' ) && FAZ_BULK_REQUEST ) {
@@ -804,7 +833,14 @@ class Controller extends Base_Controller {
 				$keep_id
 			)
 		);
-		$this->delete_cache();
+		// R4-S003 fix (1.14.4): cache invalidation is the CALLER's
+		// responsibility — mirrors promote_fallback_default's contract
+		// since F301. The pre-fix internal delete_cache() call ran
+		// PRE-COMMIT when this method executes inside update_item's
+		// transaction wrapper (R4-S001), opening the same cache-
+		// poisoning race F301 closed for delete_item. All current
+		// callers (create_item slug-probe, update_item) invoke
+		// delete_cache after the surrounding transaction commits.
 	}
 
 	/**

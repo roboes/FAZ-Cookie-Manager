@@ -907,6 +907,15 @@ class Activator {
 			$wpdb->prefix . 'faz_cookies',
 			$wpdb->prefix . 'faz_cookie_categories',
 		);
+		// R4-S004 fix (1.14.4): track per-table completion so a partial
+		// failure (disk pressure, ROW_FORMAT incompatibility on legacy
+		// MyISAM rows >8KB, lock-wait timeout on a busy table) doesn't
+		// silently bump db_version past 1.14.3 and leave the failed
+		// table stuck on MyISAM forever. We accumulate failures and
+		// the caller (maybe_update_db) can compare the resulting
+		// `faz_innodb_migration_pending` option on the next admin
+		// load to detect incomplete migration and retry.
+		$faz_innodb_failed = array();
 		foreach ( $faz_innodb_tables as $faz_innodb_table ) {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$current_engine = $wpdb->get_var(
@@ -917,8 +926,29 @@ class Activator {
 			);
 			if ( $current_engine && 'InnoDB' !== $current_engine ) {
 				// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter
-				$wpdb->query( "ALTER TABLE `{$faz_innodb_table}` ENGINE=InnoDB" );
+				$alter_result = $wpdb->query( "ALTER TABLE `{$faz_innodb_table}` ENGINE=InnoDB" );
+				if ( false === $alter_result ) {
+					$faz_innodb_failed[] = $faz_innodb_table;
+				}
 			}
+		}
+		if ( ! empty( $faz_innodb_failed ) ) {
+			// Persist the failure list so a re-run of update_db_350 (on
+			// next admin load, since maybe_update_db re-enters per
+			// request) can target only the still-pending tables.
+			// Storing as a non-autoloaded option keeps the hot path lean.
+			update_option( 'faz_innodb_migration_pending', $faz_innodb_failed, false );
+			if ( function_exists( 'error_log' ) ) {
+				error_log( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+					sprintf(
+						'[FAZ Cookie Manager] InnoDB migration failed for: %s — settings-import transactions on these tables will be silent no-ops until the engine is converted.',
+						implode( ', ', $faz_innodb_failed )
+					)
+				);
+			}
+		} else {
+			// Clear any stale pending flag from prior partial runs.
+			delete_option( 'faz_innodb_migration_pending' );
 		}
 
 		faz_clear_banner_template_cache();
