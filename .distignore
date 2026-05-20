@@ -16,6 +16,7 @@
 .playwright-cli/
 .playwright-mcp/
 .serena/
+.specify/
 .wordpress-org/
 .distignore
 
@@ -40,6 +41,7 @@ release.md
 report.md
 README.md
 scripts/
+specs/
 /*.png
 /*.jpg
 test-results/
