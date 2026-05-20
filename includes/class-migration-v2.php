@@ -293,7 +293,9 @@ class Migration_V2 {
 		}
 
 		// Construct ALTER. Backticks + allowlist-validated identifier.
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery,PluginCheck.Security.DirectDB.UnescapedDBParameter
+		// $table is callsite-controlled ($wpdb->prefix . 'faz_consent_logs'), $column comes from a static $allowed map,
+		// $ddl is one of two regex-validated literals (see L285-L292). prepare() is not usable for identifiers/DDL.
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery,PluginCheck.Security.DirectDB.UnescapedDBParameter
 		$sql = sprintf(
 			'ALTER TABLE `%s` ADD COLUMN `%s` %s, ALGORITHM=INPLACE, LOCK=NONE',
 			str_replace( '`', '', $table ),
@@ -302,14 +304,14 @@ class Migration_V2 {
 		);
 
 		// Suppress dbDelta-style warnings; we report success via return code.
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange
 		$result = $wpdb->query( $sql );
 		if ( false === $result ) {
 			// Some MySQL/MariaDB versions reject ALGORITHM= clause on the
 			// rare composite/index-dependent ALTER. Retry without the
 			// online hints — the operation is still safe (NULL-default
-			// ADD COLUMN), just might briefly lock.
-			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter
+			// ADD COLUMN), just might briefly lock. Same allowlist as above.
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange,PluginCheck.Security.DirectDB.UnescapedDBParameter
 			$result = $wpdb->query(
 				sprintf(
 					'ALTER TABLE `%s` ADD COLUMN `%s` %s',
