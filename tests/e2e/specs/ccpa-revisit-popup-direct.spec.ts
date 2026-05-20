@@ -51,6 +51,14 @@ test.describe('CCPA revisit → opt-out popup (1-click UX, 1.14.4+)', () => {
       echo wp_json_encode( array( 'banner_id' => $row->banner_id, 'previous' => $previous ) );
     `).trim();
 
+    // CodeRabbit follow-up (Biome noUnsafeFinally): capture any cleanup
+    // error in a local variable instead of throwing inside finally.
+    // Throwing in finally masks the original test failure when both the
+    // body and the cleanup fail. We rethrow AFTER finally so the body
+    // error always propagates first; cleanup errors surface only when
+    // the body succeeded.
+    let cleanupErr: unknown = undefined;
+
     try {
       const meta = JSON.parse(originalLaw);
       expect(meta.error, 'install has a default banner').toBeUndefined();
@@ -113,12 +121,14 @@ test.describe('CCPA revisit → opt-out popup (1-click UX, 1.14.4+)', () => {
           `);
         }
       } catch (e) {
-        // CodeRabbit#1: do NOT silence cleanup failures. A failed
-        // rollback leaves the banner law on 'ccpa' and the NEXT test
-        // (the GDPR regression below) inherits a polluted DB, flaking
-        // intermittently. Surface the failure so the test reports it.
-        throw new Error(`CCPA cleanup rollback failed: ${String(e)}`);
+        // CodeRabbit#1: do NOT silence cleanup failures. Capture here,
+        // rethrow AFTER finally (noUnsafeFinally compliance — avoids
+        // masking the body's original error).
+        cleanupErr = e;
       }
+    }
+    if (cleanupErr !== undefined) {
+      throw new Error(`CCPA cleanup rollback failed: ${String(cleanupErr)}`);
     }
   });
 
@@ -144,6 +154,9 @@ test.describe('CCPA revisit → opt-out popup (1-click UX, 1.14.4+)', () => {
       delete_option( 'faz_banner_template' );
       echo wp_json_encode( array( 'banner_id' => $row->banner_id, 'previous' => $previous ) );
     `).trim();
+
+    // CodeRabbit follow-up (Biome noUnsafeFinally): see CCPA test above.
+    let cleanupErr: unknown = undefined;
 
     try {
       const meta = JSON.parse(originalLaw);
@@ -190,8 +203,12 @@ test.describe('CCPA revisit → opt-out popup (1-click UX, 1.14.4+)', () => {
           `);
         }
       } catch (e) {
-        throw new Error(`GDPR cleanup rollback failed: ${String(e)}`);
+        // Capture; rethrow after finally (noUnsafeFinally compliance).
+        cleanupErr = e;
       }
+    }
+    if (cleanupErr !== undefined) {
+      throw new Error(`GDPR cleanup rollback failed: ${String(cleanupErr)}`);
     }
   });
 });
