@@ -294,17 +294,111 @@ class Renderer {
 		if ( empty( $services ) ) {
 			return esc_html__( 'None declared.', 'faz-cookie-manager' );
 		}
+		// Display-name map. Brand names are verbatim (registered marks).
+		// Grouped here in the same category buckets used by the admin form
+		// and the API allowlist — single source of truth for service IDs.
 		$names = array(
-			'ga4'      => 'Google Analytics 4',
-			'gtm'      => 'Google Tag Manager',
-			'meta'     => 'Meta (Facebook) Pixel',
-			'tiktok'   => 'TikTok Pixel',
-			'linkedin' => 'LinkedIn Insight Tag',
-			'msuet'    => 'Microsoft UET',
-			'clarity'  => 'Microsoft Clarity',
-			'cf'       => 'Cloudflare',
-			'recaptcha'=> 'Google reCAPTCHA',
-			'hotjar'   => 'Hotjar',
+			// Analytics
+			'ga4'           => 'Google Analytics 4',
+			'gtm'           => 'Google Tag Manager',
+			'matomo'        => 'Matomo Analytics',
+			'plausible'     => 'Plausible Analytics',
+			'mixpanel'      => 'Mixpanel',
+			'amplitude'     => 'Amplitude',
+			'heap'          => 'Heap',
+			'fathom'        => 'Fathom Analytics',
+			'statcounter'   => 'Statcounter',
+			// Heatmaps / session recording
+			'hotjar'        => 'Hotjar',
+			'clarity'       => 'Microsoft Clarity',
+			'mouseflow'     => 'Mouseflow',
+			'smartlook'     => 'Smartlook',
+			'luckyorange'   => 'Lucky Orange',
+			'fullstory'     => 'FullStory',
+			'logrocket'     => 'LogRocket',
+			'crazyegg'      => 'Crazy Egg',
+			// Advertising pixels
+			'meta'          => 'Meta (Facebook) Pixel',
+			'tiktok'        => 'TikTok Pixel',
+			'linkedin'      => 'LinkedIn Insight Tag',
+			'msuet'         => 'Microsoft UET',
+			'twitter'       => 'Twitter (X) Pixel',
+			'pinterest'     => 'Pinterest Tag',
+			'reddit'        => 'Reddit Pixel',
+			'snap'          => 'Snapchat Pixel',
+			'quora'         => 'Quora Pixel',
+			'outbrain'      => 'Outbrain',
+			'taboola'       => 'Taboola',
+			// CDN / edge / performance
+			'cf'            => 'Cloudflare',
+			'fastly'        => 'Fastly',
+			'akamai'        => 'Akamai',
+			'cloudfront'    => 'Amazon CloudFront',
+			'bunnycdn'      => 'BunnyCDN',
+			'jsdelivr'      => 'jsDelivr',
+			// Anti-bot / forms
+			'recaptcha'     => 'Google reCAPTCHA',
+			'hcaptcha'      => 'hCaptcha',
+			'turnstile'     => 'Cloudflare Turnstile',
+			'akismet'       => 'Akismet',
+			// Maps / embeds / media
+			'gmaps'         => 'Google Maps',
+			'mapbox'        => 'Mapbox',
+			'osm'           => 'OpenStreetMap',
+			'youtube'       => 'YouTube (embed)',
+			'vimeo'         => 'Vimeo (embed)',
+			'twitterembed'  => 'Twitter / X (embed)',
+			'instagram'     => 'Instagram (embed)',
+			'spotify'       => 'Spotify (embed)',
+			'soundcloud'    => 'SoundCloud (embed)',
+			'wistia'        => 'Wistia',
+			'brightcove'    => 'Brightcove',
+			'jwplayer'      => 'JW Player',
+			// Chat / support
+			'intercom'      => 'Intercom',
+			'zendesk'       => 'Zendesk Chat',
+			'crisp'         => 'Crisp',
+			'livechat'      => 'LiveChat',
+			'tawk'          => 'Tawk.to',
+			'drift'         => 'Drift',
+			'hubspotchat'   => 'HubSpot Chat',
+			'tidio'         => 'Tidio',
+			// Email / marketing automation
+			'mailchimp'        => 'Mailchimp',
+			'activecampaign'   => 'ActiveCampaign',
+			'convertkit'       => 'ConvertKit / Kit',
+			'hubspot'          => 'HubSpot',
+			'brevo'            => 'Brevo (formerly Sendinblue)',
+			'klaviyo'          => 'Klaviyo',
+			'pardot'           => 'Salesforce Pardot',
+			'marketo'          => 'Adobe Marketo Engage',
+			'adobe'            => 'Adobe Analytics',
+			// Payments / commerce
+			'stripe'        => 'Stripe',
+			'paypal'        => 'PayPal',
+			'square'        => 'Square',
+			'shopify'       => 'Shopify',
+			// Social sign-in / auth
+			'google_signin'   => 'Sign in with Google',
+			'apple_signin'    => 'Sign in with Apple',
+			'facebook_signin' => 'Sign in with Facebook',
+			'auth0'           => 'Auth0',
+			'okta'            => 'Okta',
+			// Error / RUM monitoring
+			'sentry'        => 'Sentry',
+			'newrelic'      => 'New Relic',
+			'datadog'       => 'Datadog',
+			'bugsnag'       => 'Bugsnag',
+			'raygun'        => 'Raygun',
+			// Personalisation / A-B testing
+			'optimizely'    => 'Optimizely',
+			'vwo'           => 'VWO',
+			'convert'       => 'Convert.com',
+			'abtasty'       => 'AB Tasty',
+			// Push notifications
+			'onesignal'     => 'OneSignal',
+			'pushwoosh'     => 'Pushwoosh',
+			'fcm'           => 'Firebase Cloud Messaging',
 		);
 		$display = array();
 		foreach ( $services as $svc ) {

@@ -149,32 +149,145 @@
 		var container = document.getElementById('cp-services-list');
 		if (!container) { return; }
 		while (container.firstChild) { container.removeChild(container.firstChild); }
-		// Service labels are brand names; we still route them through t() so a
-		// translator can choose to localize ("Cloudflare" → "Cloudflare", but
-		// "Microsoft UET" might need clarification copy in some locales).
-		var services = [
-			{ id: 'ga4',       label: t( 'svcGa4',       'Google Analytics 4' ) },
-			{ id: 'gtm',       label: t( 'svcGtm',       'Google Tag Manager' ) },
-			{ id: 'meta',      label: t( 'svcMeta',      'Meta (Facebook) Pixel' ) },
-			{ id: 'tiktok',    label: t( 'svcTiktok',    'TikTok Pixel' ) },
-			{ id: 'linkedin',  label: t( 'svcLinkedin',  'LinkedIn Insight Tag' ) },
-			{ id: 'msuet',     label: t( 'svcMsuet',     'Microsoft UET' ) },
-			{ id: 'clarity',   label: t( 'svcClarity',   'Microsoft Clarity' ) },
-			{ id: 'cf',        label: t( 'svcCf',        'Cloudflare' ) },
-			{ id: 'recaptcha', label: t( 'svcRecaptcha', 'Google reCAPTCHA' ) },
-			{ id: 'hotjar',    label: t( 'svcHotjar',    'Hotjar' ) }
+		// Group catalog renders with sub-headings inside a <details> collapsed
+		// by default (see admin/views/cookie-policy.php). Brand names are
+		// verbatim (registered trademarks) but each label is still routed
+		// through t() so a translator can attach a clarifying gloss if a
+		// service is less recognisable in their locale.
+		var groups = [
+			{ title: t('grpAnalytics', 'Analytics'), services: [
+				{ id: 'ga4',         label: t('svcGa4', 'Google Analytics 4') },
+				{ id: 'gtm',         label: t('svcGtm', 'Google Tag Manager') },
+				{ id: 'matomo',      label: t('svcMatomo', 'Matomo Analytics') },
+				{ id: 'plausible',   label: t('svcPlausible', 'Plausible Analytics') },
+				{ id: 'mixpanel',    label: t('svcMixpanel', 'Mixpanel') },
+				{ id: 'amplitude',   label: t('svcAmplitude', 'Amplitude') },
+				{ id: 'heap',        label: t('svcHeap', 'Heap') },
+				{ id: 'fathom',      label: t('svcFathom', 'Fathom Analytics') },
+				{ id: 'statcounter', label: t('svcStatcounter', 'Statcounter') }
+			] },
+			{ title: t('grpHeatmaps', 'Heatmaps & session recording'), services: [
+				{ id: 'hotjar',      label: t('svcHotjar', 'Hotjar') },
+				{ id: 'clarity',     label: t('svcClarity', 'Microsoft Clarity') },
+				{ id: 'mouseflow',   label: t('svcMouseflow', 'Mouseflow') },
+				{ id: 'smartlook',   label: t('svcSmartlook', 'Smartlook') },
+				{ id: 'luckyorange', label: t('svcLuckyorange', 'Lucky Orange') },
+				{ id: 'fullstory',   label: t('svcFullstory', 'FullStory') },
+				{ id: 'logrocket',   label: t('svcLogrocket', 'LogRocket') },
+				{ id: 'crazyegg',    label: t('svcCrazyegg', 'Crazy Egg') }
+			] },
+			{ title: t('grpAdPixels', 'Advertising pixels'), services: [
+				{ id: 'meta',      label: t('svcMeta', 'Meta (Facebook) Pixel') },
+				{ id: 'tiktok',    label: t('svcTiktok', 'TikTok Pixel') },
+				{ id: 'linkedin',  label: t('svcLinkedin', 'LinkedIn Insight Tag') },
+				{ id: 'msuet',     label: t('svcMsuet', 'Microsoft UET') },
+				{ id: 'twitter',   label: t('svcTwitter', 'Twitter (X) Pixel') },
+				{ id: 'pinterest', label: t('svcPinterest', 'Pinterest Tag') },
+				{ id: 'reddit',    label: t('svcReddit', 'Reddit Pixel') },
+				{ id: 'snap',      label: t('svcSnap', 'Snapchat Pixel') },
+				{ id: 'quora',     label: t('svcQuora', 'Quora Pixel') },
+				{ id: 'outbrain',  label: t('svcOutbrain', 'Outbrain') },
+				{ id: 'taboola',   label: t('svcTaboola', 'Taboola') }
+			] },
+			{ title: t('grpCdn', 'CDN, edge & performance'), services: [
+				{ id: 'cf',         label: t('svcCf', 'Cloudflare') },
+				{ id: 'fastly',     label: t('svcFastly', 'Fastly') },
+				{ id: 'akamai',     label: t('svcAkamai', 'Akamai') },
+				{ id: 'cloudfront', label: t('svcCloudfront', 'Amazon CloudFront') },
+				{ id: 'bunnycdn',   label: t('svcBunnycdn', 'BunnyCDN') },
+				{ id: 'jsdelivr',   label: t('svcJsdelivr', 'jsDelivr') }
+			] },
+			{ title: t('grpAntibot', 'Anti-bot & forms'), services: [
+				{ id: 'recaptcha', label: t('svcRecaptcha', 'Google reCAPTCHA') },
+				{ id: 'hcaptcha',  label: t('svcHcaptcha', 'hCaptcha') },
+				{ id: 'turnstile', label: t('svcTurnstile', 'Cloudflare Turnstile') },
+				{ id: 'akismet',   label: t('svcAkismet', 'Akismet') }
+			] },
+			{ title: t('grpEmbeds', 'Maps, embeds & media'), services: [
+				{ id: 'gmaps',        label: t('svcGmaps', 'Google Maps') },
+				{ id: 'mapbox',       label: t('svcMapbox', 'Mapbox') },
+				{ id: 'osm',          label: t('svcOsm', 'OpenStreetMap') },
+				{ id: 'youtube',      label: t('svcYoutube', 'YouTube (embed)') },
+				{ id: 'vimeo',        label: t('svcVimeo', 'Vimeo (embed)') },
+				{ id: 'twitterembed', label: t('svcTwitterembed', 'Twitter / X (embed)') },
+				{ id: 'instagram',    label: t('svcInstagram', 'Instagram (embed)') },
+				{ id: 'spotify',      label: t('svcSpotify', 'Spotify (embed)') },
+				{ id: 'soundcloud',   label: t('svcSoundcloud', 'SoundCloud (embed)') },
+				{ id: 'wistia',       label: t('svcWistia', 'Wistia') },
+				{ id: 'brightcove',   label: t('svcBrightcove', 'Brightcove') },
+				{ id: 'jwplayer',     label: t('svcJwplayer', 'JW Player') }
+			] },
+			{ title: t('grpChat', 'Chat & support'), services: [
+				{ id: 'intercom',    label: t('svcIntercom', 'Intercom') },
+				{ id: 'zendesk',     label: t('svcZendesk', 'Zendesk Chat') },
+				{ id: 'crisp',       label: t('svcCrisp', 'Crisp') },
+				{ id: 'livechat',    label: t('svcLivechat', 'LiveChat') },
+				{ id: 'tawk',        label: t('svcTawk', 'Tawk.to') },
+				{ id: 'drift',       label: t('svcDrift', 'Drift') },
+				{ id: 'hubspotchat', label: t('svcHubspotchat', 'HubSpot Chat') },
+				{ id: 'tidio',       label: t('svcTidio', 'Tidio') }
+			] },
+			{ title: t('grpEmail', 'Email & marketing automation'), services: [
+				{ id: 'mailchimp',      label: t('svcMailchimp', 'Mailchimp') },
+				{ id: 'activecampaign', label: t('svcActivecampaign', 'ActiveCampaign') },
+				{ id: 'convertkit',     label: t('svcConvertkit', 'ConvertKit / Kit') },
+				{ id: 'hubspot',        label: t('svcHubspot', 'HubSpot') },
+				{ id: 'brevo',          label: t('svcBrevo', 'Brevo (Sendinblue)') },
+				{ id: 'klaviyo',        label: t('svcKlaviyo', 'Klaviyo') },
+				{ id: 'pardot',         label: t('svcPardot', 'Salesforce Pardot') },
+				{ id: 'marketo',        label: t('svcMarketo', 'Adobe Marketo Engage') },
+				{ id: 'adobe',          label: t('svcAdobe', 'Adobe Analytics') }
+			] },
+			{ title: t('grpPayments', 'Payments & commerce'), services: [
+				{ id: 'stripe',  label: t('svcStripe', 'Stripe') },
+				{ id: 'paypal',  label: t('svcPaypal', 'PayPal') },
+				{ id: 'square',  label: t('svcSquare', 'Square') },
+				{ id: 'shopify', label: t('svcShopify', 'Shopify') }
+			] },
+			{ title: t('grpSignin', 'Social sign-in & auth'), services: [
+				{ id: 'google_signin',   label: t('svcGoogleSignin', 'Sign in with Google') },
+				{ id: 'apple_signin',    label: t('svcAppleSignin', 'Sign in with Apple') },
+				{ id: 'facebook_signin', label: t('svcFacebookSignin', 'Sign in with Facebook') },
+				{ id: 'auth0',           label: t('svcAuth0', 'Auth0') },
+				{ id: 'okta',            label: t('svcOkta', 'Okta') }
+			] },
+			{ title: t('grpMonitoring', 'Error & RUM monitoring'), services: [
+				{ id: 'sentry',   label: t('svcSentry', 'Sentry') },
+				{ id: 'newrelic', label: t('svcNewrelic', 'New Relic') },
+				{ id: 'datadog',  label: t('svcDatadog', 'Datadog') },
+				{ id: 'bugsnag',  label: t('svcBugsnag', 'Bugsnag') },
+				{ id: 'raygun',   label: t('svcRaygun', 'Raygun') }
+			] },
+			{ title: t('grpAbtest', 'Personalisation & A/B testing'), services: [
+				{ id: 'optimizely', label: t('svcOptimizely', 'Optimizely') },
+				{ id: 'vwo',        label: t('svcVwo', 'VWO') },
+				{ id: 'convert',    label: t('svcConvert', 'Convert.com') },
+				{ id: 'abtasty',    label: t('svcAbtasty', 'AB Tasty') }
+			] },
+			{ title: t('grpPush', 'Push notifications'), services: [
+				{ id: 'onesignal', label: t('svcOnesignal', 'OneSignal') },
+				{ id: 'pushwoosh', label: t('svcPushwoosh', 'Pushwoosh') },
+				{ id: 'fcm',       label: t('svcFcm', 'Firebase Cloud Messaging') }
+			] }
 		];
-		services.forEach(function (svc) {
-			var label = document.createElement('label');
-			label.style.display = 'inline-block';
-			label.style.marginRight = '14px';
-			label.style.marginBottom = '6px';
-			var cb = document.createElement('input');
-			cb.type = 'checkbox';
-			cb.dataset.serviceId = svc.id;
-			label.appendChild(cb);
-			label.appendChild(document.createTextNode(' ' + svc.label));
-			container.appendChild(label);
+		groups.forEach(function (group) {
+			var heading = document.createElement('h4');
+			heading.style.cssText = 'margin:14px 0 6px 0;font-size:13px;font-weight:600;color:#444;border-bottom:1px dotted #ccd0d4;padding-bottom:3px;';
+			heading.textContent = group.title;
+			container.appendChild(heading);
+			var wrap = document.createElement('div');
+			wrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px 14px;';
+			group.services.forEach(function (svc) {
+				var label = document.createElement('label');
+				label.style.cssText = 'display:inline-flex;align-items:center;gap:5px;font-size:13px;padding:2px 0;flex:0 0 auto;';
+				var cb = document.createElement('input');
+				cb.type = 'checkbox';
+				cb.dataset.serviceId = svc.id;
+				label.appendChild(cb);
+				label.appendChild(document.createTextNode(svc.label));
+				wrap.appendChild(label);
+			});
+			container.appendChild(wrap);
 		});
 	}
 

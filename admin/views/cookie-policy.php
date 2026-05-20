@@ -82,17 +82,31 @@ $rest_url   = esc_url( rest_url( 'faz/v1/cookie-policy/' ) );
 			</div>
 		</div>
 
-		<!-- 4. Third-party services -->
+		<!-- 4. Third-party services — ADVANCED. Collapsed by default because
+		     for most sites the cookie list auto-populated from the scanner
+		     (section 5) is sufficient. The third-party-services declaration
+		     is mostly useful for services that transmit data WITHOUT setting
+		     cookies (server-side GTM, Meta CAPI, iframe pixels, etc.) where
+		     the scanner has nothing to detect.
+		     `open` attribute deliberately omitted to keep the section
+		     collapsed on first load. -->
 		<div class="faz-card">
-			<div class="faz-card-header">
-				<h3><?php esc_html_e( 'Third-party services', 'faz-cookie-manager' ); ?></h3>
-			</div>
-			<div class="faz-card-body">
-				<div class="faz-help" style="margin-bottom:.75rem;">
-					<?php esc_html_e( 'Tick the services that load on your site so the policy can name them.', 'faz-cookie-manager' ); ?>
+			<details>
+				<summary class="faz-card-header" style="cursor:pointer; list-style:revert;">
+					<h3 style="display:inline-block; margin:0;">
+						<?php esc_html_e( 'Third-party services', 'faz-cookie-manager' ); ?>
+						<span style="font-weight:normal; font-size:12px; color:#666; margin-left:6px;">
+							<?php esc_html_e( '— advanced, optional', 'faz-cookie-manager' ); ?>
+						</span>
+					</h3>
+				</summary>
+				<div class="faz-card-body">
+					<div class="faz-help" style="margin-bottom:.75rem;">
+						<?php echo wp_kses_post( __( '<strong>You probably don\'t need this.</strong> If you\'ve run the cookie scanner (section 5 below), the policy already names every service from your site\'s actual cookies. This section is only useful for services that exchange data with third parties <em>without setting cookies</em> — for example: server-side Google Tag Manager, Meta CAPI server events, pixel iframes that block the visitor cookie store, embedded analytics that opt out of cookies. Leave it empty unless you know one of those applies.', 'faz-cookie-manager' ) ); ?>
+					</div>
+					<div id="cp-services-list" class="faz-form-group"></div>
 				</div>
-				<div id="cp-services-list" class="faz-form-group"></div>
-			</div>
+			</details>
 		</div>
 
 		<!-- 5. Cookies link (read-only — list pulled at render time) -->

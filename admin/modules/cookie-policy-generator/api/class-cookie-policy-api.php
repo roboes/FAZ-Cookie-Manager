@@ -225,7 +225,39 @@ class Cookie_Policy_Api {
 		$out['dpo']['email']   = sanitize_email( (string) ( $dpo['email'] ?? '' ) );
 		$out['dpo']['address'] = $this->trim_clip( $dpo['address'] ?? '', 500 );
 
-		$allowed_services = array( 'ga4', 'gtm', 'meta', 'tiktok', 'linkedin', 'msuet', 'clarity', 'cf', 'recaptcha', 'hotjar' );
+		// Allowlist of recognised third-party services. Kept FLAT here for
+		// O(N) intersect; the JS groups them by category for UI purposes.
+		// SYNC with includes/class-renderer.php::build_services_list() AND
+		// admin/assets/js/pages/cookie-policy.js renderServicesList() AND
+		// admin/class-admin.php fazConfig.i18n.cookiePolicy.svc* keys.
+		$allowed_services = array(
+			// Analytics
+			'ga4', 'gtm', 'matomo', 'plausible', 'mixpanel', 'amplitude', 'heap', 'fathom', 'statcounter',
+			// Heatmaps / session recording
+			'hotjar', 'clarity', 'mouseflow', 'smartlook', 'luckyorange', 'fullstory', 'logrocket', 'crazyegg',
+			// Advertising pixels
+			'meta', 'tiktok', 'linkedin', 'msuet', 'twitter', 'pinterest', 'reddit', 'snap', 'quora', 'outbrain', 'taboola',
+			// CDN / edge / performance
+			'cf', 'fastly', 'akamai', 'cloudfront', 'bunnycdn', 'jsdelivr',
+			// Anti-bot / forms
+			'recaptcha', 'hcaptcha', 'turnstile', 'akismet',
+			// Maps / embeds / media
+			'gmaps', 'mapbox', 'osm', 'youtube', 'vimeo', 'twitterembed', 'instagram', 'spotify', 'soundcloud', 'wistia', 'brightcove', 'jwplayer',
+			// Chat / support
+			'intercom', 'zendesk', 'crisp', 'livechat', 'tawk', 'drift', 'hubspotchat', 'tidio',
+			// Email / marketing automation
+			'mailchimp', 'activecampaign', 'convertkit', 'hubspot', 'brevo', 'klaviyo', 'pardot', 'marketo', 'adobe',
+			// Payments / commerce
+			'stripe', 'paypal', 'square', 'shopify',
+			// Social sign-in / auth
+			'google_signin', 'apple_signin', 'facebook_signin', 'auth0', 'okta',
+			// Error / RUM monitoring
+			'sentry', 'newrelic', 'datadog', 'bugsnag', 'raygun',
+			// Personalisation / A-B testing
+			'optimizely', 'vwo', 'convert', 'abtasty',
+			// Push notifications
+			'onesignal', 'pushwoosh', 'fcm',
+		);
 		$services = is_array( $in['third_party_services'] ?? null ) ? $in['third_party_services'] : array();
 		$out['third_party_services'] = array_values( array_intersect( $allowed_services, array_map( 'sanitize_text_field', $services ) ) );
 
