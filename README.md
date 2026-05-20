@@ -547,6 +547,13 @@ Value format: `consentid:{base64},consent:yes,action:yes,necessary:yes,functiona
 
 Only the most recent release is listed here. The complete history is in [CHANGELOG.md](CHANGELOG.md) (Keep-a-Changelog format) and on the [GitHub Releases page](https://github.com/fabiodalez-dev/FAZ-Cookie-Manager/releases).
 
+### 1.15.0 — 2026-05-20
+- **Feature**: Geo-routing v2 — 47 jurisdictional rule-set JSON files cover EU/UK + 19 US-state privacy laws + 18 international jurisdictions (LGPD/PIPL/APPI/PIPA/POPIA/PDPA/etc.) + most-protective fallback for unknown/VPN visitors. New `admin/modules/geo-routing/` module with REST API (`/faz/v1/geo/*`) and admin tab UI.
+- **Feature**: VPN/proxy detection via ipinfo.io (opt-in, gated by admin DPF/SCC attestation). When VPN detected → most-protective ruleset forced. API key encrypted at rest via `wp_salt('auth')`.
+- **Feature**: Field-by-field per-country admin override via dot-notation deltas (e.g. `signals.cmv2.ad_storage`). PIPL Art. 38-43 cross-border attestation UI (audit-trail only).
+- **Migration**: `wp_faz_consent_logs` gains 7 NULL-default columns recording the geo/signal/TCF/GPP context at consent time. Online DDL on InnoDB 5.7.6+ / MariaDB 10.3+. Idempotent partial-failure recovery via `faz_geo_v2_migration_pending` option.
+- **Compatibility**: 68 new unit tests, zero baseline regression. New filters: `faz_geo_rulesets_dir`, `faz_geo_admin_override_country`, `faz_geo_lookup_cache_ttl`. All new admin features are opt-in — installs upgrading from 1.14.x see no behavior change until they configure the geo-routing tab.
+
 ### 1.14.3 — 2026-05-19
 - **Feature**: Multi-banner geo-routing (closes #103). New `target_countries` and `priority` schema columns on `wp_faz_banners` let admins serve different banners per visitor country — e.g. a Reject-mandatory GDPR banner to EU/EEA/UK and a CCPA-style banner with the close (X) button to US visitors. Routing is owned by `Controller::get_active_banner_for_country()` and reads from Cloudflare `CF-IPCountry` (opt-in) or the MaxMind / ip-api.com fallback chain.
 - **Feature**: Per-banner close-button override (`settings.allowCloseButtonWithReject`), country-aware AMP `<amp-consent>` resolver, scope-change consent invalidation (`__scope.banner` / `__scope.law` keys), missing-banner admin notice with recovery CTA, country-dependent cache busting via `DONOTCACHEPAGE` / `Vary: CF-IPCountry` (with trust filter).

@@ -2,6 +2,28 @@
 
 All notable changes to FAZ Cookie Manager are documented in this file.
 
+## [1.15.0] — 2026-05-20
+
+### Added
+
+- **Geo-routing v2 — jurisdictional rule-sets** (spec 001). New `admin/modules/geo-routing/` module routes visitors to the appropriate compliance behavior based on country and US-state. 47 ruleset JSON files bundled covering: gdpr-strict + 7 EU country-specific (it/fr/de/es/ie/nl/pl) + uk-gdpr-pecr + ccpa-california + 18 US-state laws + 18 international (LGPD/PIPL/APPI/PIPA/POPIA/PDPA-* etc.) + fallback-gdpr-most-protective.
+- **Geo detection pipeline**: CF-IPCountry → admin override → ipinfo VPN gate (opt-in) → ip-api → GeoLite2 → 'XX' sentinel. Cache per hashed IP with monthly salt rotation (Constitution VIII).
+- **ipinfo.io VPN detection** (opt-in). When VPN/proxy/Tor detected, plugin forces the most-protective ruleset regardless of country. Admin must explicitly attest DPF/SCC compliance before enabling. API key encrypted at rest via `wp_salt('auth')`. New `ipinfo.io` entry in *External Services* section of readme.txt.
+- **Admin tab "Geo-routing"** with 6 sections: pipeline status, ruleset coverage table, per-country overrides editor, dry-run preview, ipinfo settings, PIPL cross-border attestation. All powered by 7 new REST endpoint groups under `/faz/v1/geo/*`.
+- **PIPL Art. 38-43 cross-border attestation UI**. When the plugin routes visitors from China, admin can attest to having a Standard Contract or CAC security assessment. Audit-trail only — does not block the PIPL ruleset.
+- **Field-by-field per-country admin override** via dot-notation deltas (e.g. `signals.cmv2.ad_storage`). Allows surgical customization of ruleset behavior per country without forking the JSON.
+
+### Changed
+
+- **`wp_faz_consent_logs` schema** extended with 7 NULL-default columns to record the geo / signal / TCF / GPP context that applied at consent time: `country_at_consent`, `region_at_consent`, `ruleset_id_at_consent`, `signal_gpc_received`, `signal_dnt_received`, `tc_string`, `gpp_string`. Online DDL migration via `ALGORITHM=INPLACE, LOCK=NONE` on MySQL 5.7.6+ / MariaDB 10.3+. Pre-existing rows stay NULL on new columns (correct — no retroactive backfill).
+- **`update_db_360()`** added to the migration chain. Idempotent re-entry per R4-S004 pattern; partial-failure state persisted in `faz_geo_v2_migration_pending` option.
+
+### Compatibility
+
+- 68 new unit tests across 3 test files (resolver / migration / ipinfo). Zero existing tests touched. The 21 compliance + 12 verification + 10 E2E baseline suite continues unchanged — geo-routing v2 is purely additive at this release.
+- New filters: `faz_geo_rulesets_dir`, `faz_geo_admin_override_country`, `faz_geo_lookup_cache_ttl`.
+- New WP options (all non-autoloaded): `faz_geo_admin_overrides`, `faz_geo_ipinfo_api_key`, `faz_geo_ipinfo_optin`, `faz_geo_ipinfo_optin_confirmed_at`, `faz_geo_pipl_cross_border_attested`, `faz_geo_v2_migration_pending`, `faz_geo_v2_disabled_reason`.
+
 ## [1.14.3] — 2026-05-19
 
 ### Added

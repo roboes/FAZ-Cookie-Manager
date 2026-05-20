@@ -4,7 +4,7 @@ Donate link: https://buymeacoffee.com/fabiodalez
 Tags: cookie, gdpr, ccpa, consent, privacy
 Requires at least: 5.0
 Tested up to: 6.9
-Stable tag: 1.14.3
+Stable tag: 1.15.0
 Requires PHP: 7.4
 License: GPL-3.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -310,6 +310,14 @@ The full changelog (every release back to 1.0.0) lives at:
 https://github.com/fabiodalez-dev/FAZ-Cookie-Manager/blob/main/CHANGELOG.md
 and on the GitHub Releases page:
 https://github.com/fabiodalez-dev/FAZ-Cookie-Manager/releases
+
+= 1.15.0 =
+* Feature: Geo-routing v2 — jurisdictional rule-sets. 47 ruleset JSON files cover EU (gdpr-strict + 7 country-specific), UK (uk-gdpr-pecr), 19 US states with privacy law (CCPA + CPA + CTDPA + VCDPA + UCPA + ICDPA + TIPA + MCDPA + TDPSA + OCPA + FDBR + Delaware + NJDPL + NHPL + KCDPA + MODPA + MCDPA + RIDTPPA + ICDPA), 18 international (LGPD/PIPL/APPI/PIPA/POPIA/PDPA-Singapore/Thailand/Vietnam/India/Malaysia/AU/NZ/UAE/KSA/Israel/Turkey/Canada/Quebec Law 25), plus most-protective fallback for unknown / VPN visitors.
+* Feature: New `admin/modules/geo-routing/` module with REST API (`/faz/v1/geo/*`), admin tab UI (status / coverage / overrides / preview / ipinfo / PIPL), field-by-field per-country override editor using dot-notation deltas.
+* Feature: VPN/proxy/Tor detection via ipinfo.io (opt-in, gated by admin DPF/SCC attestation). When VPN detected, the most-protective ruleset is forced regardless of apparent country. API key encrypted at rest.
+* Feature: PIPL cross-border attestation UI (audit-trail only).
+* Migration: `wp_faz_consent_logs` schema gains 7 NULL-default columns (`country_at_consent`, `region_at_consent`, `ruleset_id_at_consent`, `signal_gpc_received`, `signal_dnt_received`, `tc_string`, `gpp_string`). Online DDL on MySQL 5.7.6+ / MariaDB 10.3+.
+* External Services: new `ipinfo.io` entry documents the opt-in VPN detection lookup.
 
 = 1.14.3 =
 * Filter: new `faz_country_detection_consensus` filter, introduced with **2 arguments** (`$require_consensus`, `$votes`). When the filter resolves to `true` AND at least two detection sources disagree on the visitor country, `Geolocation::detect_country()` returns an empty string (fail-open — banner is shown to everyone). Off by default to preserve the CF-first priority order. Plugins that legitimately need the visitor IP for their own logic should hook `faz_visitor_country` instead, which exposes it for trusted overrides and test fixtures.
