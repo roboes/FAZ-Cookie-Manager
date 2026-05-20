@@ -55,9 +55,28 @@
 		while (node.firstChild) { node.removeChild(node.firstChild); }
 	}
 
+	// Prefer the project AJAX helpers (FAZ.get/post/put/del) when
+	// available — they wrap wp.apiFetch which centralises nonce + base
+	// URL handling so every admin page shares the same contract. Fall
+	// back to raw fetch for the edge case where faz-admin.js hasn't
+	// loaded yet (e.g. async load race in the WP admin head).
+	//
+	// All paths passed in are unprefixed (e.g. 'preview', 'overrides/IT');
+	// FAZ.api() prefixes 'faz/v1/' itself, the raw-fetch path uses the
+	// fully-qualified REST_URL injected by class-admin.php.
 	function api(method, path, body) {
+		var FAZ = window.FAZ;
+		var verb = String(method || 'GET').toUpperCase();
+		if (FAZ && typeof FAZ.api === 'function') {
+			switch (verb) {
+				case 'GET':    return FAZ.get(path);
+				case 'POST':   return FAZ.post(path, body || {});
+				case 'PUT':    return FAZ.put(path, body || {});
+				case 'DELETE': return FAZ.del(path);
+			}
+		}
 		return fetch(REST_URL + path, {
-			method:      method,
+			method:      verb,
 			credentials: 'same-origin',
 			headers: {
 				'X-WP-Nonce':   REST_NONCE,
@@ -98,23 +117,38 @@
 
 	// ---------- Panel loaders ----------
 
-	var loaded = {};
+	// Track per-panel load state so we don't refetch on every tab click.
+	// `loading` is set on dispatch, `loaded` is set ONLY after the
+	// corresponding loader's promise resolves successfully. If the API
+	// call fails, both flags get cleared so the next tab click retries
+	// (the previous implementation marked `loaded=true` synchronously,
+	// permanently locking out retry after a network blip).
+	var loaded  = {};
+	var loading = {};
 	function loadPanel(name) {
-		if (loaded[name]) { return; }
-		loaded[name] = true;
+		if (loaded[name] || loading[name]) { return; }
+		loading[name] = true;
+		var p = null;
 		switch (name) {
-			case 'status':    loadStatus(); break;
-			case 'coverage':  loadCoverage(); break;
-			case 'overrides': loadOverrides(); break;
-			case 'preview':   bindPreview(); break;
-			case 'ipinfo':    loadIpinfo(); break;
-			case 'pipl':      loadPipl(); break;
+			case 'status':    p = loadStatus(); break;
+			case 'coverage':  p = loadCoverage(); break;
+			case 'overrides': p = loadOverrides(); break;
+			case 'preview':   p = bindPreview(); break;
+			case 'ipinfo':    p = loadIpinfo(); break;
+			case 'pipl':      p = loadPipl(); break;
 		}
+		// Loaders return a promise (typed-string `void` is fine via
+		// Promise.resolve coercion). bindPreview() is synchronous and
+		// returns undefined → treat as resolved.
+		Promise.resolve(p).then(
+			function() { loaded[name]  = true;  loading[name] = false; },
+			function() { loaded[name]  = false; loading[name] = false; /* allow retry */ }
+		);
 	}
 
 	function loadStatus() {
 		var container = document.getElementById('faz-geo-status-content');
-		api('GET', 'status').then(function(data) {
+		return api('GET', 'status').then(function(data) {
 			clear(container);
 			var tbody = el('tbody');
 			tbody.appendChild(el('tr', null, [
@@ -150,12 +184,12 @@
 				]));
 			}
 			container.appendChild(el('table', { class: 'widefat striped' }, tbody));
-		}).catch(function(err) { showError(container, err); });
+		}).catch(function(err) { showError(container, err); throw err; });
 	}
 
 	function loadCoverage() {
 		var container = document.getElementById('faz-geo-coverage-content');
-		api('GET', 'rulesets').then(function(data) {
+		return api('GET', 'rulesets').then(function(data) {
 			clear(container);
 			var thead = el('thead', null, el('tr', null, [
 				el('th', { text: 'Ruleset ID' }),
@@ -178,12 +212,12 @@
 				]));
 			});
 			container.appendChild(el('table', { class: 'widefat striped faz-geo-coverage-table' }, [thead, tbody]));
-		}).catch(function(err) { showError(container, err); });
+		}).catch(function(err) { showError(container, err); throw err; });
 	}
 
 	function loadOverrides() {
 		var container = document.getElementById('faz-geo-overrides-content');
-		api('GET', 'overrides').then(function(data) {
+		return api('GET', 'overrides').then(function(data) {
 			clear(container);
 			var overrides = data.overrides || {};
 			var keys = Object.keys(overrides);
@@ -264,7 +298,7 @@
 				el('p', null, el('button', { type: 'submit', class: 'button button-primary', text: 'Save override' }))
 			]);
 			container.appendChild(form);
-		}).catch(function(err) { showError(container, err); });
+		}).catch(function(err) { showError(container, err); throw err; });
 	}
 
 	function bindPreview() {
@@ -297,7 +331,7 @@
 
 	function loadIpinfo() {
 		var container = document.getElementById('faz-geo-ipinfo-content');
-		api('GET', 'ipinfo-settings').then(function(data) {
+		return api('GET', 'ipinfo-settings').then(function(data) {
 			clear(container);
 			var optinCb = el('input', { type: 'checkbox', id: 'ipinfo-optin' });
 			if (data.optin) { optinCb.checked = true; }
@@ -335,12 +369,12 @@
 				el('p', null, el('button', { type: 'submit', class: 'button button-primary', text: 'Save' }))
 			]);
 			container.appendChild(form);
-		}).catch(function(err) { showError(container, err); });
+		}).catch(function(err) { showError(container, err); throw err; });
 	}
 
 	function loadPipl() {
 		var container = document.getElementById('faz-geo-pipl-content');
-		api('GET', 'pipl-attestation').then(function(data) {
+		return api('GET', 'pipl-attestation').then(function(data) {
 			clear(container);
 			var attestedCb = el('input', { type: 'checkbox', id: 'pipl-attested' });
 			if (data.attested) { attestedCb.checked = true; }
@@ -369,7 +403,7 @@
 				}
 			}, children);
 			container.appendChild(form);
-		}).catch(function(err) { showError(container, err); });
+		}).catch(function(err) { showError(container, err); throw err; });
 	}
 
 	// Initial load

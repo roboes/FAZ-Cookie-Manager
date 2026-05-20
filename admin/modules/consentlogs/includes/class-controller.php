@@ -380,11 +380,25 @@ class Controller {
 		} elseif ( isset( $data['signal_dnt'] ) ) {
 			$out['signal_dnt_received'] = ! empty( $data['signal_dnt'] ) ? 1 : 0;
 		}
-		if ( isset( $data['tc_string'] ) && is_string( $data['tc_string'] ) && '' !== $data['tc_string'] ) {
-			$out['tc_string'] = $data['tc_string'];
+		// IAB TC + GPP strings: stored verbatim for audit, but pass through
+		// sanitize_text_field() to strip control chars / extra whitespace
+		// that can't legally appear in a TCF/GPP container string. The
+		// regex shape is intentionally not enforced — TCF / GPP have
+		// evolving versions; we keep the schema permissive and validate
+		// at consumer time. Length is bounded by the TEXT column type
+		// (65 KB) which is far above any real-world payload (TCF strings
+		// are typically < 1 KB).
+		if ( isset( $data['tc_string'] ) && is_string( $data['tc_string'] ) ) {
+			$tc = sanitize_text_field( wp_unslash( $data['tc_string'] ) );
+			if ( '' !== $tc ) {
+				$out['tc_string'] = $tc;
+			}
 		}
-		if ( isset( $data['gpp_string'] ) && is_string( $data['gpp_string'] ) && '' !== $data['gpp_string'] ) {
-			$out['gpp_string'] = $data['gpp_string'];
+		if ( isset( $data['gpp_string'] ) && is_string( $data['gpp_string'] ) ) {
+			$gpp = sanitize_text_field( wp_unslash( $data['gpp_string'] ) );
+			if ( '' !== $gpp ) {
+				$out['gpp_string'] = $gpp;
+			}
 		}
 		return $out;
 	}

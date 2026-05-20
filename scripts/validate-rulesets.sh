@@ -17,7 +17,16 @@
 
 set -euo pipefail
 
-PROJECT_ROOT="${PROJECT_ROOT:-/Users/fabio/Documents/GitHub/Cookie Crawler/faz-cookie-manager}"
+# Resolve project root portably: env override > git toplevel > script-relative.
+# The hardcoded developer-machine path that lived here previously broke CI.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -z "${PROJECT_ROOT:-}" ]]; then
+    if command -v git >/dev/null 2>&1 && git -C "$SCRIPT_DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
+        PROJECT_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+    else
+        PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+    fi
+fi
 RULESETS_DIR="${PROJECT_ROOT}/admin/modules/geo-routing/rulesets"
 SCHEMA_PATH="${PROJECT_ROOT}/admin/modules/geo-routing/schemas/ruleset.schema.json"
 
@@ -54,7 +63,7 @@ red() { printf '\033[31m%s\033[0m\n' "$*"; }
 yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
 
 run_python_validator() {
-    python3 - "$SCHEMA_PATH" "$RULESETS_DIR" <<'PYEOF'
+    python3 - "$SCHEMA_PATH" "$RULESETS_DIR" "$STRICT_MODE" <<'PYEOF'
 import json
 import sys
 import os
@@ -67,7 +76,7 @@ except ImportError:
     print("WARN: python jsonschema lib not installed. Install: pip3 install jsonschema", file=sys.stderr)
     sys.exit(2)
 
-schema_path, rulesets_dir = sys.argv[1], sys.argv[2]
+schema_path, rulesets_dir, strict_mode = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(schema_path) as f:
     schema = json.load(f)
 
@@ -113,6 +122,10 @@ print(f"Errors:    {errors}")
 print(f"Warnings:  {warnings}")
 
 if errors > 0:
+    sys.exit(1)
+# --strict: treat warnings as errors (id/filename mismatch, etc.).
+if strict_mode == "yes" and warnings > 0:
+    print("Strict mode: failing due to warnings.")
     sys.exit(1)
 sys.exit(0)
 PYEOF

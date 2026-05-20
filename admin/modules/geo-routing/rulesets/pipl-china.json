@@ -14,7 +14,7 @@
   "model": "opt-in",
   "native_lang": "zh-CN",
   "official_resources_url": [
-    "http://www.cac.gov.cn"
+    "https://www.cac.gov.cn/"
   ],
   "signals": {
     "tcf_v22": false,

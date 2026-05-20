@@ -56,6 +56,20 @@ class Migration_V2 {
 	const MIN_INNODB_VERSION = '5.7.6';
 
 	/**
+	 * Minimum MariaDB version supporting online DDL with
+	 * `ALGORITHM=INPLACE, LOCK=NONE` for ADD COLUMN on InnoDB.
+	 *
+	 * MariaDB diverged from MySQL on online-DDL syntax around 10.3.x;
+	 * the InnoDB engine plus the relevant ALTER ALGORITHM= support landed
+	 * in 10.3.0. Older MariaDB falls back to the COPY algorithm with a
+	 * brief lock; we still allow it (the rows are NULL-default ADD COLUMN
+	 * so the copy is non-blocking writes; we just emit a notice).
+	 *
+	 * @var string
+	 */
+	const MIN_MARIADB_VERSION = '10.3.0';
+
+	/**
 	 * Option storing the list of columns NOT YET migrated (R4-S004
 	 * pattern). Empty / missing on fully-migrated installs.
 	 *
@@ -168,7 +182,7 @@ class Migration_V2 {
 		if ( ! self::version_supports_online_ddl() ) {
 			update_option(
 				self::DISABLED_REASON_OPTION,
-				sprintf( 'MySQL/MariaDB version below %s — online DDL unavailable. Upgrade your database before enabling geo-routing v2.', self::MIN_INNODB_VERSION ),
+				sprintf( 'MySQL version below %s (or MariaDB below %s) — online DDL unavailable. Upgrade your database before enabling geo-routing v2.', self::MIN_INNODB_VERSION, self::MIN_MARIADB_VERSION ),
 				false
 			);
 			return 'mysql_too_old';
@@ -229,10 +243,10 @@ class Migration_V2 {
 		$detected = $matches[1];
 
 		// MariaDB 10.3+ supports the equivalent INPLACE ADD COLUMN.
-		// We map MariaDB 10.3+ → "OK", below that → fail.
+		// We map MariaDB ≥ MIN_MARIADB_VERSION → "OK", below that → fail.
 		$is_mariadb = ( false !== stripos( $mysql_version, 'mariadb' ) );
 		if ( $is_mariadb ) {
-			return version_compare( $detected, '10.3.0', '>=' );
+			return version_compare( $detected, self::MIN_MARIADB_VERSION, '>=' );
 		}
 		// MySQL path.
 		return version_compare( $detected, self::MIN_INNODB_VERSION, '>=' );
@@ -317,6 +331,20 @@ class Migration_V2 {
 			// rare composite/index-dependent ALTER. Retry without the
 			// online hints — the operation is still safe (NULL-default
 			// ADD COLUMN), just might briefly lock. Same allowlist as above.
+			// Log a notice so operators on large consent_logs tables (millions
+			// of rows) know that the fallback path holds a brief table lock
+			// during COPY: implicit ALGORITHM=COPY blocks writes for the
+			// copy duration. ADD COLUMN with NULL default is fast in
+			// practice, but operators should be told so they can correlate
+			// any brief write-stall window with this migration.
+			if ( function_exists( 'error_log' ) ) {
+				// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+				error_log( sprintf(
+					'[FAZ Cookie Manager] geo-routing v2 migration: online ADD COLUMN `%s` on `%s` failed; retrying without ALGORITHM=INPLACE,LOCK=NONE (implicit ALGORITHM=COPY — table briefly locked during copy).',
+					$column,
+					$table
+				) );
+			}
 			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.DirectDatabaseQuery.SchemaChange,PluginCheck.Security.DirectDB.UnescapedDBParameter
 			$result = $wpdb->query(
 				sprintf(

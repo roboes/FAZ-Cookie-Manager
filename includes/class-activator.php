@@ -571,7 +571,21 @@ class Activator {
 	 * @return void
 	 */
 	public static function update_db_version( $version = null ) {
-		update_option( 'faz_cookie_consent_db_version', is_null( $version ) ? FAZ_VERSION : $version );
+		$target = is_null( $version ) ? FAZ_VERSION : $version;
+
+		// If the v2 geo-routing migration didn't complete (status was
+		// 'partial' / 'no_table'), pin the DB-version option below 3.6.0
+		// so the next activator pass re-enters update_db_360() and
+		// Migration_V2 picks up the residual columns listed in
+		// `faz_geo_v2_migration_pending`. Without this, the updater
+		// loop would advance past 3.6.0 and never retry the failed
+		// columns on subsequent activates.
+		$migration_complete = (bool) get_option( 'faz_geo_v2_migration_complete', true );
+		if ( ! $migration_complete && version_compare( $target, '3.6.0', '>=' ) ) {
+			$target = '3.5.0';
+		}
+
+		update_option( 'faz_cookie_consent_db_version', $target );
 	}
 
 	/**
@@ -974,13 +988,39 @@ class Activator {
 	 */
 	public static function update_db_360() {
 		$status = \FazCookie\Includes\Migration_V2::run();
-		if ( function_exists( 'error_log' ) && in_array( $status, array( 'mysql_too_old', 'partial' ), true ) ) {
-			error_log( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
-				sprintf(
-					'[FAZ Cookie Manager] geo-routing v2 migration status: %s. Check faz_geo_v2_migration_pending / faz_geo_v2_disabled_reason options for details.',
-					$status
-				)
-			);
+
+		// Propagate non-success states so the updater pipeline can retry
+		// instead of silently advancing past 3.6.0 with v2 still
+		// half-applied. `faz_geo_v2_migration_complete` is consulted by
+		// update_db_version() — when not true, the DB version option is
+		// pinned to the previous milestone (3.5.0) so the next activator
+		// invocation re-runs update_db_360() and Migration_V2::run() can
+		// pick up where it left off (`faz_geo_v2_migration_pending`
+		// already lists residual columns from the R4-S004 pattern).
+		//
+		// Notes:
+		// - `ok`        → migration succeeded this run.
+		// - `no_op`     → already complete on a previous run.
+		// - `mysql_too_old` → admin explicitly opted out of v2 by virtue
+		//                     of running below MIN_INNODB_VERSION; mark
+		//                     complete so we don't loop the upgrader, but
+		//                     leave `faz_geo_v2_disabled_reason` set so
+		//                     consumer code knows to skip v2 columns.
+		// - `partial`   → some columns added, others failed mid-ALTER;
+		//                 keep the pipeline pinned at 3.5.0 so the next
+		//                 activator run retries.
+		// - `no_table`  → consent_logs table missing; downstream
+		//                 install_all_tables() will create it, then the
+		//                 next activator pass migrates.
+		$complete = in_array( $status, array( 'ok', 'no_op', 'mysql_too_old' ), true );
+		update_option( 'faz_geo_v2_migration_complete', $complete, false );
+
+		if ( function_exists( 'error_log' ) && in_array( $status, array( 'mysql_too_old', 'partial', 'no_table' ), true ) ) {
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+			error_log( sprintf(
+				'[FAZ Cookie Manager] geo-routing v2 migration status: %s. Check faz_geo_v2_migration_pending / faz_geo_v2_disabled_reason options for details.',
+				$status
+			) );
 		}
 	}
 

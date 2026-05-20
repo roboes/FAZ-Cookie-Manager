@@ -149,6 +149,46 @@ assert_eq(
 	'VPN detected on IT → forced fallback (most-protective) [Q7]'
 );
 
+// 7b. Permissive VPN gate cast — non-bool truthy values must still trigger gate
+assert_eq(
+	Ruleset_Resolver::resolve( 'US', 'US-CA', 1, $no_overrides, $index_countries, $index_regions, $fallback ),
+	$fallback,
+	'VPN=1 (int truthy) → fallback (cast guards CLI/REST consumers)'
+);
+assert_eq(
+	Ruleset_Resolver::resolve( 'IT', null, '1', $no_overrides, $index_countries, $index_regions, $fallback ),
+	$fallback,
+	"VPN='1' (string truthy) → fallback"
+);
+assert_eq(
+	Ruleset_Resolver::resolve( 'IT', null, 0, $no_overrides, $index_countries, $index_regions, $fallback ),
+	'gdpr-strict',
+	'VPN=0 (int falsy) → normal resolution'
+);
+assert_eq(
+	Ruleset_Resolver::resolve( 'IT', null, null, $no_overrides, $index_countries, $index_regions, $fallback ),
+	'gdpr-strict',
+	'VPN=null → normal resolution (null cast to false)'
+);
+
+// 7c. resolve_us_no_law decoupling — Q2 ruleset must not depend on _index.json
+// sentinel. Even if the index changes the US mapping to anything else (or
+// removes it entirely), an unknown-state US visitor still gets gdpr-strict.
+$index_alt_us = $index_countries;
+$index_alt_us['US'] = 'us-fallback'; // hypothetical future catalog
+assert_eq(
+	Ruleset_Resolver::resolve( 'US', 'US-WY', false, $no_overrides, $index_alt_us, $index_regions, $fallback ),
+	'gdpr-strict',
+	'US no-law state still → gdpr-strict when US sentinel changes (decoupling)'
+);
+$index_no_us = $index_countries;
+unset( $index_no_us['US'] );
+assert_eq(
+	Ruleset_Resolver::resolve( 'US', null, false, $no_overrides, $index_no_us, $index_regions, $fallback ),
+	'gdpr-strict',
+	'US with no entry in index → still gdpr-strict (policy constant)'
+);
+
 // 8. XX (Cloudflare unknown) → fallback
 assert_eq(
 	Ruleset_Resolver::resolve( 'XX', null, false, $no_overrides, $index_countries, $index_regions, $fallback ),

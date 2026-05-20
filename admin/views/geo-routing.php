@@ -29,28 +29,28 @@ $rest_url   = esc_url( rest_url( 'faz/v1/geo/' ) );
 	</p>
 
 	<nav class="faz-geo-tabs" role="tablist" aria-label="<?php esc_attr_e( 'Geo-routing sections', 'faz-cookie-manager' ); ?>">
-		<button class="faz-geo-tab active" data-target="status" role="tab" aria-selected="true">
+		<button id="faz-geo-tab-status" class="faz-geo-tab active" data-target="status" role="tab" aria-selected="true" aria-controls="faz-geo-panel-status">
 			<?php esc_html_e( 'Pipeline status', 'faz-cookie-manager' ); ?>
 		</button>
-		<button class="faz-geo-tab" data-target="coverage" role="tab">
+		<button id="faz-geo-tab-coverage" class="faz-geo-tab" data-target="coverage" role="tab" aria-selected="false" aria-controls="faz-geo-panel-coverage">
 			<?php esc_html_e( 'Ruleset coverage', 'faz-cookie-manager' ); ?>
 		</button>
-		<button class="faz-geo-tab" data-target="overrides" role="tab">
+		<button id="faz-geo-tab-overrides" class="faz-geo-tab" data-target="overrides" role="tab" aria-selected="false" aria-controls="faz-geo-panel-overrides">
 			<?php esc_html_e( 'Per-country overrides', 'faz-cookie-manager' ); ?>
 		</button>
-		<button class="faz-geo-tab" data-target="preview" role="tab">
+		<button id="faz-geo-tab-preview" class="faz-geo-tab" data-target="preview" role="tab" aria-selected="false" aria-controls="faz-geo-panel-preview">
 			<?php esc_html_e( 'Preview', 'faz-cookie-manager' ); ?>
 		</button>
-		<button class="faz-geo-tab" data-target="ipinfo" role="tab">
+		<button id="faz-geo-tab-ipinfo" class="faz-geo-tab" data-target="ipinfo" role="tab" aria-selected="false" aria-controls="faz-geo-panel-ipinfo">
 			<?php esc_html_e( 'ipinfo (VPN detection)', 'faz-cookie-manager' ); ?>
 		</button>
-		<button class="faz-geo-tab" data-target="pipl" role="tab">
+		<button id="faz-geo-tab-pipl" class="faz-geo-tab" data-target="pipl" role="tab" aria-selected="false" aria-controls="faz-geo-panel-pipl">
 			<?php esc_html_e( 'PIPL cross-border', 'faz-cookie-manager' ); ?>
 		</button>
 	</nav>
 
 	<!-- Pipeline status panel -->
-	<section class="faz-geo-panel" id="faz-geo-panel-status" role="tabpanel" aria-labelledby="status">
+	<section class="faz-geo-panel" id="faz-geo-panel-status" role="tabpanel" aria-labelledby="faz-geo-tab-status">
 		<h2><?php esc_html_e( 'Pipeline status', 'faz-cookie-manager' ); ?></h2>
 		<div id="faz-geo-status-content">
 			<p class="faz-loading"><?php esc_html_e( 'Loading…', 'faz-cookie-manager' ); ?></p>
@@ -58,7 +58,7 @@ $rest_url   = esc_url( rest_url( 'faz/v1/geo/' ) );
 	</section>
 
 	<!-- Ruleset coverage table -->
-	<section class="faz-geo-panel hidden" id="faz-geo-panel-coverage" role="tabpanel" aria-labelledby="coverage">
+	<section class="faz-geo-panel hidden" id="faz-geo-panel-coverage" role="tabpanel" aria-labelledby="faz-geo-tab-coverage">
 		<h2><?php esc_html_e( 'Ruleset coverage', 'faz-cookie-manager' ); ?></h2>
 		<p>
 			<?php esc_html_e( 'Each country (and US state with privacy law) maps to a specific rule-set that defines banner behaviour, default signals, and UI flags. Click any row to inspect the resolved ruleset configuration.', 'faz-cookie-manager' ); ?>
@@ -69,7 +69,7 @@ $rest_url   = esc_url( rest_url( 'faz/v1/geo/' ) );
 	</section>
 
 	<!-- Per-country overrides -->
-	<section class="faz-geo-panel hidden" id="faz-geo-panel-overrides" role="tabpanel" aria-labelledby="overrides">
+	<section class="faz-geo-panel hidden" id="faz-geo-panel-overrides" role="tabpanel" aria-labelledby="faz-geo-tab-overrides">
 		<h2><?php esc_html_e( 'Per-country overrides', 'faz-cookie-manager' ); ?></h2>
 		<p>
 			<?php esc_html_e( 'Override the auto-detected rule-set for a specific country. Use the dot-notation delta to selectively change individual fields (e.g. signals.cmv2.ad_storage).', 'faz-cookie-manager' ); ?>
@@ -80,7 +80,7 @@ $rest_url   = esc_url( rest_url( 'faz/v1/geo/' ) );
 	</section>
 
 	<!-- Preview -->
-	<section class="faz-geo-panel hidden" id="faz-geo-panel-preview" role="tabpanel" aria-labelledby="preview">
+	<section class="faz-geo-panel hidden" id="faz-geo-panel-preview" role="tabpanel" aria-labelledby="faz-geo-tab-preview">
 		<h2><?php esc_html_e( 'Preview routing', 'faz-cookie-manager' ); ?></h2>
 		<p>
 			<?php esc_html_e( 'Simulate a visitor from any country / US state / VPN status and see the rule-set the plugin would apply.', 'faz-cookie-manager' ); ?>
@@ -108,7 +108,7 @@ $rest_url   = esc_url( rest_url( 'faz/v1/geo/' ) );
 	</section>
 
 	<!-- ipinfo settings -->
-	<section class="faz-geo-panel hidden" id="faz-geo-panel-ipinfo" role="tabpanel" aria-labelledby="ipinfo">
+	<section class="faz-geo-panel hidden" id="faz-geo-panel-ipinfo" role="tabpanel" aria-labelledby="faz-geo-tab-ipinfo">
 		<h2><?php esc_html_e( 'ipinfo.io — VPN detection', 'faz-cookie-manager' ); ?></h2>
 		<p>
 			<?php
@@ -125,7 +125,7 @@ $rest_url   = esc_url( rest_url( 'faz/v1/geo/' ) );
 	</section>
 
 	<!-- PIPL attestation -->
-	<section class="faz-geo-panel hidden" id="faz-geo-panel-pipl" role="tabpanel" aria-labelledby="pipl">
+	<section class="faz-geo-panel hidden" id="faz-geo-panel-pipl" role="tabpanel" aria-labelledby="faz-geo-tab-pipl">
 		<h2><?php esc_html_e( 'PIPL — Cross-border data transfer attestation', 'faz-cookie-manager' ); ?></h2>
 		<p>
 			<?php esc_html_e( 'When the plugin routes visitors from China (PIPL applies), cross-border transfer of personal data requires either a Standard Contract (Art. 38) or a CAC security assessment (Art. 40). Confirm your status here for audit purposes; the plugin does NOT block the PIPL rule-set if unattested, but a warning will be displayed in the admin area.', 'faz-cookie-manager' ); ?>

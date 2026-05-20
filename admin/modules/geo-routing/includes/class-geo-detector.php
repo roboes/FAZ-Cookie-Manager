@@ -188,11 +188,14 @@ class Geo_Detector {
 	 * Delegates to the existing geolocation infrastructure rather than
 	 * re-implementing the fallback chain.
 	 *
-	 * @param string $ip Visitor IP (informational — Geolocation::get_country
-	 *                   reads REMOTE_ADDR / CF-Connecting-IP internally).
+	 * @param string $ip_unused Kept for signature stability with the call-site
+	 *                          (which has the IP available); Geolocation::get_country()
+	 *                          reads REMOTE_ADDR / CF-Connecting-IP internally,
+	 *                          so we do not need to pass it through.
 	 * @return array{country:string, region:string, source:string}
 	 */
-	private function resolve_via_existing_geolocation( $ip ) {
+	private function resolve_via_existing_geolocation( $ip_unused ) {
+		unset( $ip_unused );
 		// L2-SP1-S001 fix (1.15.0): use public static get_country(),
 		// not the private static detect_country(). The previous call to
 		// $geo->detect_country() raised a Throwable that was silently

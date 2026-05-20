@@ -66,7 +66,11 @@ class Ruleset_Resolver {
 		$valid_ruleset_ids = null
 	) {
 		// Stage 1: VPN trumps everything. Constitution Governance.
-		if ( true === $vpn_detected ) {
+		// Cast defensively so CLI scripts, REST consumers or future
+		// callers that pass 1 / "true" / "1" don't silently bypass the
+		// gate (the public docblock advertises @param bool but PHP won't
+		// enforce it at call time).
+		if ( (bool) $vpn_detected ) {
 			return $fallback_id;
 		}
 
@@ -130,18 +134,25 @@ class Ruleset_Resolver {
 	 *
 	 * Per Q2 resolution (2026-05-19): default to gdpr-strict (most-protective).
 	 *
-	 * @param array  $index_countries Country index map.
-	 * @param string $fallback_id     Hard fallback.
-	 * @return string Ruleset id.
+	 * Policy decision, not a catalog lookup: a US visitor from a state
+	 * without comprehensive privacy law gets the most-protective opt-in
+	 * treatment regardless of what _index.json says about the US entry.
+	 * Previously this depended on `$index_countries['US'] === 'us-router'`
+	 * as a sentinel — if the catalog evolved (e.g. US → 'us-fallback')
+	 * the resolver silently degraded to fallback-gdpr-most-protective
+	 * for every unknown US state, breaking the documented Q2 behaviour
+	 * without any catalog-side error. Hardcoding the policy here makes
+	 * the contract explicit and the failure mode loud.
+	 *
+	 * @param array  $index_countries Country index map (kept for signature
+	 *                                stability with callers / future hooks
+	 *                                that may want to inspect catalog state).
+	 * @param string $fallback_id     Hard fallback (kept for signature stability).
+	 * @return string Ruleset id — always 'gdpr-strict'.
 	 */
 	private static function resolve_us_no_law( $index_countries, $fallback_id ) {
-		// _index.json maps US → 'us-router' as a sentinel; the catalog
-		// is expected to redirect to gdpr-strict for no-law states.
-		// In P1 simplified catalog, fallback to gdpr-strict directly.
-		if ( is_array( $index_countries ) && isset( $index_countries['US'] ) && 'us-router' === $index_countries['US'] ) {
-			return 'gdpr-strict';
-		}
-		return $fallback_id;
+		unset( $index_countries, $fallback_id ); // policy constant: inputs not consulted.
+		return 'gdpr-strict';
 	}
 
 	/**

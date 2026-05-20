@@ -270,8 +270,28 @@ class Geo_Api {
 
 	/**
 	 * POST /preview — dry-run resolve {country, region} → ruleset.
+	 *
+	 * Lightly rate-limited per admin user: at most 60 calls/min. The
+	 * endpoint is gated by manage_options + nonce so the only realistic
+	 * abuse vector is a compromised admin session or a buggy/rogue
+	 * filter on cron — but the call does ruleset JSON load + schema
+	 * validation + resolve, so a tight loop is non-trivial. The window
+	 * is purely a guardrail against accidental call-storm patterns.
 	 */
 	public function preview( WP_REST_Request $request ) {
+		// Per-user transient counter, 60s window.
+		$user_id  = get_current_user_id();
+		$rate_key = 'faz_geo_preview_rate_' . ( $user_id > 0 ? $user_id : 'anon' );
+		$count    = (int) get_transient( $rate_key );
+		if ( $count >= 60 ) {
+			return new WP_Error(
+				'rate_limited',
+				'Too many preview requests (max 60/min).',
+				array( 'status' => 429 )
+			);
+		}
+		set_transient( $rate_key, $count + 1, MINUTE_IN_SECONDS );
+
 		$body    = $request->get_json_params();
 		$country = isset( $body['country'] ) ? (string) $body['country'] : '';
 		$region  = isset( $body['region'] ) ? (string) $body['region'] : '';
@@ -367,7 +387,22 @@ class Geo_Api {
 			if ( '' === $key ) {
 				delete_option( 'faz_geo_ipinfo_api_key' );
 			} else {
-				update_option( 'faz_geo_ipinfo_api_key', Secrets::encrypt( $key ), false );
+				// Bound the input: wp_options.option_value is LONGTEXT and would
+				// happily store 64 KB of payload; legitimate ipinfo tokens are
+				// 14-32 alphanumeric chars. 512 is a generous ceiling for any
+				// future provider that uses long opaque tokens.
+				if ( strlen( $key ) > 512 ) {
+					return new WP_Error( 'invalid_api_key', 'API key too long (max 512 chars).', array( 'status' => 400 ) );
+				}
+				// Strip control / whitespace characters that can't possibly belong
+				// in an opaque API token but could otherwise corrupt the encrypted
+				// payload after XOR.
+				$key_clean = preg_replace( '/[\x00-\x1F\x7F]/', '', $key );
+				$encrypted = Secrets::encrypt( $key_clean );
+				if ( '' === $encrypted ) {
+					return new WP_Error( 'encryption_unavailable', 'Could not encrypt the API key (wp_salt unavailable).', array( 'status' => 500 ) );
+				}
+				update_option( 'faz_geo_ipinfo_api_key', $encrypted, false );
 			}
 		}
 
@@ -379,28 +414,69 @@ class Geo_Api {
 	}
 
 	/**
-	 * GET /pipl-attestation.
+	 * GET /pipl-attestation. Returns the current state + the audit log of
+	 * past attestation transitions (append-only).
 	 */
 	public function get_pipl_attestation() {
 		$data = (array) get_option( 'faz_geo_pipl_cross_border_attested', array() );
+		$log  = (array) get_option( 'faz_geo_pipl_attestation_log', array() );
+
+		// Sanitize the audit log for JSON output — drop any malformed
+		// entries instead of trusting raw option content downstream.
+		$sanitized_log = array();
+		foreach ( $log as $entry ) {
+			if ( ! is_array( $entry ) ) {
+				continue;
+			}
+			$sanitized_log[] = array(
+				'attested'  => ! empty( $entry['attested'] ),
+				'timestamp' => (int) ( $entry['timestamp'] ?? 0 ),
+				'user_id'   => (int) ( $entry['user_id'] ?? 0 ),
+			);
+		}
+
 		return new WP_REST_Response( array(
 			'attested'   => ! empty( $data['attested'] ),
 			'timestamp'  => (int) ( $data['timestamp'] ?? 0 ),
 			'user_id'    => (int) ( $data['user_id'] ?? 0 ),
+			'audit_log'  => $sanitized_log,
 		), 200 );
 	}
 
 	/**
 	 * POST /pipl-attestation — { attested: bool }.
+	 *
+	 * The "current" state lives in `faz_geo_pipl_cross_border_attested`.
+	 * Every state transition (true→false OR false→true) is also appended
+	 * to `faz_geo_pipl_attestation_log` so the audit trail for cross-border
+	 * data transfer obligations (PIPL Art. 38–43, GDPR Art. 30) survives
+	 * revocations. The log is capped at 200 entries; older entries roll
+	 * off (this is per-install regulatory audit history, not infinite
+	 * retention).
 	 */
 	public function set_pipl_attestation( WP_REST_Request $request ) {
 		$body     = $request->get_json_params();
 		$attested = ! empty( $body['attested'] );
-		$data = array(
+		$data     = array(
 			'attested'  => $attested,
 			'timestamp' => time(),
 			'user_id'   => get_current_user_id(),
 		);
+
+		// Only append to the log when the state actually changes — avoids
+		// padding the log with repeated POSTs of the same value.
+		$prev = (array) get_option( 'faz_geo_pipl_cross_border_attested', array() );
+		$prev_attested = ! empty( $prev['attested'] );
+		if ( empty( $prev ) || $prev_attested !== $attested ) {
+			$log   = (array) get_option( 'faz_geo_pipl_attestation_log', array() );
+			$log[] = $data;
+			// Cap at 200 entries — keep the most recent.
+			if ( count( $log ) > 200 ) {
+				$log = array_slice( $log, -200 );
+			}
+			update_option( 'faz_geo_pipl_attestation_log', $log, false );
+		}
+
 		update_option( 'faz_geo_pipl_cross_border_attested', $data, false );
 		return new WP_REST_Response( $data, 200 );
 	}

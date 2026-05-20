@@ -54,13 +54,6 @@ class Ruleset_Loader {
 	private $index_cache = null;
 
 	/**
-	 * Cached schema decoded payload (per-request).
-	 *
-	 * @var array|null
-	 */
-	private $schema_cache = null;
-
-	/**
 	 * Cache group for `wp_cache_get` / `wp_cache_set`.
 	 *
 	 * @var string
