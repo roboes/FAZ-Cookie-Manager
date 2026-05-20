@@ -1,0 +1,56 @@
+{
+  "$schema": "../schemas/ruleset.schema.json",
+  "id": "ccpa-california",
+  "version": "1.0.0",
+  "display_name": "CCPA + CPRA (California)",
+  "law_references": [
+    "Cal. Civ. Code §1798.100 et seq. (CCPA)",
+    "CPRA (Prop. 24)",
+    "CPPA Reg. §7025 (GPC requirement)"
+  ],
+  "applies_to": {
+    "countries": ["US"],
+    "regions": ["US-CA"]
+  },
+  "model": "opt-out-with-sensitive-opt-in",
+  "native_lang": "en",
+  "official_resources_url": [
+    "https://oag.ca.gov/privacy/ccpa",
+    "https://cppa.ca.gov/regulations/"
+  ],
+  "signals": {
+    "tcf_v22": false,
+    "gpp": { "enabled": true, "section": "usca" },
+    "gpc_honored": true,
+    "gpc_required": true,
+    "dnt_honored": false,
+    "cmv2": {
+      "ad_storage": "denied-until-action",
+      "analytics_storage": "denied-until-action",
+      "ad_user_data": "denied-until-action",
+      "ad_personalization": "denied-until-action",
+      "personalization_storage": "granted",
+      "functionality_storage": "granted",
+      "security_storage": "granted"
+    }
+  },
+  "ui": {
+    "equal_weight_buttons": true,
+    "donotsell_link_required": true,
+    "sensitive_separate_optin": true,
+    "revisit_widget_required": true,
+    "default_categories": {
+      "necessary": "granted-locked",
+      "functional": "granted",
+      "analytics": "granted",
+      "marketing": "granted",
+      "profiling": "denied-until-action"
+    }
+  },
+  "cross_border_notes": null,
+  "_meta": {
+    "behavior_review_date": "2026-05-20",
+    "next_review_due": "2027-05-20",
+    "notes": "Opt-out model (sale/share) + opt-in for sensitive data per CPRA. GPC required (CPPA Reg. §7025) — when Sec-GPC:1 detected, 'Do Not Sell or Share' preference auto-set with informational notice. Sensitive categories (profiling) gated separately."
+  }
+}

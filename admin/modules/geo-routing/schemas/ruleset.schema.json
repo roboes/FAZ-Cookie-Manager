@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/fabiodalez-dev/FAZ-Cookie-Manager/schemas/ruleset.schema.json",
+  "title": "FAZ Cookie Manager — Geo-routing Ruleset",
+  "description": "Schema for jurisdictional rule-sets loaded by admin/modules/geo-routing. Spec: specs/001-geo-routing-next/data-model.md §4.",
+  "type": "object",
+  "required": [
+    "id",
+    "version",
+    "display_name",
+    "applies_to",
+    "model",
+    "native_lang",
+    "official_resources_url",
+    "signals",
+    "ui",
+    "_meta"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional JSON-schema dollar-ref; ignored by validator."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]+[a-z0-9]$",
+      "description": "Ruleset identifier. MUST match the filename without .json"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semver. Bump rules per data-model.md §4 (major = legal change, minor = matrix change, patch = wording)."
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 80
+    },
+    "law_references": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Public-domain citation strings (statute names, article numbers). NOT legal text."
+    },
+    "applies_to": {
+      "type": "object",
+      "required": ["countries"],
+      "additionalProperties": false,
+      "properties": {
+        "countries": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$",
+            "description": "ISO 3166-1 alpha-2"
+          },
+          "minItems": 1
+        },
+        "regions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}-[A-Z0-9]{1,3}$",
+            "description": "ISO 3166-2 (e.g. US-CA, BR-SP)"
+          }
+        }
+      }
+    },
+    "model": {
+      "type": "string",
+      "enum": [
+        "opt-in",
+        "opt-out",
+        "hybrid",
+        "opt-out-with-sensitive-opt-in"
+      ],
+      "description": "Consent model class per Constitution §Jurisdictional Compliance Matrix."
+    },
+    "native_lang": {
+      "type": "string",
+      "pattern": "^[a-z]{2}(-[A-Z]{2})?$",
+      "description": "Primary language of the jurisdiction (BCP-47 short form)."
+    },
+    "official_resources_url": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uri",
+        "pattern": "^https?://"
+      },
+      "minItems": 1,
+      "description": "Public authoritative resources (Garante, CNIL, OAG CA, ANPD, CAC, etc.). NOT shipped legal text — links only. Q5 revised 2026-05-20."
+    },
+    "signals": {
+      "type": "object",
+      "required": ["tcf_v22", "gpp", "gpc_honored", "gpc_required", "dnt_honored", "cmv2"],
+      "additionalProperties": false,
+      "properties": {
+        "tcf_v22": { "type": "boolean" },
+        "gpp": {
+          "type": "object",
+          "required": ["enabled"],
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "section": {
+              "type": ["string", "null"],
+              "description": "IAB GPP section identifier (e.g. usca, usco, usnatv1) when enabled."
+            }
+          }
+        },
+        "gpc_honored": { "type": "boolean" },
+        "gpc_required": { "type": "boolean" },
+        "dnt_honored": { "type": "boolean" },
+        "cmv2": {
+          "type": "object",
+          "required": ["ad_storage", "analytics_storage", "ad_user_data", "ad_personalization", "personalization_storage", "functionality_storage", "security_storage"],
+          "additionalProperties": false,
+          "properties": {
+            "ad_storage": { "$ref": "#/$defs/cmv2_state" },
+            "analytics_storage": { "$ref": "#/$defs/cmv2_state" },
+            "ad_user_data": { "$ref": "#/$defs/cmv2_state" },
+            "ad_personalization": { "$ref": "#/$defs/cmv2_state" },
+            "personalization_storage": { "$ref": "#/$defs/cmv2_state" },
+            "functionality_storage": { "$ref": "#/$defs/cmv2_state" },
+            "security_storage": { "$ref": "#/$defs/cmv2_state" }
+          }
+        }
+      }
+    },
+    "ui": {
+      "type": "object",
+      "required": ["equal_weight_buttons", "donotsell_link_required", "sensitive_separate_optin", "revisit_widget_required", "default_categories"],
+      "additionalProperties": false,
+      "properties": {
+        "equal_weight_buttons": { "type": "boolean" },
+        "donotsell_link_required": { "type": "boolean" },
+        "sensitive_separate_optin": { "type": "boolean" },
+        "revisit_widget_required": { "type": "boolean" },
+        "default_categories": {
+          "type": "object",
+          "patternProperties": {
+            "^[a-z][a-z0-9_-]*$": {
+              "type": "string",
+              "enum": ["granted", "denied", "denied-until-action", "granted-locked"]
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "cross_border_notes": {
+      "type": ["object", "null"],
+      "description": "Non-null when jurisdiction has cross-border transfer obligations (e.g. PIPL Art. 38-43). Structure free-form until Q9 admin UI is finalized."
+    },
+    "_meta": {
+      "type": "object",
+      "required": ["behavior_review_date"],
+      "additionalProperties": false,
+      "properties": {
+        "behavior_review_date": {
+          "type": ["string", "null"],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "next_review_due": {
+          "type": ["string", "null"],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "notes": { "type": ["string", "null"] }
+      }
+    }
+  },
+  "$defs": {
+    "cmv2_state": {
+      "type": "string",
+      "enum": ["granted", "denied", "denied-until-action", "granted-locked"]
+    }
+  }
+}
