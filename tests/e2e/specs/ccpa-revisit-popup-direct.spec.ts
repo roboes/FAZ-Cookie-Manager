@@ -113,31 +113,85 @@ test.describe('CCPA revisit → opt-out popup (1-click UX, 1.14.4+)', () => {
           `);
         }
       } catch (e) {
-        // Cleanup failures shouldn't fail the test.
+        // CodeRabbit#1: do NOT silence cleanup failures. A failed
+        // rollback leaves the banner law on 'ccpa' and the NEXT test
+        // (the GDPR regression below) inherits a polluted DB, flaking
+        // intermittently. Surface the failure so the test reports it.
+        throw new Error(`CCPA cleanup rollback failed: ${String(e)}`);
       }
     }
   });
 
   test('GDPR mode regression: revisit still shows the banner (negative coverage)', async ({ page, wpBaseURL }) => {
-    // GDPR is the default in the dev fixture — no setup needed beyond
-    // making sure the banner is GDPR-law.
-    await page.goto(wpBaseURL, { waitUntil: 'domcontentloaded' });
-    const banner = page.locator('.faz-consent-container').first();
-    await expect(banner, 'GDPR banner shows on first visit').toBeVisible({ timeout: REVISIT_TIMEOUT });
+    // CodeRabbit#2: do not depend on the dev-fixture default. Force the
+    // default banner to GDPR law explicitly at the start, restore the
+    // prior value in finally. This makes the test deterministic
+    // regardless of test ordering, fixture state, or parallel runs.
+    const originalLaw = wpEval(`
+      global $wpdb;
+      $row = $wpdb->get_row( "SELECT banner_id, settings FROM {$wpdb->prefix}faz_banners WHERE banner_default = 1 LIMIT 1" );
+      if ( ! $row ) { echo wp_json_encode( array( 'error' => 'no_default_banner' ) ); exit; }
+      $settings = json_decode( $row->settings, true );
+      $previous = isset( $settings['applicableLaw'] ) ? $settings['applicableLaw'] : '';
+      $settings['applicableLaw'] = 'gdpr';
+      $wpdb->update(
+        $wpdb->prefix . 'faz_banners',
+        array( 'settings' => wp_json_encode( $settings ) ),
+        array( 'banner_id' => $row->banner_id ),
+        array( '%s' ),
+        array( '%d' )
+      );
+      delete_option( 'faz_banner_template' );
+      echo wp_json_encode( array( 'banner_id' => $row->banner_id, 'previous' => $previous ) );
+    `).trim();
 
-    // Record `action` by clicking Accept All
-    await page.locator('[data-faz-tag="accept-button"]').first().click();
-    await expect(banner, 'banner closes after Accept').toBeHidden({ timeout: REVISIT_TIMEOUT });
+    try {
+      const meta = JSON.parse(originalLaw);
+      expect(meta.error, 'install has a default banner').toBeUndefined();
 
-    // Click revisit — banner MUST re-open (GDPR has a full preference center
-    // accessible from the banner; we don't skip it).
-    const revisitWidget = page.locator('[data-faz-tag="revisit-consent"]').first();
-    await expect(revisitWidget).toBeVisible({ timeout: REVISIT_TIMEOUT });
-    await revisitWidget.locator('.faz-btn-revisit').click();
-    await expect(banner, 'GDPR revisit re-opens the banner (1-click shortcut is CCPA-only)').toBeVisible({ timeout: REVISIT_TIMEOUT });
+      await page.goto(wpBaseURL, { waitUntil: 'domcontentloaded' });
+      const banner = page.locator('.faz-consent-container').first();
+      await expect(banner, 'GDPR banner shows on first visit').toBeVisible({ timeout: REVISIT_TIMEOUT });
 
-    // Opt-out popup MUST NOT be present in GDPR mode (DOM may not even render it)
-    const popup = page.locator('[data-faz-tag="optout-popup"]').first();
-    await expect(popup, 'opt-out popup is not the GDPR revisit target').toBeHidden();
+      // Record `action` by clicking Accept All
+      await page.locator('[data-faz-tag="accept-button"]').first().click();
+      await expect(banner, 'banner closes after Accept').toBeHidden({ timeout: REVISIT_TIMEOUT });
+
+      // Click revisit — banner MUST re-open (GDPR has a full preference center
+      // accessible from the banner; we don't skip it).
+      const revisitWidget = page.locator('[data-faz-tag="revisit-consent"]').first();
+      await expect(revisitWidget).toBeVisible({ timeout: REVISIT_TIMEOUT });
+      await revisitWidget.locator('.faz-btn-revisit').click();
+      await expect(banner, 'GDPR revisit re-opens the banner (1-click shortcut is CCPA-only)').toBeVisible({ timeout: REVISIT_TIMEOUT });
+
+      // Opt-out popup MUST NOT be present in GDPR mode (DOM may not even render it)
+      const popup = page.locator('[data-faz-tag="optout-popup"]').first();
+      await expect(popup, 'opt-out popup is not the GDPR revisit target').toBeHidden();
+    } finally {
+      // Restore original banner law — surface failures (CodeRabbit#1 pattern)
+      try {
+        const meta = JSON.parse(originalLaw);
+        if (!meta.error && meta.previous !== undefined) {
+          wpEval(`
+            global $wpdb;
+            $row = $wpdb->get_row( $wpdb->prepare( "SELECT settings FROM {$wpdb->prefix}faz_banners WHERE banner_id = %d", ${parseInt(meta.banner_id, 10)} ) );
+            if ( $row ) {
+              $settings = json_decode( $row->settings, true );
+              $settings['applicableLaw'] = ${JSON.stringify(meta.previous)};
+              $wpdb->update(
+                $wpdb->prefix . 'faz_banners',
+                array( 'settings' => wp_json_encode( $settings ) ),
+                array( 'banner_id' => ${parseInt(meta.banner_id, 10)} ),
+                array( '%s' ),
+                array( '%d' )
+              );
+              delete_option( 'faz_banner_template' );
+            }
+          `);
+        }
+      } catch (e) {
+        throw new Error(`GDPR cleanup rollback failed: ${String(e)}`);
+      }
+    }
   });
 });
