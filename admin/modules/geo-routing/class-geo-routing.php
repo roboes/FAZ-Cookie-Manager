@@ -190,7 +190,12 @@ class Geo_Routing {
 				$overrides,
 				$loader->load_index(),
 				$loader->load_us_regions(),
-				$loader->get_fallback_id()
+				$loader->get_fallback_id(),
+				// L2-SP1-S006 fix: pass the catalog ids to validate
+				// admin overrides against. Invalid overrides degrade
+				// to auto-detection instead of producing non-loadable
+				// ruleset ids.
+				$loader->list_all()
 			);
 
 			$ruleset = $loader->load_ruleset( $ruleset_id );

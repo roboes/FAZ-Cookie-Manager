@@ -247,21 +247,53 @@ class Controller {
 			$categories = wp_json_encode( $categories );
 		}
 
+		// L2-SP1-S003 fix (1.15.0): populate the 7 geo-routing v2
+		// audit columns added by Migration_V2. Resolves Constitution V
+		// (Auditable Records) gap — until this commit the columns were
+		// added schema-side but never written, leaving NULL on every row.
+		//
+		// Data source priority:
+		//   1. $data['visitor_context'] explicitly passed by caller
+		//      (REST API consent_log endpoint, JS-side hydration).
+		//   2. Geo_Routing::get_visitor_context() server-side resolve
+		//      (cached per-request — no extra HTTP). Only invoked if
+		//      the Geo_Routing class is available (defensive — geo-
+		//      routing v2 module might be removed by a future host
+		//      filter).
+		//   3. NULL columns (legacy fallback).
+		$geo_fields = $this->resolve_geo_audit_fields( $data );
+
+		$insert_data = array(
+			'consent_id'      => $consent_id,
+			'status'          => $status,
+			'categories'      => $categories,
+			'ip_hash'         => $ip_hash,
+			'user_agent'      => $user_agent,
+			'url'             => $url,
+			'banner_slug'     => $banner_slug,
+			'policy_revision' => $policy_revision,
+			'created_at'      => current_time( 'mysql' ),
+		);
+		$insert_format = array( '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s' );
+
+		// Append v2 columns only when geo-routing v2 has resolved data.
+		// $wpdb->insert tolerates extra keys against existing columns;
+		// the migration probe in Migration_V2 has already guaranteed
+		// the columns exist on this install (or the option
+		// faz_geo_v2_disabled_reason is set, in which case we still
+		// skip the v2 fields rather than emit unknown-column errors).
+		if ( is_array( $geo_fields ) && ! empty( $geo_fields ) && '' === (string) get_option( 'faz_geo_v2_disabled_reason', '' ) ) {
+			foreach ( $geo_fields as $col => $val ) {
+				$insert_data[ $col ]   = $val;
+				$insert_format[]        = is_int( $val ) ? '%d' : '%s';
+			}
+		}
+
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- consent log writes by design must not be cached; every visitor consent action produces a fresh row.
 		$result = $wpdb->insert(
 			$this->get_table_name(),
-			array(
-				'consent_id' => $consent_id,
-				'status'     => $status,
-				'categories' => $categories,
-				'ip_hash'    => $ip_hash,
-				'user_agent' => $user_agent,
-				'url'        => $url,
-				'banner_slug' => $banner_slug,
-				'policy_revision' => $policy_revision,
-				'created_at' => current_time( 'mysql' ),
-			),
-			array( '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s' )
+			$insert_data,
+			$insert_format
 		);
 
 		if ( false === $result ) {
@@ -279,6 +311,72 @@ class Controller {
 			'policy_revision' => $policy_revision,
 			'created_at' => current_time( 'mysql' ),
 		);
+	}
+
+	/**
+	 * Resolve the 7 geo-routing v2 audit fields for `log_consent()`.
+	 *
+	 * Spec: 001-geo-routing-next FR-07, L2-SP1-S003 fix.
+	 *
+	 * Returns columns the caller can pass-through to $wpdb->insert:
+	 *   country_at_consent, region_at_consent, ruleset_id_at_consent,
+	 *   signal_gpc_received, signal_dnt_received, tc_string, gpp_string
+	 *
+	 * Defensive: never throws. If geo-routing v2 module is absent,
+	 * returns an empty array → caller skips the v2 columns entirely.
+	 *
+	 * @since 1.15.0
+	 * @param array $data Caller payload (may contain 'visitor_context').
+	 * @return array Sparse column→value map.
+	 */
+	protected function resolve_geo_audit_fields( $data ) {
+		$ctx = isset( $data['visitor_context'] ) && is_array( $data['visitor_context'] ) ? $data['visitor_context'] : null;
+
+		if ( null === $ctx ) {
+			$class = '\\FazCookie\\Admin\\Modules\\Geo_Routing\\Geo_Routing';
+			if ( class_exists( $class ) ) {
+				try {
+					$orchestrator = $class::get_instance();
+					if ( method_exists( $orchestrator, 'get_visitor_context' ) ) {
+						$ctx = $orchestrator->get_visitor_context();
+					}
+				} catch ( \Throwable $e ) {
+					$ctx = null;
+				}
+			}
+		}
+
+		if ( ! is_array( $ctx ) ) {
+			return array();
+		}
+
+		$out = array();
+		if ( isset( $ctx['country'] ) && is_string( $ctx['country'] ) && preg_match( '/^[A-Z]{2}$/', $ctx['country'] ) ) {
+			$out['country_at_consent'] = $ctx['country'];
+		}
+		if ( isset( $ctx['region'] ) && is_string( $ctx['region'] ) && preg_match( '/^[A-Z]{2}-[A-Z0-9]{1,3}$/', $ctx['region'] ) ) {
+			$out['region_at_consent'] = $ctx['region'];
+		}
+		if ( isset( $ctx['ruleset_id'] ) && is_string( $ctx['ruleset_id'] ) && preg_match( '/^[a-z][a-z0-9-]*[a-z0-9]$/', $ctx['ruleset_id'] ) ) {
+			$out['ruleset_id_at_consent'] = $ctx['ruleset_id'];
+		}
+		if ( isset( $ctx['signals']['gpc'] ) ) {
+			$out['signal_gpc_received'] = ! empty( $ctx['signals']['gpc'] ) ? 1 : 0;
+		} elseif ( isset( $data['signal_gpc'] ) ) {
+			$out['signal_gpc_received'] = ! empty( $data['signal_gpc'] ) ? 1 : 0;
+		}
+		if ( isset( $ctx['signals']['dnt'] ) ) {
+			$out['signal_dnt_received'] = ! empty( $ctx['signals']['dnt'] ) ? 1 : 0;
+		} elseif ( isset( $data['signal_dnt'] ) ) {
+			$out['signal_dnt_received'] = ! empty( $data['signal_dnt'] ) ? 1 : 0;
+		}
+		if ( isset( $data['tc_string'] ) && is_string( $data['tc_string'] ) && '' !== $data['tc_string'] ) {
+			$out['tc_string'] = $data['tc_string'];
+		}
+		if ( isset( $data['gpp_string'] ) && is_string( $data['gpp_string'] ) && '' !== $data['gpp_string'] ) {
+			$out['gpp_string'] = $data['gpp_string'];
+		}
+		return $out;
 	}
 
 	/**

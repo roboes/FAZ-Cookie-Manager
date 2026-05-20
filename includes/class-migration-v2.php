@@ -107,6 +107,44 @@ class Migration_V2 {
 		global $wpdb;
 		$table = $wpdb->prefix . 'faz_consent_logs';
 
+		// L2-SP1-S002 fix (1.15.0): MySQL advisory lock to serialize
+		// concurrent activator invocations. Without this, two parallel
+		// `maybe_update_db()` runs (admin reactivate + cron / WP-CLI
+		// + browser admin / multi-worker FPM) both observed the column
+		// missing, both issued ALTER TABLE, the second got ERROR 1060
+		// "Duplicate column name" → wpdb returned false → the column
+		// got marked as failed in `faz_geo_v2_migration_pending` even
+		// though it actually existed. Acquiring `GET_LOCK` with a 10s
+		// timeout makes the second caller wait for the first to finish,
+		// then it sees the columns present and exits with status='no_op'.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		$lock_acquired = (int) $wpdb->get_var( "SELECT GET_LOCK('faz_geo_v2_migration', 10)" );
+		if ( 1 !== $lock_acquired ) {
+			// Lock not granted within 10s — another worker is still
+			// running the migration. Return cleanly; the next
+			// `maybe_update_db()` cycle will re-enter.
+			return 'lock_busy';
+		}
+
+		try {
+			$result = self::run_locked( $table );
+		} finally {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+			$wpdb->get_var( "SELECT RELEASE_LOCK('faz_geo_v2_migration')" );
+		}
+		return $result;
+	}
+
+	/**
+	 * Inner migration body — called by run() after acquiring the
+	 * advisory lock. Same flow as the pre-fix run().
+	 *
+	 * @param string $table Full table name (with prefix).
+	 * @return string Status: 'ok' | 'mysql_too_old' | 'partial' | 'no_table' | 'no_op'.
+	 */
+	protected static function run_locked( $table ) {
+		global $wpdb;
+
 		// 1. Bail if the consent_logs table itself doesn't exist yet
 		//    (e.g. activator running before install_all_tables completed).
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery

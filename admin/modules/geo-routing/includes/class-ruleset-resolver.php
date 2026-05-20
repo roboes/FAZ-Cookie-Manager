@@ -62,7 +62,8 @@ class Ruleset_Resolver {
 		$admin_overrides,
 		$index_countries,
 		$index_regions,
-		$fallback_id = 'fallback-gdpr-most-protective'
+		$fallback_id = 'fallback-gdpr-most-protective',
+		$valid_ruleset_ids = null
 	) {
 		// Stage 1: VPN trumps everything. Constitution Governance.
 		if ( true === $vpn_detected ) {
@@ -77,7 +78,25 @@ class Ruleset_Resolver {
 		if ( '' !== $country && is_array( $admin_overrides ) && isset( $admin_overrides[ $country ] ) ) {
 			$override = $admin_overrides[ $country ];
 			if ( is_array( $override ) && ! empty( $override['ruleset_id'] ) ) {
-				return (string) $override['ruleset_id'];
+				$override_id = (string) $override['ruleset_id'];
+				// L2-SP1-S006 fix (1.15.0): if a whitelist of valid
+				// ruleset ids is provided, validate the override
+				// against it. Without this, a corrupted
+				// `faz_geo_admin_overrides` option (direct DB edit,
+				// restore from stale backup with a since-removed
+				// ruleset, third-party plugin filter on get_option)
+				// could route visitors to a missing ruleset. With it,
+				// invalid overrides degrade gracefully to the next
+				// resolution stage instead of producing a non-loadable
+				// id (Ruleset_Loader::load_ruleset would return null
+				// and Geo_Routing::get_visitor_context falls back to
+				// the most-protective ruleset — same end state, but
+				// now with the choice made explicit at the resolver
+				// boundary rather than buried in downstream null-checks).
+				if ( null === $valid_ruleset_ids || ( is_array( $valid_ruleset_ids ) && in_array( $override_id, $valid_ruleset_ids, true ) ) ) {
+					return $override_id;
+				}
+				// Invalid override id — fall through to auto-detection.
 			}
 			// `delta` without explicit `ruleset_id` falls through to auto-detection;
 			// the delta is applied by the consumer when materializing the ruleset config.
