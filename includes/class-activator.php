@@ -63,6 +63,9 @@ class Activator {
 		'3.5.0' => array(
 			'update_db_350',
 		),
+		'3.6.0' => array(
+			'update_db_360',
+		),
 	);
 	/**
 	 * Return the current instance of the class
@@ -952,6 +955,33 @@ class Activator {
 		}
 
 		faz_clear_banner_template_cache();
+	}
+
+	/**
+	 * Geo-routing v2 schema migration (spec 001 — task T015).
+	 *
+	 * Adds 7 NULL-default columns to wp_faz_consent_logs via online DDL.
+	 * Delegated to \FazCookie\Includes\Migration_V2 (R4-S004 pattern):
+	 *   - Probes MySQL version (5.7.6+ required for INPLACE, LOCK=NONE)
+	 *   - Per-column ALTER with idempotent re-entry
+	 *   - Persists `faz_geo_v2_migration_pending` on partial failure
+	 *
+	 * Constitution V Auditable Records: NULL on legacy rows is correct
+	 * (pre-v2 visits had no geo context to capture).
+	 *
+	 * @since 1.15.0
+	 * @return void
+	 */
+	public static function update_db_360() {
+		$status = \FazCookie\Includes\Migration_V2::run();
+		if ( function_exists( 'error_log' ) && in_array( $status, array( 'mysql_too_old', 'partial' ), true ) ) {
+			error_log( // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+				sprintf(
+					'[FAZ Cookie Manager] geo-routing v2 migration status: %s. Check faz_geo_v2_migration_pending / faz_geo_v2_disabled_reason options for details.',
+					$status
+				)
+			);
+		}
 	}
 
 	/**
