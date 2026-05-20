@@ -20,7 +20,7 @@ $rest_nonce = wp_create_nonce( 'wp_rest' );
 $rest_url   = esc_url( rest_url( 'faz/v1/geo/' ) );
 
 ?><div class="wrap faz-admin-page faz-geo-routing-page" id="faz-geo-routing-app"
-     data-faz-rest-url="<?php echo $rest_url; ?>"
+     data-faz-rest-url="<?php echo esc_url( $rest_url ); ?>"
      data-faz-rest-nonce="<?php echo esc_attr( $rest_nonce ); ?>">
 
 	<h1><?php esc_html_e( 'Geo-routing', 'faz-cookie-manager' ); ?></h1>

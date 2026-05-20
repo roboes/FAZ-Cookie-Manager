@@ -111,7 +111,12 @@ class Geo_Api {
 			),
 		) );
 
-		register_rest_route( $ns, "/{$base}/overrides/(?P<country>[A-Z]{2})", array(
+		// L2-SP1-S007 fix (1.15.0): widen regex to accept both
+		// uppercase and lowercase country codes; the handler normalizes
+		// via strtoupper(). Eliminates the asymmetry where POST
+		// /overrides accepted {it: {...}} (case-coerced) but DELETE
+		// /overrides/it returned 404.
+		register_rest_route( $ns, "/{$base}/overrides/(?P<country>[A-Za-z]{2})", array(
 			'methods'             => 'DELETE',
 			'callback'            => array( $this, 'delete_override' ),
 			'permission_callback' => array( $this, 'check_admin' ),
@@ -260,6 +265,20 @@ class Geo_Api {
 		$region  = isset( $body['region'] ) ? (string) $body['region'] : '';
 		$vpn     = ! empty( $body['vpn'] );
 
+		// L1-SP1-S007 fix (1.15.0): normalize country/region BEFORE
+		// echoing them back in the response. Eliminates any payload-
+		// reflection path — if a future UI rendering reads `input.country`
+		// into a DOM attribute, the value is guaranteed to be `^[A-Z]{2}$`
+		// shape (or empty), not arbitrary user input.
+		$country = strtoupper( trim( $country ) );
+		if ( ! preg_match( '/^[A-Z]{2}$/', $country ) ) {
+			$country = '';
+		}
+		$region = strtoupper( trim( $region ) );
+		if ( ! preg_match( '/^[A-Z]{2}-[A-Z0-9]{1,3}$/', $region ) ) {
+			$region = '';
+		}
+
 		$loader     = Ruleset_Loader::get_instance();
 		$overrides  = (array) get_option( 'faz_geo_admin_overrides', array() );
 		$ruleset_id = Ruleset_Resolver::resolve(
@@ -404,7 +423,13 @@ class Geo_Api {
 					if ( ! is_string( $path ) ) {
 						continue;
 					}
-					if ( ! preg_match( '/^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)*$/i', $path ) ) {
+					// L1-SP1-S005 fix (1.15.0): normalize to lowercase
+					// BEFORE the regex, then enforce case-sensitive
+					// pattern. Otherwise paths like 'Signals.CmV2'
+					// would pass validation but silently no-op at
+					// runtime (ruleset keys are all-lowercase).
+					$path = strtolower( $path );
+					if ( ! preg_match( '/^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)*$/', $path ) ) {
 						continue;
 					}
 					// Only scalar values allowed in delta.

@@ -41,30 +41,74 @@ class Secrets {
 		if ( ! is_string( $plain ) || '' === $plain ) {
 			return '';
 		}
-		$key    = self::derive_key( strlen( $plain ) );
-		$cipher = $plain ^ $key;
-		return 'v1:' . base64_encode( $cipher );
+		$key      = self::derive_key( strlen( $plain ) );
+		$cipher   = $plain ^ $key;
+		$key_hint = self::current_key_hint();
+		// Format: v2:<8-hex-keyhint>:<base64-ciphertext>
+		// v2 supersedes v1 (no hint) — v1 ciphertexts still decode for
+		// backward compat with installs that encrypted via the old format.
+		return 'v2:' . $key_hint . ':' . base64_encode( $cipher );
 	}
 
 	/**
 	 * Decrypt a previously-encrypted string.
 	 *
-	 * Returns '' if input is unrecognizable (allows the consumer to
-	 * fail gracefully — e.g. ipinfo client skips lookup if key empty).
+	 * Returns '' if input is unrecognizable OR if the key-hint indicates
+	 * the salt has rotated since encryption. L1-SP1-S003 fix (1.15.0):
+	 * the key-hint prefix lets the consumer detect salt rotation; an
+	 * empty return triggers admin notice via Ipinfo_Client lookup path
+	 * (which treats "" as "key missing" and surfaces the gap).
 	 *
-	 * @param string $cipher_str 'v1:' prefixed base64 ciphertext.
+	 * @param string $cipher_str 'v1:' or 'v2:' prefixed ciphertext.
 	 * @return string Decrypted plaintext or '' on failure.
 	 */
 	public static function decrypt( $cipher_str ) {
-		if ( ! is_string( $cipher_str ) || 0 !== strpos( $cipher_str, 'v1:' ) ) {
+		if ( ! is_string( $cipher_str ) ) {
 			return '';
 		}
-		$decoded = base64_decode( substr( $cipher_str, 3 ), true );
-		if ( false === $decoded || '' === $decoded ) {
-			return '';
+		// v2 path with salt-rotation hint check.
+		if ( 0 === strpos( $cipher_str, 'v2:' ) ) {
+			$parts = explode( ':', $cipher_str, 3 );
+			if ( 3 !== count( $parts ) ) {
+				return '';
+			}
+			$hint    = (string) $parts[1];
+			$payload = (string) $parts[2];
+			if ( $hint !== self::current_key_hint() ) {
+				// Salt rotated — the keystream this ciphertext was
+				// encrypted with is no longer derivable. Return empty
+				// so the consumer (Ipinfo_Client) treats this as
+				// "key missing" rather than silently produce garbage.
+				return '';
+			}
+			$decoded = base64_decode( $payload, true );
+			if ( false === $decoded || '' === $decoded ) {
+				return '';
+			}
+			$key = self::derive_key( strlen( $decoded ) );
+			return $decoded ^ $key;
 		}
-		$key = self::derive_key( strlen( $decoded ) );
-		return $decoded ^ $key;
+		// v1 backward-compat path (no hint — salt rotation undetectable).
+		if ( 0 === strpos( $cipher_str, 'v1:' ) ) {
+			$decoded = base64_decode( substr( $cipher_str, 3 ), true );
+			if ( false === $decoded || '' === $decoded ) {
+				return '';
+			}
+			$key = self::derive_key( strlen( $decoded ) );
+			return $decoded ^ $key;
+		}
+		return '';
+	}
+
+	/**
+	 * 8-char hint of the current key (used by v2 format for salt-rotation
+	 * detection — see L1-SP1-S003 resolution).
+	 *
+	 * @return string
+	 */
+	private static function current_key_hint() {
+		$salt = function_exists( 'wp_salt' ) ? (string) wp_salt( 'auth' ) : 'faz-fallback-salt-not-secure';
+		return substr( hash( 'sha256', 'faz_secrets_v2|' . $salt ), 0, 8 );
 	}
 
 	/**

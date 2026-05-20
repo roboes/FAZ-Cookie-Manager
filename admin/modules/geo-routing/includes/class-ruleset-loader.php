@@ -285,7 +285,11 @@ class Ruleset_Loader {
 	 */
 	private function sanitize_id( $id ) {
 		$id = is_string( $id ) ? strtolower( $id ) : '';
-		if ( ! preg_match( '/^[a-z][a-z0-9-]+[a-z0-9]$/', $id ) ) {
+		// L1-SP1-S006 fix (1.15.0): allow 2-character ids (e.g. 'eu')
+		// by widening the middle quantifier from + to *. Path traversal
+		// defense is preserved — the char class [a-z0-9-] still excludes
+		// /, ., and ..
+		if ( ! preg_match( '/^[a-z][a-z0-9-]*[a-z0-9]$/', $id ) ) {
 			return '';
 		}
 		return $id;
