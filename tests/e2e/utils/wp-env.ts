@@ -60,23 +60,74 @@ function assertWpPath(): void {
   }
 }
 
+// Transient-failure detection: wp-cli occasionally hits a SIGTERM kill due to
+// MySQL pool exhaustion, an in-flight PHP-FPM worker recycle, or an OPcache
+// stale-file reload mid-call. These are not real test failures and retry on
+// a fresh process usually succeeds. Match on:
+//   - the explicit timeout we emit when execFileSync's `timeout` kicks in
+//   - SIGTERM/SIGKILL kill signals on child_process errors
+//   - 'Database connection' / 'MySQL server has gone away' runtime fragments
+//     the WP bootstrap can emit when the DB blinks
+const TRANSIENT_WP_CLI_PATTERNS = [
+  /ETIMEDOUT/i,
+  /SIGTERM/i,
+  /SIGKILL/i,
+  /Database connection/i,
+  /MySQL server has gone away/i,
+  /Lost connection to MySQL/i,
+];
+
+function isTransientWpCliError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = (error as NodeJS.ErrnoException).code ?? '';
+  const signal = (error as { signal?: string }).signal ?? '';
+  const haystack = `${error.message}\n${code}\n${signal}`;
+  return TRANSIENT_WP_CLI_PATTERNS.some((re) => re.test(haystack));
+}
+
+function blockingSleep(ms: number): void {
+  // execFileSync is sync, so retry backoff needs a sync sleep. Atomics.wait
+  // on a SharedArrayBuffer yields the CPU without busy-waiting and works on
+  // any Node 12+. Avoids spawning child_process('sleep') for sub-second
+  // delays, which would add ~30-50ms fork overhead.
+  const sab = new SharedArrayBuffer(4);
+  Atomics.wait(new Int32Array(sab), 0, 0, ms);
+}
+
 export function wp(args: string[]): string {
   assertWpPath();
-  try {
-    return execFileSync('wp', [`--path=${WP_PATH}`, ...args], {
-      encoding: 'utf8',
-      env: WP_CLI_ENV,
-      killSignal: 'SIGTERM',
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: WP_CLI_TIMEOUT_MS,
-    }).trim();
-  } catch (error) {
-    const command = ['wp', `--path=${WP_PATH}`, ...args].join(' ');
-    if (error instanceof Error) {
-      error.message = `WP-CLI command failed or timed out after ${WP_CLI_TIMEOUT_MS}ms: ${command}\n${error.message}`;
+  const command = ['wp', `--path=${WP_PATH}`, ...args].join(' ');
+  const maxAttempts = 2; // 1 retry on transient error — a second failure is real.
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return execFileSync('wp', [`--path=${WP_PATH}`, ...args], {
+        encoding: 'utf8',
+        env: WP_CLI_ENV,
+        killSignal: 'SIGTERM',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: WP_CLI_TIMEOUT_MS,
+      }).trim();
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxAttempts && isTransientWpCliError(error)) {
+        // 500ms backoff lets a recycling PHP-FPM worker / blinking MySQL
+        // settle before the retry — empirically enough on the dev stack
+        // (nginx + PHP-FPM 8.4 + brew MySQL). Longer makes per-spec
+        // overhead visible in serial runs; shorter risks the same
+        // transient firing twice.
+        blockingSleep(500);
+        continue;
+      }
+      break;
     }
-    throw error;
   }
+
+  if (lastError instanceof Error) {
+    lastError.message = `WP-CLI command failed or timed out after ${WP_CLI_TIMEOUT_MS}ms (${maxAttempts} attempt(s)): ${command}\n${lastError.message}`;
+  }
+  throw lastError;
 }
 
 export function wpEval(code: string): string {
