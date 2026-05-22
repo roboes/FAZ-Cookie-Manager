@@ -181,6 +181,21 @@ test.describe('Cookie Policy Generator — admin integration (Spec 002)', () => 
     );
     expect(sampleName, 'each service checkbox must carry a `name` so readForm picks it up').toBe('third_party_services[]');
 
+    // Wait for writeForm() (the REST GET .then handler in cookie-policy.js)
+    // to have hydrated the form with the persisted FAKE_DATA seed. The
+    // render at line 172 only verifies renderServicesList() ran; the
+    // hydration is a separate async step that runs after the GET resolves.
+    // If we tick `.checked` before writeForm fires, writeForm will race in
+    // afterwards and reset our ticks back to the persisted seed
+    // (`[ga4,cf,recaptcha]`) before submit serializes — the exact failure
+    // observed in long full-suite runs where the GET is slower under load.
+    // FAKE_DATA seeds 3 services, so wait for any checkbox to be :checked.
+    await adminPage.waitForFunction(
+      () => document.querySelectorAll('#cp-services-list input[type=checkbox]:checked').length > 0,
+      undefined,
+      { timeout: 5000 },
+    );
+
     // Clear any seeded state from beforeAll, then tick exactly 3 well-known
     // services covering 3 different group categories (analytics, CDN, anti-bot).
     await adminPage.evaluate(() => {
@@ -360,5 +375,85 @@ test.describe('Cookie Policy Generator — admin integration (Spec 002)', () => 
         }
       }
     }
+  });
+
+  test('7. P2-A regression: COOKIE_CATEGORIES HTML survives markdown_to_html() without nested <p>', () => {
+    // Repro of the CodeRabbit P2 finding: the cookie-list <dl> block must
+    // not be re-parsed by the line-based markdown_to_html(). Symptoms of
+    // the bug pre-fix:
+    //   - `<p>` wrapping closing tags: `<p>...</dt></p>`
+    //   - inline tags (`<small>`, `<strong>`) wrapped in their own `<p>`
+    //   - stray closing `</p>` after `</dl>`
+    // The fix is the two-pass sentinel substitution in Renderer::render().
+    const html = wpEval(`
+      // Ensure at least one cookie exists in inventory so build_cookie_list_html
+      // produces a non-empty <dl>. Column names must match the live schema:
+      // cookie_name / cookie_domain / cookie_duration / cookie_description.
+      global $wpdb;
+      $wpdb->delete( $wpdb->prefix . 'faz_cookies', array( 'name' => 'faz_p2_probe' ) );
+      // Use real schema column names: name/domain/duration/description/category.
+      $wpdb->insert( $wpdb->prefix . 'faz_cookies', array(
+        'name'        => 'faz_p2_probe',
+        'slug'        => 'faz_p2_probe',
+        'category'    => 1,
+        'duration'    => 'Session',
+        'domain'      => 'example.com',
+        'description' => '<strong>Probe</strong> for P2-A regression.',
+      ) );
+      // Bust the per-language cookie-list cache so the next render reflects the probe.
+      wp_cache_delete( 'faz_cookie_policy_list_en', 'faz_cookie_policy' );
+      wp_cache_flush();
+      $rendered = do_shortcode( '[faz_cookie_policy_v2]' );
+      echo $rendered;
+    `);
+
+    // Regression assertions: no invalid nesting patterns introduced by the
+    // line-based markdown parser around the cookie list.
+    expect(html, 'closing </dl> must not be followed by a stray </p>').not.toMatch(/<\/dl>\s*<\/p>/);
+    expect(html, 'closing </dt> must not be inside a <p>').not.toMatch(/<p>[^<]*<\/dt>/);
+    expect(html, 'closing </dd> must not be inside a <p>').not.toMatch(/<p>[^<]*<\/dd>/);
+    expect(html, '<small> must not be wrapped in its own <p>').not.toMatch(/<p>\s*<small>/);
+    // Positive checks: the structural HTML did make it through unmangled.
+    expect(html, 'a <dl> block is present').toMatch(/<dl[\s>]/);
+    expect(html, '<dt> / <dd> still close cleanly').toMatch(/<\/dd>\s*<\/dl>/);
+
+    // Probe cleanup.
+    wpEval(`
+      global $wpdb;
+      $wpdb->delete( $wpdb->prefix . 'faz_cookies', array( 'name' => 'faz_p2_probe' ) );
+      wp_cache_delete( 'faz_cookie_policy_list_en', 'faz_cookie_policy' );
+    `);
+  });
+
+  test('8. P2-B regression: policy_version_hash is stable when only LAST_UPDATED_DATE drifts', () => {
+    // Repro of the CodeRabbit P2 finding: LAST_UPDATED_DATE is computed via
+    // current_time() and is display-only. It must NOT influence the hash,
+    // otherwise the data-faz-policy-version drifts daily and produces false
+    // material-change signals downstream.
+    const out = wpEval(`
+      $template_path = ''; // empty path → deterministic 'no-template' sha
+      $base = array(
+        'COMPANY_NAME'      => 'Acme',
+        'JURISDICTION_NAME' => 'GDPR',
+        'COOKIE_CATEGORIES' => '<dl><dt>x</dt><dd>y</dd></dl>',
+        'LAST_UPDATED_DATE' => '2026-01-01',
+      );
+      $alt = $base;
+      $alt['LAST_UPDATED_DATE'] = '2027-12-31';
+      $h1 = \\FazCookie\\Admin\\Modules\\Cookie_Policy_Generator\\Includes\\Generator::policy_version_hash( $template_path, $base );
+      $h2 = \\FazCookie\\Admin\\Modules\\Cookie_Policy_Generator\\Includes\\Generator::policy_version_hash( $template_path, $alt );
+      // Sanity: a real material change MUST shift the hash.
+      $material = $base;
+      $material['COMPANY_NAME'] = 'Changed Inc.';
+      $h3 = \\FazCookie\\Admin\\Modules\\Cookie_Policy_Generator\\Includes\\Generator::policy_version_hash( $template_path, $material );
+      echo wp_json_encode( array(
+        'stable_same_day'  => $h1,
+        'stable_year_diff' => $h2,
+        'material_change'  => $h3,
+      ) );
+    `).trim();
+    const data = JSON.parse(out) as { stable_same_day: string; stable_year_diff: string; material_change: string };
+    expect(data.stable_year_diff, 'hash MUST be identical when only LAST_UPDATED_DATE drifts').toBe(data.stable_same_day);
+    expect(data.material_change, 'hash MUST change on real content edits (COMPANY_NAME)').not.toBe(data.stable_same_day);
   });
 });
