@@ -1232,8 +1232,42 @@ function _fazLoopFocus() {
     _fazAttachFocusLoop(firstElementPopup, lastElementPopup, true);
     _fazAttachFocusLoop(lastElementPopup, firstElementPopup);
 }
+// Tracks the currently-attached focus-loop handler per (element, isReverse)
+// pair so repeated _fazLoopFocus() calls (legitimate dynamic re-init OR
+// test fixture injection) REPLACE the previous listener instead of stacking.
+// Without this cleanup, listeners accumulate; addEventListener fires them in
+// registration order, so the most-recently registered (most "polluted")
+// handler wins on Tab, and its closed-over targetElement may point to a
+// stale DOM node — the visible symptom in the focus-trap test under full
+// suite load (issue #124).
+const _fazFocusLoopHandlers = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
 function _fazAttachFocusLoop(element, targetElement, isReverse = false) {
     if (!element || !targetElement) return;
+    const slot = isReverse ? '__faz_focus_loop_reverse' : '__faz_focus_loop_forward';
+    if (_fazFocusLoopHandlers) {
+        let perElement = _fazFocusLoopHandlers.get(element);
+        if (!perElement) {
+            perElement = {};
+            _fazFocusLoopHandlers.set(element, perElement);
+        }
+        if (perElement[slot]) {
+            element.removeEventListener("keydown", perElement[slot]);
+        }
+        const handler = (event) => {
+            if (
+                event.key !== 'Tab' ||
+                (isReverse && !event.shiftKey) ||
+                (!isReverse && event.shiftKey)
+            )
+                return;
+            event.preventDefault();
+            targetElement.focus();
+        };
+        element.addEventListener("keydown", handler);
+        perElement[slot] = handler;
+        return;
+    }
+    // Fallback path (no WeakMap support — extremely old environments).
     element.addEventListener("keydown", (event) => {
         if (
             event.key !== 'Tab' ||
