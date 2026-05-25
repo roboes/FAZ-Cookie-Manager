@@ -4,7 +4,7 @@ Donate link: https://buymeacoffee.com/fabiodalez
 Tags: cookie, gdpr, ccpa, consent, privacy
 Requires at least: 5.0
 Tested up to: 7.0
-Stable tag: 1.16.0
+Stable tag: 1.16.1
 Requires PHP: 7.4
 License: GPL-3.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -324,6 +324,9 @@ The full changelog (every release back to 1.0.0) lives at:
 https://github.com/fabiodalez-dev/FAZ-Cookie-Manager/blob/main/CHANGELOG.md
 and on the GitHub Releases page:
 https://github.com/fabiodalez-dev/FAZ-Cookie-Manager/releases
+
+= 1.16.1 =
+* Fix: Cookie Policy generator (`[faz_cookie_policy_complete]`) was rendering literal JSON like `{"en":"Functional"}` for category names, category descriptions, cookie descriptions, and cookie durations on multilingual installs. Root cause: `build_cookie_list_html()` bypassed the model getters with a JOIN'd raw `SELECT *` and called `esc_html()` directly on i18n-encoded JSON columns. Added a private `decode_i18n_text()` helper that mirrors `Cookie_Table_Shortcode::localize_category_name()` — pick active language, fall back to `en`, then to the first non-empty entry. Description columns now flow through `wp_kses_post()` so the inline `<p>` tags they may contain survive. Reported by James in the wp.org support thread "Performance Impact???".
 
 = 1.16.0 =
 * Feature: Cookie Policy Generator (Spec 002). New admin tab "Cookie Policy" + new `[faz_cookie_policy_complete]` shortcode renders a jurisdiction-aware, multi-language Cookie Policy from a template scaffold filled with the admin's company data. Covers GDPR (EU/EEA/UK), CCPA/CPRA (California), LGPD (Brazil) in six languages (en, it, fr, de, es, pt-BR) — 18 scaffolds total. Auto-populated cookie inventory pulled live from `wp_faz_cookies` so additions via the scanner reflect at the next render. Non-removable disclaimer at the bottom of every generated policy makes explicit that templates are starting points, not legal advice.

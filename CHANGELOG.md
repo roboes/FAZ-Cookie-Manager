@@ -2,6 +2,12 @@
 
 All notable changes to FAZ Cookie Manager are documented in this file.
 
+## [1.16.1] — 2026-05-25
+
+### Fixed
+
+- **Cookie Policy generator rendering literal JSON** on multilingual installs (wp.org support thread "Performance Impact???"). `[faz_cookie_policy_complete]` was printing `{"en":"Functional"}` for category names and `{"en":"<p>…<\/p>"}` for descriptions and durations. Root cause: `Cookie_Policy_Generator\Renderer::build_cookie_list_html()` bypassed the model getters with a JOIN'd `SELECT *` and called `esc_html()` directly on the i18n JSON columns (`wp_faz_cookie_categories.name`, `wp_faz_cookie_categories.description`, `wp_faz_cookies.description`, `wp_faz_cookies.duration`). Added a private `decode_i18n_text()` helper that mirrors the decode logic of the long-standing `Cookie_Table_Shortcode::localize_category_name()` — pick the active language, fall back to `en`, then to the first non-empty entry. Description fields now flow through `wp_kses_post()` so the inline `<p>` tags they may legitimately contain survive instead of being escaped to text. Audit confirmed no other call sites had the same bug: the controllers (`Cookie_Controller::prepare_item`, `Category_Controller::prepare_item`) decode via `prepare_json()`, the model getters (`Store::get_description`, `Cookie_Categories::get_name`, `Cookie::get_duration`) decode via `normalize_multilingual_data()`, and the WP-CLI / settings import/export paths decode explicitly with `json_decode`.
+
 ## [1.16.0] — 2026-05-20
 
 ### Added

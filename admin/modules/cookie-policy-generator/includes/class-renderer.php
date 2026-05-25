@@ -350,7 +350,17 @@ class Renderer {
 		} else {
 			$grouped = array();
 			foreach ( $rows as $row ) {
-				$cat = (string) ( $row['category_name'] ?? 'Uncategorized' );
+				// Categories' `name` and `description` columns store i18n
+				// JSON objects shaped like {"en":"Functional","it":"Funzionale"}
+				// — same shape as cookies' `description` / `duration` columns
+				// (the legacy [faz_cookie_table] decodes them via
+				// localize_category_name() in includes/class-cookie-table-shortcode.php).
+				// We must decode here too, otherwise the rendered policy
+				// shows literal JSON like <h3>{"en":"Functional"}</h3>
+				// (reported by James in the wp.org support thread
+				// "Performance Impact???" on 1.16.0). Use $lang as the
+				// preferred key, fall back to 'en' then first non-empty.
+				$cat = self::decode_i18n_text( $row['category_name'] ?? '', $lang ) ?: 'Uncategorized';
 				$grouped[ $cat ][] = $row;
 			}
 
@@ -358,15 +368,23 @@ class Renderer {
 			foreach ( $grouped as $cat_name => $items ) {
 				$parts[] = '<section class="faz-cookie-policy-category">';
 				$parts[] = '<h3>' . esc_html( $cat_name ) . '</h3>';
-				if ( ! empty( $items[0]['category_description'] ) ) {
-					$parts[] = '<p>' . esc_html( $items[0]['category_description'] ) . '</p>';
+				$cat_desc = self::decode_i18n_text( $items[0]['category_description'] ?? '', $lang );
+				if ( '' !== $cat_desc ) {
+					// Category description may contain HTML (admin sometimes
+					// stores <p>…</p> inside the JSON value); wp_kses_post at
+					// the renderer boundary will filter it. Use wp_kses_post
+					// here too so well-formed HTML survives without escaping.
+					$parts[] = wp_kses_post( $cat_desc );
 				}
 				$parts[] = '<dl>';
 				foreach ( $items as $row ) {
+					// Cookie `name` and `domain` are plain identifiers (not
+					// translated). Cookie `duration` and `description` ARE
+					// i18n JSON objects on the same schema as categories.
 					$name     = (string) ( $row['cookie_name'] ?? '' );
 					$domain   = (string) ( $row['cookie_domain'] ?? '' );
-					$duration = (string) ( $row['cookie_duration'] ?? '' );
-					$desc     = (string) ( $row['cookie_description'] ?? '' );
+					$duration = self::decode_i18n_text( $row['cookie_duration'] ?? '', $lang );
+					$desc     = self::decode_i18n_text( $row['cookie_description'] ?? '', $lang );
 					$parts[]  = '<dt><code>' . esc_html( $name ) . '</code>';
 					if ( '' !== $domain ) {
 						$parts[] = ' <small>(' . esc_html( $domain ) . ')</small>';
@@ -376,7 +394,8 @@ class Renderer {
 					if ( '' !== $duration ) {
 						$parts[] = '<strong>' . esc_html__( 'Duration:', 'faz-cookie-manager' ) . '</strong> ' . esc_html( $duration ) . ' &middot; ';
 					}
-					$parts[] = esc_html( $desc );
+					// Cookie description may contain HTML inside the JSON value.
+					$parts[] = wp_kses_post( $desc );
 					$parts[] = '</dd>';
 				}
 				$parts[] = '</dl>';
@@ -388,6 +407,43 @@ class Renderer {
 		wp_cache_set( $cache_key, $html, 'faz_cookie_policy', 5 * MINUTE_IN_SECONDS );
 		self::$cookie_list_cache[ $cache_key ] = $html;
 		return $html;
+	}
+
+	/**
+	 * Decode an i18n JSON value (`{"en":"…","it":"…"}`) into the active
+	 * language string. Plain strings pass through unchanged.
+	 *
+	 * Categories' `name`/`description` and cookies' `description`/`duration`
+	 * are stored as JSON objects keyed by language code; mirror the decode
+	 * logic of Cookie_Table_Shortcode::localize_category_name() so the
+	 * generated policy doesn't leak raw JSON (wp.org topic
+	 * "Performance Impact???", 1.16.0).
+	 *
+	 * Fallback chain: $lang → 'en' → first non-empty entry.
+	 */
+	private static function decode_i18n_text( $value, $lang ) {
+		if ( ! is_string( $value ) || '' === $value ) {
+			return '';
+		}
+		if ( '{' !== $value[0] ) {
+			return $value;
+		}
+		$decoded = json_decode( $value, true );
+		if ( ! is_array( $decoded ) ) {
+			return $value;
+		}
+		if ( is_string( $lang ) && '' !== $lang && isset( $decoded[ $lang ] ) && is_string( $decoded[ $lang ] ) && '' !== $decoded[ $lang ] ) {
+			return $decoded[ $lang ];
+		}
+		if ( isset( $decoded['en'] ) && is_string( $decoded['en'] ) && '' !== $decoded['en'] ) {
+			return $decoded['en'];
+		}
+		foreach ( $decoded as $v ) {
+			if ( is_string( $v ) && '' !== $v ) {
+				return $v;
+			}
+		}
+		return '';
 	}
 
 	/**

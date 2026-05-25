@@ -563,6 +563,9 @@ Value format: `consentid:{base64},consent:yes,action:yes,necessary:yes,functiona
 
 Only the most recent release is listed here. The complete history is in [CHANGELOG.md](CHANGELOG.md) (Keep-a-Changelog format) and on the [GitHub Releases page](https://github.com/fabiodalez-dev/FAZ-Cookie-Manager/releases).
 
+### 1.16.1 — 2026-05-25
+- **Fix**: `[faz_cookie_policy_complete]` was rendering literal JSON like `{"en":"Functional"}` for category names and descriptions on multilingual installs. `Renderer::build_cookie_list_html()` now decodes the i18n JSON columns via a new private `decode_i18n_text()` helper (active language → `en` → first non-empty entry). Description fields flow through `wp_kses_post()` so the inline `<p>` they may contain survives. Audit of every other call site that reads `wp_faz_cookies` / `wp_faz_cookie_categories` confirmed no other leaks: controllers decode via `prepare_json()`, model getters via `normalize_multilingual_data()`, and WP-CLI / settings import/export decode explicitly. Reported by James on the wp.org support thread "Performance Impact???".
+
 ### 1.16.0 — 2026-05-20
 - **Feature**: Cookie Policy Generator (spec 002). New admin tab "Cookie Policy" + new `[faz_cookie_policy_complete]` shortcode rendering a jurisdiction-aware, multi-language Cookie Policy from a template scaffold filled with the admin's company data (name, address, DPO, third-party services, retention). Covers GDPR (EU/EEA/UK), CCPA/CPRA (California) and LGPD (Brazil) in 6 languages (en, it, fr, de, es, pt-BR) — 18 scaffolds total.
 - **Feature**: Auto-populated cookie list inside the rendered policy pulls live from `wp_faz_cookies` so additions via the scanner show up at the next render (5-min `wp_cache` TTL).
