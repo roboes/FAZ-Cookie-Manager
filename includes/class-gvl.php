@@ -306,8 +306,8 @@ class Gvl {
 	 *   1. Read every distinct cookie domain stored in wp_faz_cookies.
 	 *   2. Match each domain against the curated domain → vendor-ID
 	 *      map shipped at admin/modules/gvl/data/domain-to-vendor.json.
-	 *      Matching is "domain suffix-aware" — `subdomain.facebook.com`
-	 *      matches the `facebook.com` entry without requiring an exact
+	 *      Matching is "domain suffix-aware" — `subdomain.linkedin.com`
+	 *      matches the `linkedin.com` entry without requiring an exact
 	 *      string equality (cookies frequently live on a subdomain).
 	 *   3. Intersect the resulting vendor IDs with the IDs that the
 	 *      downloaded GVL actually carries. Vendors that have left the
@@ -359,9 +359,9 @@ class Gvl {
 		}
 
 		// Cache lookup keys for the suffix scan. The map keys are
-		// `facebook.com`, `googletagmanager.com` etc.; the cookie
+		// `linkedin.com`, `googletagmanager.com` etc.; the cookie
 		// `domain` column tends to carry the same plus optional leading
-		// dot (`.facebook.com`) or subdomain (`m.facebook.com`).
+		// dot (`.linkedin.com`) or subdomain (`m.linkedin.com`).
 		$map_keys = array_keys( $map );
 		$matched  = array();
 		foreach ( $domains as $raw_domain ) {
@@ -376,10 +376,10 @@ class Gvl {
 				}
 				continue;
 			}
-			// Suffix match: cookie domain `m.facebook.com` against map key `facebook.com`.
+			// Suffix match: cookie domain `m.linkedin.com` against map key `linkedin.com`.
 			// Guard against false positives by requiring a dot before the
-			// candidate suffix — `notfacebook.com` must NOT match
-			// `facebook.com`. The "." prefix achieves that.
+			// candidate suffix — `notlinkedin.com` must NOT match
+			// `linkedin.com`. The "." prefix achieves that.
 			foreach ( $map_keys as $key ) {
 				if ( substr( $d, -( strlen( $key ) + 1 ) ) === '.' . $key ) {
 					foreach ( (array) $map[ $key ] as $vid ) {

@@ -13,8 +13,8 @@
  *      (admin/modules/gvl/data/domain-to-vendor.json) that ALSO exist
  *      in the live GVL. Stale / not-in-GVL IDs are filtered out
  *      silently.
- *   3. Suffix matching is exact-domain only (`.notfacebook.com` MUST
- *      NOT match `facebook.com`).
+ *   3. Suffix matching is exact-domain only (`.notlinkedin.com` MUST
+ *      NOT match `linkedin.com`).
  *   4. `newly_suggested` excludes IDs already in
  *      faz_gvl_selected_vendors; `already_selected` mirrors them.
  *   5. Read-only — calling /suggest never mutates
@@ -144,18 +144,20 @@ test.describe('GVL vendor auto-detect from cookies', () => {
     expect([...r.vendor_ids].sort((a, b) => a - b)).toEqual(r.vendor_ids);
   });
 
-  test('3. Suffix match guard: ".notfacebook.com" does NOT trigger a Facebook match', async () => {
-    // Plant a domain that contains "facebook.com" as a non-suffix substring.
+  test('3. Suffix match guard: ".notlinkedin.com" does NOT trigger a LinkedIn match', async () => {
+    // Plant a domain that contains "linkedin.com" as a non-suffix substring.
     // The Gvl::suggest_vendor_ids_from_scanned_cookies() helper guards
     // against this with a "." prefix check on the suffix candidate.
+    // linkedin.com IS in domain-to-vendor.json (mapped to vendor 804), so
+    // this is a true adversarial input: without the dot-prefix guard, a
+    // naive substring/endsWith check on `notlinkedin.com` would match
+    // `linkedin.com` and falsely surface vendor 804. The assertion that
+    // vendor_ids === [] is therefore exercising the guard, not passing
+    // trivially because the suffix is absent from the map.
     plantCookies([
-      { name: 'auto_evil', slug: 'auto-detect-evil', domain: '.notfacebook.com' },
+      { name: 'auto_evil', slug: 'auto-detect-evil', domain: '.notlinkedin.com' },
     ]);
     const r = await suggest();
-    // facebook.com isn't in the mapping anyway (Meta isn't a TCF vendor),
-    // but the assertion is still meaningful: the helper must NOT match
-    // ".notfacebook.com" against any candidate suffix in the map. So
-    // the response should have zero vendor_ids for THIS cookie alone.
     expect(r.vendor_ids).toEqual([]);
   });
 

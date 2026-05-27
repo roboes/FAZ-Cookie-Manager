@@ -362,6 +362,13 @@
 			// committing the change.
 			suggested.forEach(function (id) { selectedVendors[id] = true; });
 
+			// Refresh the visible "Selected: N vendors" counter immediately
+			// after mutating selectedVendors. loadVendors()/renderVendors()
+			// only redraw the table — they don't touch #faz-gvl-selected-count,
+			// so without this call the counter stays stale until the admin
+			// manually toggles a checkbox or clicks Select-All.
+			updateSelectedCount();
+
 			// Re-render the currently visible vendor table so the new
 			// checkboxes appear ticked. The set we just merged into may
 			// include vendors NOT on the current page (filtered by
