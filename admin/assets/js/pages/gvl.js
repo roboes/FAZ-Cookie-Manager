@@ -5,12 +5,14 @@
 	'use strict';
 
 	// i18n helper — looks up fazConfig.i18n.<key> with dot-notation, falls back to provided string.
+	// `key` is a hard-coded string from this file (e.g. 'gvl.savedCount'),
+	// never reachable from user input — the computed-key walk is safe.
 	function __(key, fallback) {
 		var parts = key.split('.');
 		var obj = (window.fazConfig && window.fazConfig.i18n) || {};
 		for (var i = 0; i < parts.length; i++) {
 			if (!obj || typeof obj !== 'object') { return fallback; }
-			obj = obj[parts[i]];
+			obj = obj[parts[i]]; // nosemgrep
 		}
 		return typeof obj === 'string' ? obj : fallback;
 	}
@@ -31,6 +33,10 @@
 		document.getElementById('faz-gvl-download').addEventListener('click', downloadGvl);
 		document.getElementById('faz-gvl-save').addEventListener('click', saveSelection);
 		document.getElementById('faz-gvl-select-all').addEventListener('change', toggleSelectAll);
+		var autoBtn = document.getElementById('faz-gvl-auto-detect');
+		if (autoBtn) {
+			autoBtn.addEventListener('click', autoDetectFromCookies);
+		}
 
 		var searchInput = document.getElementById('faz-gvl-search');
 		searchInput.addEventListener('input', function () {
@@ -308,6 +314,67 @@
 		}).catch(function () {
 			FAZ.btnLoading(btn, false);
 			FAZ.notify(__('gvl.selectionFailed', 'Failed to save selection.'), 'error');
+		});
+	}
+
+	function autoDetectFromCookies() {
+		var btn    = document.getElementById('faz-gvl-auto-detect');
+		var status = document.getElementById('faz-gvl-auto-detect-status');
+		FAZ.btnLoading(btn, true);
+		if (status) { status.textContent = ''; }
+
+		FAZ.get('gvl/suggest').then(function (data) {
+			FAZ.btnLoading(btn, false);
+			if (!data || data.gvl_available !== true) {
+				// GVL has never been downloaded — nudge the admin towards
+				// the Update button at the top of the page rather than
+				// silently doing nothing.
+				FAZ.notify(__('gvl.autoDetectNoGvl', 'Update the Global Vendor List first, then try Auto-detect again.'), 'warning');
+				return;
+			}
+			var suggested = (data.vendor_ids || []).map(Number).filter(function (n) { return n > 0; });
+			var added     = (data.newly_suggested || []).map(Number);
+			var already   = (data.already_selected || []).map(Number);
+
+			if (suggested.length === 0) {
+				FAZ.notify(__('gvl.autoDetectNoMatch', 'No matching ad-tech vendors were found in the scanned cookies. Run the cookie scanner first if you have not.'), 'info');
+				if (status) { status.textContent = ''; }
+				return;
+			}
+
+			// Merge into the in-memory selection map. Save is deferred —
+			// the admin still has to click "Save Selection" to persist.
+			// This way the auto-detection is auditable: they SEE which
+			// boxes got ticked and can untick any false positive before
+			// committing the change.
+			suggested.forEach(function (id) { selectedVendors[id] = true; });
+
+			// Re-render the currently visible vendor table so the new
+			// checkboxes appear ticked. The set we just merged into may
+			// include vendors NOT on the current page (filtered by
+			// search/purpose) — those still get persisted on Save.
+			loadVendors();
+
+			// Inline feedback string. Tone tries to make the deferred-save
+			// nature obvious so the admin doesn't think the change is
+			// already live.
+			var msg;
+			if (added.length === 0) {
+				msg = __('gvl.autoDetectAllAlready', 'All %d auto-detected vendor(s) were already in your selection.')
+					.replace('%d', suggested.length);
+			} else if (already.length === 0) {
+				msg = __('gvl.autoDetectAdded', 'Pre-ticked %d vendor(s) from cookie scan. Click Save Selection to apply.')
+					.replace('%d', added.length);
+			} else {
+				msg = __('gvl.autoDetectMixed', 'Pre-ticked %d new vendor(s), %d were already selected. Click Save Selection to apply.')
+					.replace('%d', added.length)
+					.replace('%d', already.length);
+			}
+			if (status) { status.textContent = msg; }
+			FAZ.notify(msg, 'success');
+		}).catch(function () {
+			FAZ.btnLoading(btn, false);
+			FAZ.notify(__('gvl.autoDetectFailed', 'Auto-detect failed. Check the cookie scanner and try again.'), 'error');
 		});
 	}
 
