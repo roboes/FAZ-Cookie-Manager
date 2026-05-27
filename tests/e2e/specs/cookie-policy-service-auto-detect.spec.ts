@@ -543,6 +543,99 @@ test.describe('Cookie Policy third-party auto-detect from cookies', () => {
     await expect(adminPage.locator('#cp-services-auto-detect')).toBeEnabled({ timeout: 5_000 });
   });
 
+  test('26. Pre-existing admin selection is preserved: 5 non-scannered services stay ticked when Auto-detect adds a new one and Save is clicked', async () => {
+    // Scenario: an admin already configured Third-party services manually
+    // before this feature shipped — five services with no cookie footprint
+    // on the live site (auth0, square, akismet, pardot, fcm). Then the
+    // scanner observes a new domain (googletagmanager.com → gtm). Auto-
+    // detect should propose ONLY the new one and SAVE must persist all
+    // six together — pre-existing selections never get dropped.
+    //
+    // This is the composition test #5 + #10 + #22 implies but doesn't
+    // assert end-to-end. Migration story for 1.16.4 hinges on it.
+    const preExisting = ['auth0', 'square', 'akismet', 'pardot', 'fcm'];
+    // JSON-bridge the array into PHP via json_decode — keeps the fixture
+    // legible even as the seed list grows.
+    wpEval(
+      `$d = (array) get_option('faz_cookie_policy_data', array()); $d['third_party_services'] = json_decode(${JSON.stringify(JSON.stringify(preExisting))}, true); update_option('faz_cookie_policy_data', $d, false);`,
+    );
+    // Sanity: option was seeded with exactly the five entries.
+    const seeded = JSON.parse(
+      wpEval(
+        `$d = (array) get_option('faz_cookie_policy_data', array()); echo wp_json_encode($d['third_party_services'] ?? array());`,
+      ).trim(),
+    );
+    expect(seeded.sort()).toEqual([...preExisting].sort());
+
+    // Plant a single discoverable cookie the curated map will resolve.
+    plantCookies([
+      { name: 'cp_gtm', slug: 'cp-auto-mig-gtm', domain: '.googletagmanager.com' },
+    ]);
+
+    // Reload so the admin page reads the freshly-seeded option AND the
+    // freshly-planted scanner row.
+    await adminPage.reload({ waitUntil: 'domcontentloaded' });
+    await adminPage.locator('summary', { hasText: 'Third-party services' }).click();
+    await adminPage.waitForSelector('#cp-services-list input[data-service-id="auth0"]', { timeout: 5_000 });
+
+    // All five pre-existing checkboxes must be ticked at load time
+    // (writeForm() runs after the parallel /settings+/detected-services
+    // fetches resolve — the second renderServicesList() pass repaints
+    // the labels with badges, then writeForm restores the checked state).
+    for (const sid of preExisting) {
+      await expect(
+        adminPage.locator(`#cp-services-list input[data-service-id="${sid}"]`),
+      ).toBeChecked({ timeout: 10_000 });
+    }
+    // GTM must NOT be ticked yet — the scanner saw the cookie but the
+    // admin never accepted the suggestion.
+    await expect(adminPage.locator('#cp-services-list input[data-service-id="gtm"]')).not.toBeChecked();
+
+    // Click Auto-detect. Status should say "1 new + 0 already selected"
+    // — GTM is genuinely new, none of the five pre-existing services
+    // have a cookie domain mapped to them in domain-to-service.json.
+    await adminPage.click('#cp-services-auto-detect');
+    await expect(adminPage.locator('#cp-services-auto-detect-status')).toContainText(
+      /1 new \+ 0 already selected\. Click Save to commit\./i,
+      { timeout: 10_000 },
+    );
+
+    // All five pre-existing checkboxes STILL ticked — auto-detect must
+    // not destick anything. GTM now ticked.
+    for (const sid of preExisting) {
+      await expect(
+        adminPage.locator(`#cp-services-list input[data-service-id="${sid}"]`),
+      ).toBeChecked();
+    }
+    await expect(adminPage.locator('#cp-services-list input[data-service-id="gtm"]')).toBeChecked();
+
+    // Pre-save invariant: the option still holds ONLY the five originals
+    // — deferred-save means the DOM tick is ephemeral until submit.
+    const preSave = JSON.parse(
+      wpEval(
+        `$d = (array) get_option('faz_cookie_policy_data', array()); echo wp_json_encode($d['third_party_services'] ?? array());`,
+      ).trim(),
+    );
+    expect(preSave.sort()).toEqual([...preExisting].sort());
+
+    // Submit the form.
+    await adminPage.click('button[type=submit]', { timeout: 5_000 });
+    await expect(adminPage.locator('#cp-save-status')).toContainText(/Saved/i, { timeout: 10_000 });
+
+    // Post-save: option contains exactly the six expected service IDs
+    // — the five originals (preserved) plus GTM (newly accepted).
+    const persisted = JSON.parse(
+      wpEval(
+        `$d = (array) get_option('faz_cookie_policy_data', array()); echo wp_json_encode($d['third_party_services'] ?? array());`,
+      ).trim(),
+    );
+    expect(persisted, `expected pre-existing selection preserved + gtm added; got: ${persisted.join(', ')}`).toHaveLength(6);
+    expect(persisted).toEqual(expect.arrayContaining([...preExisting, 'gtm']));
+    // No phantom entries — array length matches the expected set exactly.
+    const phantom = persisted.filter((s: string) => ![...preExisting, 'gtm'].includes(s));
+    expect(phantom).toEqual([]);
+  });
+
   test('25. Map loader caches the file read — repeated suggest calls produce identical responses without per-call I/O', async () => {
     // We can't directly observe disk I/O from E2E, but we CAN assert
     // that two back-to-back /suggest-services calls return identical
