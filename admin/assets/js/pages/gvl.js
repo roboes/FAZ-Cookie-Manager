@@ -364,8 +364,12 @@
 			if (!data || data.gvl_available !== true) {
 				// GVL has never been downloaded — nudge the admin towards
 				// the Update button at the top of the page rather than
-				// silently doing nothing.
-				FAZ.notify(__('gvl.autoDetectNoGvl', 'Update the Global Vendor List first, then try Auto-detect again.'), 'warning');
+				// silently doing nothing. Write the SAME message to the
+				// persistent status span so a faded toast still leaves a
+				// trace — parity with cookie-policy.js (F007).
+				var noGvlMsg = __('gvl.autoDetectNoGvl', 'Update the Global Vendor List first, then try Auto-detect again.');
+				if (status) { status.textContent = noGvlMsg; }
+				FAZ.notify(noGvlMsg, 'warning');
 				return;
 			}
 			var suggested = (data.vendor_ids || []).map(Number).filter(function (n) { return n > 0; });
@@ -373,8 +377,11 @@
 			var already   = (data.already_selected || []).map(Number);
 
 			if (suggested.length === 0) {
-				FAZ.notify(__('gvl.autoDetectNoMatch', 'No matching ad-tech vendors were found in the scanned cookies. Run the cookie scanner first if you have not.'), 'info');
-				if (status) { status.textContent = ''; }
+				// Soft info string in the persistent span instead of going
+				// blank — keeps a trace after the toast fades (F007).
+				var noMatchMsg = __('gvl.autoDetectNoMatch', 'No matching ad-tech vendors were found in the scanned cookies. Run the cookie scanner first if you have not.');
+				if (status) { status.textContent = noMatchMsg; }
+				FAZ.notify(noMatchMsg, 'info');
 				return;
 			}
 
@@ -429,7 +436,11 @@
 		}).catch(function () {
 			if (requestId !== autoDetectRequestId) { return; }
 			FAZ.btnLoading(btn, false);
-			FAZ.notify(__('gvl.autoDetectFailed', 'Auto-detect failed. Check the cookie scanner and try again.'), 'error');
+			// Persist the failure in the status span too — the toast
+			// auto-dismisses but the admin still needs a trace (F007).
+			var failedMsg = __('gvl.autoDetectFailed', 'Auto-detect failed. Check the cookie scanner and try again.');
+			if (status) { status.textContent = failedMsg; }
+			FAZ.notify(failedMsg, 'error');
 		});
 	}
 
