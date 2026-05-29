@@ -395,10 +395,17 @@ class Gvl {
 
 		// Filter out IDs that the currently-downloaded GVL doesn't carry
 		// any longer (vendor de-registered, GVL never downloaded yet).
+		// When the GVL has NOT been downloaded there is no live vendor list
+		// to validate against, so we cannot certify any of the matched IDs.
+		// Return an empty array rather than the unvalidated `$matched` set:
+		// the documented response shape (vendor_ids + gvl_available=false)
+		// must never carry stale/unvalidated IDs to its consumers.
 		$gvl_data = $this->get_data();
 		if ( $gvl_data && isset( $gvl_data['vendors'] ) && is_array( $gvl_data['vendors'] ) ) {
 			$live_ids = array_map( 'intval', array_keys( $gvl_data['vendors'] ) );
 			$matched  = array_intersect_key( $matched, array_flip( $live_ids ) );
+		} else {
+			return array();
 		}
 
 		$ids = array_keys( $matched );

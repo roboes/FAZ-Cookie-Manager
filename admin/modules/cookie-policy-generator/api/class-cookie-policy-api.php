@@ -471,7 +471,7 @@ class Cookie_Policy_Api {
 	 *
 	 * Read-only — never mutates the saved selection. The admin reviews
 	 * the pre-ticked checkboxes in the Third-party services tab and
-	 * commits via Save Selection (deferred-save UX).
+	 * commits via Save (deferred-save UX).
 	 *
 	 * @param WP_REST_Request $request
 	 * @return WP_REST_Response
@@ -486,6 +486,11 @@ class Cookie_Policy_Api {
 
 		$already_selected = array_values( array_intersect( $matched, $selected ) );
 		$newly_suggested  = array_values( array_diff( $matched, $selected ) );
+		// Sort both partitions for stable, deterministic output — matches the
+		// GVL sibling \FazCookie\Admin\Modules\Gvl\Api::suggest_from_cookies(),
+		// which sorts already_selected and newly_suggested the same way.
+		sort( $already_selected );
+		sort( $newly_suggested );
 
 		return new WP_REST_Response( array(
 			'service_ids'      => $matched,
@@ -530,9 +535,7 @@ class Cookie_Policy_Api {
 	private function suggest_services_from_scanned_cookies() {
 		global $wpdb;
 		$table = $wpdb->prefix . 'faz_cookies';
-		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-		$exists = (string) $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) );
-		if ( $exists !== $table ) {
+		if ( ! self::table_exists( $table ) ) {
 			return array();
 		}
 		// Scanner-discovered rows only. Manually-added cookies (discovered=0)
@@ -605,14 +608,35 @@ class Cookie_Policy_Api {
 	private function cookies_table_has_discovered_rows() {
 		global $wpdb;
 		$table = $wpdb->prefix . 'faz_cookies';
-		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-		$exists = (string) $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) );
-		if ( $exists !== $table ) {
+		if ( ! self::table_exists( $table ) ) {
 			return false;
 		}
 		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		$count = (int) $wpdb->get_var( "SELECT COUNT(*) FROM `{$table}` WHERE discovered = 1" );
 		return $count > 0;
+	}
+
+	/**
+	 * SHOW TABLES LIKE existence probe, cached per request keyed by table
+	 * name. Shared by suggest_services_from_scanned_cookies() and
+	 * cookies_table_has_discovered_rows() so the suggest + detected pair on
+	 * the same admin page does not repeat the round-trip. The two callers
+	 * keep their own SELECT/COUNT queries (different WHERE clauses drive
+	 * distinct scan_available semantics); only the existence check is shared.
+	 *
+	 * @param string $table Fully-qualified table name (with prefix).
+	 * @return bool
+	 */
+	private static function table_exists( $table ) {
+		global $wpdb;
+		static $cache = array();
+		if ( isset( $cache[ $table ] ) ) {
+			return $cache[ $table ];
+		}
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$exists = (string) $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) );
+		$cache[ $table ] = ( $exists === $table );
+		return $cache[ $table ];
 	}
 
 	/**

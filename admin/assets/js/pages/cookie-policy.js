@@ -388,11 +388,22 @@
 		}
 	}
 
+	// Closure-level timer handle for the auto-detect status auto-clear.
+	// Cleared at the start of every setAutoDetectStatus() call so a stale
+	// timer scheduled by a previous 'ok' message can never blank a newer
+	// scanning/error message that was painted afterwards.
+	var autoDetectStatusTimer = null;
 	function setAutoDetectStatus(msg, kind) {
 		var el = document.getElementById('cp-services-auto-detect-status');
 		if (!el) { return; }
+		if (autoDetectStatusTimer) { clearTimeout(autoDetectStatusTimer); autoDetectStatusTimer = null; }
 		el.textContent = msg || '';
 		el.style.color = kind === 'error' ? '#c4302b' : (kind === 'ok' ? '#1d7d28' : 'var(--faz-text-secondary, #555)');
+		// Mirror setStatus(): auto-clear the success message after 3s.
+		// 'error' and scanning ('') states stay persistent (no timer).
+		if (msg && kind === 'ok') {
+			autoDetectStatusTimer = setTimeout(function () { el.textContent = ''; autoDetectStatusTimer = null; }, 3000);
+		}
 	}
 
 	function autoDetectServices() {
@@ -405,13 +416,23 @@
 		// result. Mirrors the GVL admin page's pattern (PR #127).
 		autoDetectRequestId += 1;
 		var myReqId = autoDetectRequestId;
-		btn.disabled = true;
+		// Spinner + disabled state via the shared FAZ.btnLoading helper
+		// (parity with gvl.js). Read-only scan, so pass the scan-specific
+		// label instead of letting it default to "Saving...". btnLoading
+		// stashes the original button text in dataset.origText and restores
+		// it on the false call.
+		var FAZ = window.FAZ;
+		if (FAZ && typeof FAZ.btnLoading === 'function') {
+			FAZ.btnLoading(btn, true, t( 'svcAutoDetectScanning', 'Scanning cookie inventory…' ));
+		} else {
+			btn.disabled = true;
+		}
 		setAutoDetectStatus(t( 'svcAutoDetectScanning', 'Scanning cookie inventory…' ), '');
 
 		api('GET', 'suggest-services')
 			.then(function (resp) {
 				if (myReqId !== autoDetectRequestId) { return; } // stale, drop
-				btn.disabled = false;
+				if (FAZ && typeof FAZ.btnLoading === 'function') { FAZ.btnLoading(btn, false); } else { btn.disabled = false; }
 				if (!resp || resp.scan_available !== true) {
 					setAutoDetectStatus(t( 'svcAutoDetectNoScan', 'No scanner data yet. Run the cookie scanner first.' ), 'error');
 					return;
@@ -420,6 +441,15 @@
 				var already = (resp && Array.isArray(resp.already_selected)) ? resp.already_selected : [];
 				if (newly.length === 0 && already.length === 0) {
 					setAutoDetectStatus(t( 'svcAutoDetectNoMatch', 'No matching services found among scanned cookies.' ), 'ok');
+					return;
+				}
+				// Nothing new to add but the detected services are already
+				// selected: confirm that and OMIT the "Click Save to commit"
+				// prompt — there is nothing to save. Mirrors gvl.js's
+				// autoDetectAllAlready branch (added.length === 0).
+				if (newly.length === 0 && already.length > 0) {
+					var allAlreadyTpl = t( 'svcAutoDetectAllAlready', 'All %d detected service(s) are already selected.' );
+					setAutoDetectStatus(allAlreadyTpl.replace('%d', String(already.length)), 'ok');
 					return;
 				}
 				// Pre-tick the newly_suggested checkboxes. Already-selected
@@ -449,7 +479,7 @@
 			})
 			.catch(function (err) {
 				if (myReqId !== autoDetectRequestId) { return; }
-				btn.disabled = false;
+				if (FAZ && typeof FAZ.btnLoading === 'function') { FAZ.btnLoading(btn, false); } else { btn.disabled = false; }
 				setAutoDetectStatus(t( 'svcAutoDetectFailed', 'Auto-detect failed' ) + ': ' + err.message, 'error');
 			});
 	}
