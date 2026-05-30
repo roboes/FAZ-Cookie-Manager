@@ -491,6 +491,9 @@ class Admin {
 					'saved'                    => __( 'Settings saved successfully.', 'faz-cookie-manager' ),
 					'saveFailed'               => __( 'Failed to save settings.', 'faz-cookie-manager' ),
 					'loadFailed'               => __( 'Failed to load settings.', 'faz-cookie-manager' ),
+					// Default loading-button label for FAZ.btnLoading (faz-admin.js)
+					// when a call site passes no explicit label.
+					'saving'                   => __( 'Saving…', 'faz-cookie-manager' ),
 					'confirmDelete'            => __( 'Are you sure you want to delete this?', 'faz-cookie-manager' ),
 					// (banner-status toggle strings live in the consolidated 'banner'
 				// sub-array further down — kept together to avoid PHP's last-key-wins

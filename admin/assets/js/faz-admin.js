@@ -366,16 +366,20 @@
 		if (loading) {
 			btn.dataset.origText = btn.textContent;
 			btn.disabled = true;
+			btn.setAttribute('aria-busy', 'true');
 			var spinner = document.createElement('span');
 			spinner.className = 'faz-spinner';
 			btn.textContent = '';
 			btn.appendChild(spinner);
-			// Default label is "Saving..."; callers performing a non-save
+			// Default label is "Saving…"; callers performing a non-save
 			// operation (e.g. a read-only scan) pass their own label so the
-			// spinner copy matches the action.
-			btn.appendChild(document.createTextNode(' ' + (loadingLabel || 'Saving...')));
+			// spinner copy matches the action. The no-label default is sourced
+			// from a localized i18n key when present, falling back to English.
+			var lbl = loadingLabel || (window.fazConfig && window.fazConfig.i18n && window.fazConfig.i18n.saving) || 'Saving…';
+			btn.appendChild(document.createTextNode(' ' + lbl));
 		} else {
 			btn.disabled = false;
+			btn.removeAttribute('aria-busy');
 			btn.textContent = btn.dataset.origText || 'Save';
 		}
 	};

@@ -343,6 +343,7 @@
 					// carries the compact sizing override (see faz-admin.css).
 					badge.className = 'faz-badge faz-badge-success faz-svc-detected-badge';
 					badge.title = t( 'svcDetectedTooltip', 'The cookie scanner observed a tracking domain for this service on your site.' );
+					badge.setAttribute( 'aria-label', t( 'svcDetectedTooltip', 'The cookie scanner observed a tracking domain for this service on your site.' ) );
 					badge.style.cssText = 'margin-left:4px;';
 					badge.textContent = t( 'svcDetectedBadge', 'Detected' );
 					label.appendChild(badge);
@@ -403,7 +404,7 @@
 		if (!el) { return; }
 		if (autoDetectStatusTimer) { clearTimeout(autoDetectStatusTimer); autoDetectStatusTimer = null; }
 		el.textContent = msg || '';
-		el.style.color = kind === 'error' ? '#c4302b' : (kind === 'ok' ? '#1d7d28' : 'var(--faz-text-secondary, #555)');
+		el.style.color = kind === 'error' ? '#c4302b' : (kind === 'warning' ? 'var(--faz-warning, #b86900)' : (kind === 'ok' ? '#1d7d28' : 'var(--faz-text-secondary, #555)'));
 		// Mirror setStatus(): auto-clear the success message after 3s.
 		// 'error' and scanning ('') states stay persistent (no timer).
 		if (msg && kind === 'ok') {
@@ -439,7 +440,7 @@
 				if (myReqId !== autoDetectRequestId) { return; } // stale, drop
 				if (FAZ && typeof FAZ.btnLoading === 'function') { FAZ.btnLoading(btn, false); } else { btn.disabled = false; }
 				if (!resp || resp.scan_available !== true) {
-					setAutoDetectStatus(t( 'svcAutoDetectNoScan', 'No scanner data yet. Run the cookie scanner first.' ), 'error');
+					setAutoDetectStatus(t( 'svcAutoDetectNoScan', 'No scanner data yet. Run the cookie scanner first.' ), 'warning');
 					return;
 				}
 				var newly  = (resp && Array.isArray(resp.newly_suggested))  ? resp.newly_suggested  : [];
@@ -541,6 +542,16 @@
 				// writeForm() can never leave the button permanently disabled.
 				if (autoDetectBtn) { autoDetectBtn.disabled = false; }
 			}
+		}).catch(function (err) {
+			// Outer safety net: a synchronous throw in renderServicesList() or
+			// writeForm() (inside the .then() try block) becomes a rejection
+			// here. Without this, it surfaces as an unhandled rejection and the
+			// "Load failed" status is lost. Re-enable Auto-detect (idempotent
+			// with the finally block) and surface the failure. Mirrors gvl.js
+			// loadSelectedVendors's .catch(). The inner api() .catch() handlers
+			// return null (no throw), so this never double-fires on that path.
+			if (autoDetectBtn) { autoDetectBtn.disabled = false; }
+			setStatus(t( 'loadFailed', 'Load failed' ) + ': ' + (err && err.message ? err.message : err), 'error');
 		});
 
 		document.getElementById('faz-cookie-policy-form').addEventListener('submit', function (e) {

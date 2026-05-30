@@ -39,9 +39,10 @@
 		if (!el) { return; }
 		if (autoDetectStatusTimer) { clearTimeout(autoDetectStatusTimer); autoDetectStatusTimer = null; }
 		el.textContent = msg || '';
-		el.style.color = kind === 'error' ? '#c4302b' : (kind === 'ok' || kind === 'success' ? '#1d7d28' : 'var(--faz-text-secondary, #555)');
-		// Auto-clear ONLY the success message after 3s. 'error' (F007) and
-		// scanning ('') states stay persistent — no timer.
+		el.style.color = kind === 'error' ? '#c4302b' : (kind === 'warning' ? 'var(--faz-warning, #b86900)' : (kind === 'ok' || kind === 'success' ? '#1d7d28' : 'var(--faz-text-secondary, #555)'));
+		// Auto-clear ONLY the 'ok'/'success' message after 3s. 'error' (F007),
+		// 'warning' (noGvl), 'info' (noMatch — neutral grey, no --faz-info token)
+		// and scanning ('') states stay persistent — no timer.
 		if (msg && (kind === 'ok' || kind === 'success')) {
 			autoDetectStatusTimer = setTimeout(function () { el.textContent = ''; autoDetectStatusTimer = null; }, 3000);
 		}
@@ -66,6 +67,10 @@
 			// toast. loadSelectedVendors() re-enables it in BOTH .then()/.catch().
 			// Mirrors the cookie-policy.js fix (PR #127 CodeRabbit review).
 			autoBtn.disabled = true;
+			// Give AT users context for the disabled button while the saved
+			// selection hydrates. Cleared once hydration completes / the button
+			// is re-enabled in loadSelectedVendors().
+			setAutoDetectStatus(__('gvl.autoDetectHydrating', 'Loading saved selection…'), 'info');
 			autoBtn.addEventListener('click', autoDetectFromCookies);
 		}
 
@@ -142,12 +147,15 @@
 			// overwritten by a late hydration). Re-enable before loadVendors().
 			var ab = document.getElementById('faz-gvl-auto-detect');
 			if (ab) { ab.disabled = false; }
+			// Hydration done — clear the "Loading saved selection…" status.
+			setAutoDetectStatus('', '');
 			loadVendors();
 		}).catch(function () {
 			// Fetch error: re-enable so a transient failure doesn't brick
 			// Auto-detect permanently.
 			var ab = document.getElementById('faz-gvl-auto-detect');
 			if (ab) { ab.disabled = false; }
+			setAutoDetectStatus('', '');
 			loadVendors();
 		});
 	}
