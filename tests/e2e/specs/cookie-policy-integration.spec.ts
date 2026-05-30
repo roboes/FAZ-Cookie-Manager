@@ -385,16 +385,19 @@ test.describe('Cookie Policy Generator — admin integration (Spec 002)', () => 
   });
 
   test('7. P2-A regression: COOKIE_CATEGORIES HTML survives markdown_to_html() without nested <p>', () => {
-    // Repro of the CodeRabbit P2 finding: the cookie-list <dl> block must
-    // not be re-parsed by the line-based markdown_to_html(). Symptoms of
-    // the bug pre-fix:
-    //   - `<p>` wrapping closing tags: `<p>...</dt></p>`
+    // Repro of the CodeRabbit P2 finding: the cookie-list block must not
+    // be re-parsed by the line-based markdown_to_html(). The cookie list
+    // is rendered as an HTML5 <details> accordion wrapping a
+    // <table class="faz-cookie-policy-table"> (the flat <dl> layout was
+    // dropped in 1.16.2 per Gooloo feedback — see Renderer::render()).
+    // Symptoms of the bug pre-fix, adapted to the table markup:
+    //   - `<p>` wrapping closing tags: `<p>...</td></p>`
     //   - inline tags (`<small>`, `<strong>`) wrapped in their own `<p>`
-    //   - stray closing `</p>` after `</dl>`
+    //   - stray closing `</p>` after `</table>`
     // The fix is the two-pass sentinel substitution in Renderer::render().
     const html = wpEval(`
       // Ensure at least one cookie exists in inventory so build_cookie_list_html
-      // produces a non-empty <dl>. Column names must match the live schema:
+      // produces a non-empty <table>. Column names must match the live schema:
       // cookie_name / cookie_domain / cookie_duration / cookie_description.
       global $wpdb;
       $wpdb->delete( $wpdb->prefix . 'faz_cookies', array( 'name' => 'faz_p2_probe' ) );
@@ -415,14 +418,17 @@ test.describe('Cookie Policy Generator — admin integration (Spec 002)', () => 
     `);
 
     // Regression assertions: no invalid nesting patterns introduced by the
-    // line-based markdown parser around the cookie list.
-    expect(html, 'closing </dl> must not be followed by a stray </p>').not.toMatch(/<\/dl>\s*<\/p>/);
-    expect(html, 'closing </dt> must not be inside a <p>').not.toMatch(/<p>[^<]*<\/dt>/);
-    expect(html, 'closing </dd> must not be inside a <p>').not.toMatch(/<p>[^<]*<\/dd>/);
+    // line-based markdown parser around the cookie list (now a <table>).
+    expect(html, 'closing </table> must not be followed by a stray </p>').not.toMatch(/<\/table>\s*<\/p>/);
+    expect(html, 'closing </td> must not be inside a <p>').not.toMatch(/<p>[^<]*<\/td>/);
+    expect(html, 'closing </tr> must not be inside a <p>').not.toMatch(/<p>[^<]*<\/tr>/);
+    expect(html, '<table> must not be wrapped in its own <p>').not.toMatch(/<p>\s*<table[\s>]/);
     expect(html, '<small> must not be wrapped in its own <p>').not.toMatch(/<p>\s*<small>/);
     // Positive checks: the structural HTML did make it through unmangled.
-    expect(html, 'a <dl> block is present').toMatch(/<dl[\s>]/);
-    expect(html, '<dt> / <dd> still close cleanly').toMatch(/<\/dd>\s*<\/dl>/);
+    expect(html, 'the cookie-list <table> block is present').toMatch(/<table class="faz-cookie-policy-table">/);
+    expect(html, 'the <details> accordion wrapper survived').toMatch(/<details class="faz-cookie-policy-details">/);
+    expect(html, '<tbody> / </table> still close cleanly').toMatch(/<\/tbody>\s*<\/table>/);
+    expect(html, 'the probe cookie row rendered inside the table').toContain('faz_p2_probe');
 
     // Probe cleanup.
     wpEval(`
