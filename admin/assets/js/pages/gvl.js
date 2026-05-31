@@ -43,7 +43,7 @@
 		if (!el) { return; }
 		if (autoDetectStatusTimer) { clearTimeout(autoDetectStatusTimer); autoDetectStatusTimer = null; }
 		el.textContent = msg || '';
-		el.style.color = kind === 'error' ? '#c4302b' : (kind === 'warning' ? 'var(--faz-warning, #b86900)' : (kind === 'ok' || kind === 'success' ? '#1d7d28' : 'var(--faz-text-secondary, #555)'));
+		el.style.color = kind === 'error' ? 'var(--faz-danger, #c03658)' : (kind === 'warning' ? 'var(--faz-warning, #b86900)' : (kind === 'ok' || kind === 'success' ? 'var(--faz-success, #17785b)' : 'var(--faz-text-secondary, #555)'));
 		// Auto-clear ONLY the 'ok'/'success' message after 3s. 'error' (F007),
 		// 'warning' (noGvl), 'info' (noMatch — neutral grey, no --faz-info token)
 		// and scanning ('') states stay persistent — no timer.

@@ -833,6 +833,10 @@ body[class*="faz-cookie-manager"] #wpbody-content {
 	background: var(--faz-primary);
 	color: #fff;
 }
+.faz-toast-warning {
+	background: var(--faz-warning);
+	color: #fff;
+}
 @keyframes fazToastIn {
 	from { opacity: 0; transform: translateX(40px); }
 	to { opacity: 1; transform: translateX(0); }

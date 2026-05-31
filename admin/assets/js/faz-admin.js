@@ -232,6 +232,11 @@
 		if (!toastContainer) {
 			toastContainer = document.createElement('div');
 			toastContainer.className = 'faz-toast-container';
+			// Polite live region so screen readers announce dynamically
+			// injected toasts (e.g. auto-detect results) — WCAG 2.2 SC 4.1.3.
+			toastContainer.setAttribute('role', 'status');
+			toastContainer.setAttribute('aria-live', 'polite');
+			toastContainer.setAttribute('aria-atomic', 'true');
 			document.body.appendChild(toastContainer);
 		}
 		var toast = document.createElement('div');
