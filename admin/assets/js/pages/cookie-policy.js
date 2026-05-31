@@ -518,12 +518,17 @@
 			autoDetectBtn.addEventListener('click', autoDetectServices);
 		}
 
+		// Tracks whether the saved settings actually loaded. If the GET failed
+		// the form holds only defaults, so we must NOT re-enable Auto-detect or
+		// allow a submit — saving would overwrite the real config with blanks.
+		var hydrationFailed = false;
 		Promise.all([
-			api('GET', 'settings').catch(function (err) { setStatus(t( 'loadFailed', 'Load failed' ) + ': ' + err.message, 'error'); return null; }),
+			api('GET', 'settings').catch(function (err) { setStatus(t( 'loadFailed', 'Load failed' ) + ': ' + err.message, 'error'); hydrationFailed = true; return null; }),
 			api('GET', 'detected-services').catch(function () { return { service_ids: [] }; })
 		]).then(function (results) {
 			try {
 				var settings = results[0];
+				if (settings === null) { hydrationFailed = true; }
 				var detected = results[1] && Array.isArray(results[1].service_ids) ? results[1].service_ids : [];
 				// Re-render with badges if the scanner found anything. Empty
 				// detected list: skip the rerender (badges identical to first
@@ -546,7 +551,13 @@
 				// auto-detect ticks can't be overwritten by a late hydration).
 				// In finally so a synchronous throw in renderServicesList()/
 				// writeForm() can never leave the button permanently disabled.
-				if (autoDetectBtn) { autoDetectBtn.disabled = false; }
+				// Only when settings hydrated: a failed load keeps it disabled
+				// so the admin can't auto-detect/save over the real config.
+				if (autoDetectBtn && !hydrationFailed) {
+					autoDetectBtn.disabled = false;
+					// Clear the server-rendered "Loading saved selection…" hint.
+					setAutoDetectStatus('', '');
+				}
 			}
 		}).catch(function (err) {
 			// Outer safety net: a synchronous throw in renderServicesList() or
@@ -556,12 +567,19 @@
 			// with the finally block) and surface the failure. Mirrors gvl.js
 			// loadSelectedVendors's .catch(). The inner api() .catch() handlers
 			// return null (no throw), so this never double-fires on that path.
-			if (autoDetectBtn) { autoDetectBtn.disabled = false; }
+			// Keep the button disabled when settings never hydrated.
+			if (autoDetectBtn && !hydrationFailed) { autoDetectBtn.disabled = false; }
 			setStatus(t( 'loadFailed', 'Load failed' ) + ': ' + (err && err.message ? err.message : err), 'error');
 		});
 
 		document.getElementById('faz-cookie-policy-form').addEventListener('submit', function (e) {
 			e.preventDefault();
+			// Refuse to save over a config that never loaded — readForm() would
+			// serialise default/blank fields and clobber the real saved data.
+			if (hydrationFailed) {
+				setStatus(t( 'loadFailed', 'Settings did not load — reload the page before saving.' ), 'error');
+				return;
+			}
 			var payload = readForm();
 			setStatus(t( 'saving', 'Saving…' ), '');
 			api('POST', 'settings', payload)

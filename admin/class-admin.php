@@ -666,6 +666,8 @@ class Admin {
 						'selectedVendors'          => __( 'Selected: %d vendors', 'faz-cookie-manager' ),
 						/* translators: %d: number of vendors saved */
 						'savedCount'               => __( 'Saved %d vendor(s).', 'faz-cookie-manager' ),
+						'selectedLoadFailed'       => __( 'Could not load your saved selection — reload before changing it.', 'faz-cookie-manager' ),
+						'notHydrated'              => __( 'Your saved selection has not loaded yet — reload the page before saving.', 'faz-cookie-manager' ),
 						'selectionSaved'           => __( 'vendor(s) saved.', 'faz-cookie-manager' ),
 						'selectionSavedWithCount'  => __( 'Saved {count} vendor(s).', 'faz-cookie-manager' ),
 						'selectionFailed'          => __( 'Failed to save selection.', 'faz-cookie-manager' ),

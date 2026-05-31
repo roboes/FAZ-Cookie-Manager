@@ -374,12 +374,14 @@ class Gvl {
 			if ( '' === $d ) {
 				continue;
 			}
-			// Exact match first (cheapest, covers most rows).
+			// Exact match first (cheapest, covers most rows). Do NOT `continue`
+			// after an exact hit — a longer host (e.g. `challenges.cloudflare.com`)
+			// can ALSO suffix-match a parent key (`cloudflare.com`) and add more
+			// vendors. $matched dedupes by id, so collecting both is safe.
 			if ( isset( $map[ $d ] ) ) {
 				foreach ( (array) $map[ $d ] as $vid ) {
 					$matched[ (int) $vid ] = true;
 				}
-				continue;
 			}
 			// Suffix match: cookie domain `m.linkedin.com` against map key `linkedin.com`.
 			// Guard against false positives by requiring a dot before the

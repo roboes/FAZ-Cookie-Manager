@@ -22,6 +22,10 @@
 	var searchTerm = '';
 	var purposeFilter = 0;
 	var selectedVendors = {};  // { vendorId: true }
+	// Whether the saved selection has loaded. Until it has, selectedVendors is
+	// empty and a Save would wipe the server-side selection — so Auto-detect
+	// stays disabled and saveSelection() refuses to run.
+	var hydrated = false;
 	var searchTimer = null;
 	// Race guard for autoDetectFromCookies — incremented on every
 	// invocation, captured locally inside the function so a slow
@@ -142,6 +146,7 @@
 				});
 			}
 			updateSelectedCount();
+			hydrated = true;
 			// Hydration done — Auto-detect is safe now (selectedVendors holds
 			// the saved selection, so a subsequent auto-detect tick can't be
 			// overwritten by a late hydration). Re-enable before loadVendors().
@@ -151,11 +156,11 @@
 			setAutoDetectStatus('', '');
 			loadVendors();
 		}).catch(function () {
-			// Fetch error: re-enable so a transient failure doesn't brick
-			// Auto-detect permanently.
-			var ab = document.getElementById('faz-gvl-auto-detect');
-			if (ab) { ab.disabled = false; }
-			setAutoDetectStatus('', '');
+			// Fetch error: the saved selection never loaded. Do NOT re-enable
+			// Auto-detect and leave `hydrated` false — saveSelection() now holds
+			// only an empty set, and committing it would wipe the server-side
+			// selection. Surface the failure and still show the vendor list.
+			setAutoDetectStatus(__('gvl.selectedLoadFailed', 'Could not load your saved selection — reload before changing it.'), 'error');
 			loadVendors();
 		});
 	}
@@ -348,6 +353,12 @@
 	}
 
 	function saveSelection() {
+		// Refuse to save before the saved selection has loaded — selectedVendors
+		// would be empty and committing it would wipe the server-side selection.
+		if (!hydrated) {
+			FAZ.notify(__('gvl.notHydrated', 'Your saved selection has not loaded yet — reload the page before saving.'), 'error');
+			return;
+		}
 		var btn = document.getElementById('faz-gvl-save');
 		var ids = Object.keys(selectedVendors).map(Number).sort(function (a, b) { return a - b; });
 

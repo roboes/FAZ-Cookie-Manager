@@ -1672,8 +1672,11 @@ function _fazAnnounceConsent() {
 
 function _fazAcceptReject(option = "custom") {
     return () => {
+        // The screen-reader announcement is fired centrally inside
+        // _fazAcceptCookies() (past its age-gate guard) so every consent-
+        // recording path — accept/reject/save, the close button, per-cookie
+        // toggles — announces the saved outcome, not just this one.
         if (_fazAcceptCookies(option) === false) return;
-        _fazAnnounceConsent();
         _fazRemoveBanner();
         _fazHidePreferenceCenter();
         _fazAfterConsent();
@@ -1713,6 +1716,12 @@ function _fazAcceptCookies(choice = "all") {
             return false;
         }
     }
+
+    // Past the age gate the choice WILL be recorded below, so announce the
+    // saved outcome here — this is the single point every consent path passes
+    // through (accept/reject/save, close button, per-cookie toggles), so the
+    // screen-reader confirmation can never be missed (WCAG 2.2 SC 4.1.3).
+    _fazAnnounceConsent();
 
     // Snapshot accepted categories before updating consent, so _fazAfterConsent
     // can detect revocations (executed JS cannot be unloaded — needs page reload).
@@ -2940,7 +2949,10 @@ function _fazAfterConsent() {
                         iframe.contentWindow.postMessage({
                             type: 'faz_consent_forward',
                             consent: consentValue
-                        }, new URL(targetUrl).origin);
+                            // Resolve against the page URL so relative /
+                            // protocol-relative targets (which _fazIsAllowedScheme
+                            // accepts) yield a concrete origin instead of throwing.
+                        }, new URL(targetUrl, window.location.href).origin);
                     } catch(e) { /* cross-origin error — ignore */ }
                     setTimeout(function() { if (iframe.parentNode) iframe.parentNode.removeChild(iframe); }, 1000);
                 });
@@ -3921,7 +3933,10 @@ window.addEventListener('message', function(event) {
     var originAllowed = false;
     for (var _ti = 0; _ti < targets.length; _ti++) {
         var _allowedOrigin = null;
-        try { _allowedOrigin = new URL(targets[_ti]).origin; } catch (e) { _allowedOrigin = null; }
+        // Resolve against the page URL so relative / protocol-relative targets
+        // yield a concrete origin to compare against event.origin (matching the
+        // sender side), instead of throwing and silently dropping the target.
+        try { _allowedOrigin = new URL(targets[_ti], window.location.href).origin; } catch (e) { _allowedOrigin = null; }
         if (_allowedOrigin !== null && event.origin === _allowedOrigin) {
             originAllowed = true;
             break;

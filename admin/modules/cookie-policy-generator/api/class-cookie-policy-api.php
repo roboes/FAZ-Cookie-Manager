@@ -580,12 +580,14 @@ class Cookie_Policy_Api {
 			if ( '' === $d ) {
 				continue;
 			}
-			// Exact match first.
+			// Exact match first. Do NOT `continue` after an exact hit — a
+			// longer host (e.g. `challenges.cloudflare.com`) can ALSO suffix-
+			// match a parent key (`cloudflare.com`) and contribute additional
+			// services. $matched dedupes by id, so collecting both is safe.
 			if ( isset( $map[ $d ] ) ) {
 				foreach ( (array) $map[ $d ] as $sid ) {
 					$matched[ (string) $sid ] = true;
 				}
-				continue;
 			}
 			// Suffix match with dot-prefix guard. `m.linkedin.com` ends with
 			// `.linkedin.com` and matches; `notlinkedin.com` ends with
