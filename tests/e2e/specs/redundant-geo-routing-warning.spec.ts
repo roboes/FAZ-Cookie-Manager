@@ -9,12 +9,19 @@
  * The notice fires on every FAZ admin page when:
  *   - settings.geolocation.geo_targeting = true
  *   - settings.geolocation.default_behavior = "no_banner"
+ *   - settings.geolocation.target_regions = [] (no region selected — the
+ *     global geo gate in Frontend::is_geo_banner_disabled() has nothing to
+ *     split visitors on, so the no-store header buys nothing)
  *   - settings.iab.enabled = false
  *   - has_country_dependent_banners() returns false
  *   - at least one banner is configured
  *
+ * When target_regions IS populated the banner genuinely varies by visitor
+ * country (in-region visitors see it, others don't), so the no-store is
+ * justified and the warning must NOT fire (test 6).
+ *
  * Tests:
- *   1. Warning appears with all guards matched.
+ *   1. Warning appears with all guards matched (no target regions).
  *   2. "Disable Geo-routing now" AJAX flips geo_targeting off and the
  *      warning disappears on next page load.
  *   3. Warning does NOT appear when IAB TCF is enabled (geo no-cache is
@@ -22,6 +29,8 @@
  *   4. Warning does NOT appear when default_behavior is "show_banner"
  *      (no no-cache emitted).
  *   5. Warning does NOT appear when geo_targeting is off (the obvious case).
+ *   6. Warning does NOT appear when target_regions is populated (the geo
+ *      gate is doing real per-country work — no-store is justified).
  */
 
 import { test, expect, type Page } from '../fixtures/wp-fixture';
@@ -32,13 +41,9 @@ const NOTICE_ID = 'faz-redundant-geo-routing-notice';
 let adminPage: Page;
 
 async function setSettings(page: Page, patch: Record<string, unknown>): Promise<void> {
-  // Drive via WP-CLI through page.request would be possible but we
-  // already have a faz/v1/settings route protected by nonce; using
-  // the option directly is simpler for test setup. Persist via a
-  // dedicated REST helper if one existed — for now, drive the option
-  // through WP-CLI exec from the test harness's WP_PATH.
-  // Note: the spec invokes wp shell out of band; here we POST through
-  // the existing settings endpoint to stay self-contained.
+  // Persist settings through the existing nonce-protected faz/v1/settings
+  // REST route (GET current → deep-merge patch → POST). This keeps the spec
+  // self-contained without shelling out to WP-CLI.
   await page.goto(ADMIN_PAGE, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(
     () => typeof (window as unknown as { fazConfig?: { api?: { nonce?: string } } }).fazConfig?.api?.nonce === 'string',
@@ -74,9 +79,9 @@ test.describe('1.16.3 — Redundant Geo-routing admin warning', () => {
     await loginAsAdmin(adminPage);
   });
 
-  test('1. Warning appears when geo_targeting=on + no_banner + no target_countries + iab off', async () => {
+  test('1. Warning appears when geo_targeting=on + no_banner + no target regions + no target_countries + iab off', async () => {
     await setSettings(adminPage, {
-      geolocation: { geo_targeting: true, default_behavior: 'no_banner' },
+      geolocation: { geo_targeting: true, default_behavior: 'no_banner', target_regions: [] },
       iab: { enabled: false },
     });
     await adminPage.goto(ADMIN_PAGE, { waitUntil: 'domcontentloaded' });
@@ -122,6 +127,19 @@ test.describe('1.16.3 — Redundant Geo-routing admin warning', () => {
   test('5. Warning does NOT appear when geo_targeting is off', async () => {
     await setSettings(adminPage, {
       geolocation: { geo_targeting: false, default_behavior: 'no_banner' },
+      iab: { enabled: false },
+    });
+    await adminPage.goto(ADMIN_PAGE, { waitUntil: 'domcontentloaded' });
+    await expect(adminPage.locator(`#${NOTICE_ID}`)).toHaveCount(0);
+  });
+
+  test('6. Warning does NOT appear when target_regions is populated (geo gate is doing real work)', async () => {
+    // Everything else matches the redundant config, but a non-empty
+    // target_regions means is_geo_banner_disabled() genuinely hides the
+    // banner outside EU/UK — the page output varies by country and the
+    // no-store header is justified, so the warning must stay hidden.
+    await setSettings(adminPage, {
+      geolocation: { geo_targeting: true, default_behavior: 'no_banner', target_regions: ['eu', 'uk'] },
       iab: { enabled: false },
     });
     await adminPage.goto(ADMIN_PAGE, { waitUntil: 'domcontentloaded' });

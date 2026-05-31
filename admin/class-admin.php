@@ -1607,16 +1607,22 @@ class Admin {
 	 *   - geo-routing toggle on (settings.geolocation.geo_targeting=true)
 	 *   - default_behavior set to "no_banner" (the only value that flips
 	 *     send_geo_cache_headers() via is_country_dependent_output())
-	 *   - exactly one banner configured
-	 *   - no banner has a target_countries list (so the "do not show
-	 *     outside target regions" gate isn't actually doing anything)
+	 *   - no global target regions selected (settings.geolocation.target_regions
+	 *     empty) — the country split the no_banner gate keys off in
+	 *     Frontend::is_geo_banner_disabled() is empty, so the gate can never
+	 *     hide the banner for one country and show it for another
+	 *   - at least one banner configured, and no banner has a target_countries
+	 *     list (so the per-banner geo gate isn't doing anything either)
 	 *   - IAB TCF disabled (else the no-cache is justified anyway)
 	 *
 	 * In that configuration the plugin penalises the CDN cache for the
-	 * entire site while the geo-routing decision can never fire — same
-	 * combination that James (gooloo / english truffles) hit in support
+	 * entire site while neither the global target-regions gate nor any
+	 * per-banner target-countries list can actually produce a per-country
+	 * split — same symptom James (gooloo / english truffles) hit in support
 	 * thread "Performance Impact???". Detecting it lets us point admins
-	 * at a one-click resolution.
+	 * at a one-click resolution. Note: when target_regions IS populated the
+	 * banner genuinely varies by country, so the no-store is justified and
+	 * this returns false (no warning).
 	 *
 	 * Returns true when the user-visible warning should be shown.
 	 *
@@ -1655,6 +1661,22 @@ class Admin {
 			// where Geo-routing's no_banner gate cannot fire usefully.
 			return false;
 		}
+		// The global "hide banner outside target regions" gate
+		// (Frontend::is_geo_banner_disabled) keys off
+		// settings.geolocation.target_regions — NOT the per-banner
+		// target_countries that has_country_dependent_banners() inspects.
+		// When at least one target region is selected, the banner genuinely
+		// varies by visitor country (in-region visitors see it, others do
+		// not), so the Cache-Control: no-store IS functionally justified and
+		// the configuration is not redundant. Only when no target region is
+		// selected does the no_banner gate have nothing to act on, making the
+		// full-page-cache penalty pointless — which is the case we warn about.
+		$target_regions = isset( $geo['target_regions'] ) && is_array( $geo['target_regions'] )
+			? array_filter( $geo['target_regions'] )
+			: array();
+		if ( ! empty( $target_regions ) ) {
+			return false;
+		}
 		return true;
 	}
 
@@ -1687,12 +1709,12 @@ class Admin {
 
 		$disable_nonce = wp_create_nonce( 'faz_disable_redundant_geo_routing' );
 		$dismiss_nonce = wp_create_nonce( 'faz_dismiss_redundant_geo_routing' );
-		$settings_url  = admin_url( 'admin.php?page=faz-cookie-manager-settings#geolocation' );
+		$settings_url  = admin_url( 'admin.php?page=faz-cookie-manager-settings#faz-geo-regions' );
 
 		echo '<div class="notice notice-warning is-dismissible" id="faz-redundant-geo-routing-notice">';
 		echo '<p><strong>' . esc_html__( 'FAZ Cookie Manager — Geo-routing is on but has no effect', 'faz-cookie-manager' ) . '</strong></p>';
-		echo '<p>' . esc_html__( 'Geo-routing is enabled in Settings with "Hide banner outside target regions" as the default behaviour, but you only have one banner and none of your banners have a target-countries list. In this configuration the plugin tells the CDN that every page is country-dependent (so no full-page cache is kept) while the geo-routing decision can never actually fire. The most common symptom is "X-Cdn-Cache-Status: MISS" on every page, and a Lighthouse drop.', 'faz-cookie-manager' ) . '</p>';
-		echo '<p>' . esc_html__( 'If you do NOT need per-country banners (single banner serving every visitor), the safe fix is to disable Geo-routing. If you DO want per-country banners, add a target-countries list to at least one banner — the warning will clear on its own.', 'faz-cookie-manager' ) . '</p>';
+		echo '<p>' . esc_html__( 'Geo-routing is enabled in Settings with "Hide banner outside target regions" as the default behaviour, but no target regions are selected and none of your banners has a target-countries list. In this configuration the plugin tells the CDN that every page is country-dependent (so no full-page cache is kept) while the geo-routing gate has nothing to target, so it can never actually fire. The most common symptom is "X-Cdn-Cache-Status: MISS" on every page, and a Lighthouse drop.', 'faz-cookie-manager' ) . '</p>';
+		echo '<p>' . esc_html__( 'If you do NOT need per-country banners, the safe fix is to disable Geo-routing. If you DO want per-country banners, select one or more target regions in Settings → Geolocation, or add a target-countries list to at least one banner — the warning will clear on its own.', 'faz-cookie-manager' ) . '</p>';
 		printf(
 			'<p><button type="button" class="button button-primary" id="faz-disable-redundant-geo-routing" data-nonce="%s">%s</button> <a href="%s" class="button">%s</a></p>',
 			esc_attr( $disable_nonce ),
@@ -1701,51 +1723,47 @@ class Admin {
 			esc_html__( 'Open Geo-routing settings', 'faz-cookie-manager' )
 		);
 		echo '</div>';
-		?>
-<script>
-(function(){
-	var notice = document.getElementById('faz-redundant-geo-routing-notice');
-	if (!notice) return;
-	var btn = notice.querySelector('#faz-disable-redundant-geo-routing');
-	if (btn) {
-		btn.addEventListener('click', function () {
-			btn.disabled = true;
-			btn.textContent = <?php echo wp_json_encode( __( 'Disabling…', 'faz-cookie-manager' ) ); ?>;
-			var body = new URLSearchParams();
-			body.set('action', 'faz_disable_redundant_geo_routing');
-			body.set('_wpnonce', btn.dataset.nonce);
-			fetch(ajaxurl, { method: 'POST', credentials: 'same-origin', body: body })
-				.then(function (r) { return r.json(); })
-				.then(function (json) {
-					if (json && json.success) {
-						notice.querySelector('p:last-of-type').textContent = <?php echo wp_json_encode( __( 'Geo-routing disabled. The CDN cache should start filling again within minutes of organic traffic.', 'faz-cookie-manager' ) ); ?>;
-					} else {
-						btn.disabled = false;
-						btn.textContent = <?php echo wp_json_encode( __( 'Disable Geo-routing now', 'faz-cookie-manager' ) ); ?>;
-					}
-				})
-				.catch(function () {
-					btn.disabled = false;
-					btn.textContent = <?php echo wp_json_encode( __( 'Disable Geo-routing now', 'faz-cookie-manager' ) ); ?>;
-				});
-		});
-	}
-	// Dismiss button is rendered by WordPress for is-dismissible notices;
-	// hook the click to persist the dismissal via AJAX so the notice does
-	// not reappear on every admin page load until the underlying setting
-	// changes.
-	var dismissNonce = <?php echo wp_json_encode( $dismiss_nonce ); ?>;
-	notice.addEventListener('click', function (e) {
-		var target = e.target;
-		if (!target || !target.classList || !target.classList.contains('notice-dismiss')) return;
-		var body = new URLSearchParams();
-		body.set('action', 'faz_dismiss_redundant_geo_routing');
-		body.set('_wpnonce', dismissNonce);
-		fetch(ajaxurl, { method: 'POST', credentials: 'same-origin', body: body });
-	});
-})();
-</script>
-		<?php
+
+		// Notice behaviour is attached via wp_add_inline_script (not a raw
+		// <script> echo) so Plugin Check's WordPress.Security.EscapeOutput
+		// sniff stays clean — same lesson recorded on print_api_fetch_polyfill()
+		// above. The faz-admin handle is always enqueued on FAZ admin pages
+		// (enqueue_scripts() gates on faz_is_admin_page(), the same gate this
+		// notice uses), so the inline script always has a host handle.
+		$inline_js = sprintf(
+			'(function(){' .
+			'var notice=document.getElementById("faz-redundant-geo-routing-notice");' .
+			'if(!notice){return;}' .
+			'var btn=notice.querySelector("#faz-disable-redundant-geo-routing");' .
+			'if(btn){btn.addEventListener("click",function(){' .
+			'btn.disabled=true;btn.textContent=%1$s;' .
+			'var body=new URLSearchParams();' .
+			'body.set("action","faz_disable_redundant_geo_routing");' .
+			'body.set("_wpnonce",btn.dataset.nonce);' .
+			'fetch(ajaxurl,{method:"POST",credentials:"same-origin",body:body})' .
+			'.then(function(r){return r.json();})' .
+			'.then(function(json){' .
+			'if(json&&json.success){notice.querySelector("p:last-of-type").textContent=%2$s;}' .
+			'else{btn.disabled=false;btn.textContent=%3$s;}' .
+			'})' .
+			'.catch(function(){btn.disabled=false;btn.textContent=%3$s;});' .
+			'});}' .
+			'var dismissNonce=%4$s;' .
+			'notice.addEventListener("click",function(e){' .
+			'var target=e.target;' .
+			'if(!target||!target.classList||!target.classList.contains("notice-dismiss")){return;}' .
+			'var body=new URLSearchParams();' .
+			'body.set("action","faz_dismiss_redundant_geo_routing");' .
+			'body.set("_wpnonce",dismissNonce);' .
+			'fetch(ajaxurl,{method:"POST",credentials:"same-origin",body:body});' .
+			'});' .
+			'})();',
+			wp_json_encode( __( 'Disabling…', 'faz-cookie-manager' ) ),
+			wp_json_encode( __( 'Geo-routing disabled. The CDN cache should start filling again within minutes of organic traffic.', 'faz-cookie-manager' ) ),
+			wp_json_encode( __( 'Disable Geo-routing now', 'faz-cookie-manager' ) ),
+			wp_json_encode( $dismiss_nonce )
+		);
+		wp_add_inline_script( 'faz-admin', $inline_js, 'after' );
 	}
 
 	/**
