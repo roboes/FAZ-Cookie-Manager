@@ -321,12 +321,17 @@ class Gvl {
 	 * (PRs adding entries with citations) are welcome — schema is
 	 * `{ "mappings": { "<domain>": [<vendor_id>, …] } }`.
 	 *
-	 * Returns an array of vendor IDs (sorted, unique) ready to be passed
-	 * to the existing /faz/v1/gvl/selected POST endpoint OR shown as
-	 * "suggested" checkboxes in the admin UI. Empty array when the
-	 * cookies table is empty / scanner never ran / no domain match.
+	 * Returns the sorted, unique vendor IDs to show as "suggested"
+	 * checkboxes in the admin UI, alongside a `scan_available` flag so the
+	 * caller can distinguish "the scanner never ran" (no discovered rows)
+	 * from "the scanner ran but nothing matched / the GVL isn't downloaded".
+	 * Mirrors Cookie_Policy_Api::scan_discovered_services(). `vendor_ids`
+	 * is empty when the cookies table is missing / the scanner never ran /
+	 * no domain matched / the GVL hasn't been downloaded; `scan_available`
+	 * is true whenever at least one discovered row exists, regardless of
+	 * whether any matched.
 	 *
-	 * @return int[]
+	 * @return array{vendor_ids: int[], scan_available: bool}
 	 */
 	public function suggest_vendor_ids_from_scanned_cookies() {
 		global $wpdb;
@@ -341,7 +346,7 @@ class Gvl {
 		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		$exists = (string) $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
 		if ( $exists !== $table ) {
-			return array();
+			return array( 'vendor_ids' => array(), 'scan_available' => false );
 		}
 		// Restrict to scanner-discovered rows only — `discovered = 1` is
 		// the column the cookie scanner sets when it actually OBSERVED a
@@ -352,15 +357,19 @@ class Gvl {
 		// not retroactively trigger a TCF-vendor suggestion. CodeRabbit
 		// PR #127 review (2026-05-27) flagged the broader query as a
 		// source of potential false positives — confirmed.
+		// No `domain <> ''` filter — a blank-domain discovered row must still
+		// count toward scan_available (the scanner DID run), and the matching
+		// loop skips blank domains anyway. Mirrors scan_discovered_services().
 		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.DirectDatabaseQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-		$domains = (array) $wpdb->get_col( $wpdb->prepare( "SELECT DISTINCT domain FROM `{$table}` WHERE domain <> %s AND discovered = %d", '', 1 ) );
-		if ( empty( $domains ) ) {
-			return array();
+		$domains        = (array) $wpdb->get_col( $wpdb->prepare( "SELECT DISTINCT domain FROM `{$table}` WHERE discovered = %d", 1 ) );
+		$scan_available = ! empty( $domains );
+		if ( ! $scan_available ) {
+			return array( 'vendor_ids' => array(), 'scan_available' => false );
 		}
 
 		$map = self::load_domain_vendor_map();
 		if ( empty( $map ) ) {
-			return array();
+			return array( 'vendor_ids' => array(), 'scan_available' => true );
 		}
 
 		// Cache lookup keys for the suffix scan. The map keys are
@@ -397,7 +406,7 @@ class Gvl {
 		}
 
 		if ( empty( $matched ) ) {
-			return array();
+			return array( 'vendor_ids' => array(), 'scan_available' => true );
 		}
 
 		// Filter out IDs that the currently-downloaded GVL doesn't carry
@@ -412,12 +421,12 @@ class Gvl {
 			$live_ids = array_map( 'intval', array_keys( $gvl_data['vendors'] ) );
 			$matched  = array_intersect_key( $matched, array_flip( $live_ids ) );
 		} else {
-			return array();
+			return array( 'vendor_ids' => array(), 'scan_available' => true );
 		}
 
 		$ids = array_keys( $matched );
 		sort( $ids );
-		return $ids;
+		return array( 'vendor_ids' => $ids, 'scan_available' => true );
 	}
 
 	/**

@@ -681,7 +681,8 @@ class Admin {
 						'autoDetectScanning'       => __( 'Scanning cookie inventory…', 'faz-cookie-manager' ),
 						'autoDetectHydrating'      => __( 'Loading saved selection…', 'faz-cookie-manager' ),
 						'autoDetectNoGvl'          => __( 'Update the Global Vendor List first, then try Auto-detect again.', 'faz-cookie-manager' ),
-						'autoDetectNoMatch'        => __( 'No matching ad-tech vendors were found in the scanned cookies. Run the cookie scanner first if you have not.', 'faz-cookie-manager' ),
+						'autoDetectNoScan'         => __( 'No scanner data yet. Run the cookie scanner first.', 'faz-cookie-manager' ),
+						'autoDetectNoMatch'        => __( 'No matching ad-tech vendors were found in the scanned cookies.', 'faz-cookie-manager' ),
 						/* translators: %d: number of vendors pre-ticked from the cookie scan */
 						'autoDetectAdded'          => __( 'Pre-ticked %d vendor(s) from cookie scan. Click Save Selection to apply.', 'faz-cookie-manager' ),
 						/* translators: %d: number of auto-detected vendors already in the selection */

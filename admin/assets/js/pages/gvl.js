@@ -413,25 +413,43 @@
 				FAZ.notify(noGvlMsg, 'warning');
 				return;
 			}
+			// Three-state distinction (parity with cookie-policy.js): the
+			// scanner never ran (no discovered rows) is actionably different
+			// from "scanner ran but nothing matched". Without scan_available
+			// both collapse to the no-match hint, so the admin who simply
+			// forgot to run the scanner gets the wrong nudge.
+			if (data.scan_available !== true) {
+				var noScanMsg = __('gvl.autoDetectNoScan', 'No scanner data yet. Run the cookie scanner first.');
+				setAutoDetectStatus(noScanMsg, 'warning');
+				FAZ.notify(noScanMsg, 'warning');
+				return;
+			}
+
 			var suggested = (data.vendor_ids || []).map(Number).filter(function (n) { return n > 0; });
 			var added     = (data.newly_suggested || []).map(Number);
 			var already   = (data.already_selected || []).map(Number);
 
 			if (suggested.length === 0) {
-				// Soft info string in the persistent span instead of going
-				// blank — keeps a trace after the toast fades (F007).
-				var noMatchMsg = __('gvl.autoDetectNoMatch', 'No matching ad-tech vendors were found in the scanned cookies. Run the cookie scanner first if you have not.');
+				// Scanner ran (scan_available === true) and the GVL is present
+				// but no scanned domain matched the curated map. Soft info
+				// string in the persistent span instead of going blank — keeps
+				// a trace after the toast fades (F007).
+				var noMatchMsg = __('gvl.autoDetectNoMatch', 'No matching ad-tech vendors were found in the scanned cookies.');
 				setAutoDetectStatus(noMatchMsg, 'info');
 				FAZ.notify(noMatchMsg, 'info');
 				return;
 			}
 
-			// Merge into the in-memory selection map. Save is deferred —
-			// the admin still has to click "Save Selection" to persist.
-			// This way the auto-detection is auditable: they SEE which
-			// boxes got ticked and can untick any false positive before
-			// committing the change.
-			suggested.forEach(function (id) { selectedVendors[id] = true; });
+			// Merge ONLY the newly-suggested vendors into the in-memory
+			// selection — never the full matched set. `already_selected` is
+			// computed server-side against the SAVED option, so re-ticking it
+			// would silently resurrect a vendor the admin unticked in-session
+			// (before saving), reversing their unsaved change. Ticking only
+			// `added` leaves in-session unticks intact. Mirrors the safe
+			// cookie-policy.js autoDetectServices() pattern (F007).
+			// Save is deferred — the admin still clicks "Save Selection" to
+			// persist, so the auto-detection stays auditable.
+			added.forEach(function (id) { selectedVendors[id] = true; });
 
 			// Refresh the visible "Selected: N vendors" counter immediately
 			// after mutating selectedVendors. loadVendors()/renderVendors()

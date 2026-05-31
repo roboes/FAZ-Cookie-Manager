@@ -328,11 +328,16 @@ class Api extends Rest_Controller {
 	 *
 	 * Response shape:
 	 *   {
-	 *     "vendor_ids":   [27, 32, 89, 755, …],   // suggested
+	 *     "vendor_ids":   [27, 32, 89, 755, …],   // suggested (empty when no match)
 	 *     "already_selected":  [89, 755],          // intersection with current selection
 	 *     "newly_suggested":   [27, 32],           // suggestions NOT already selected
-	 *     "gvl_available":     true                // false when GVL hasn't been downloaded
+	 *     "gvl_available":     true,               // false when GVL hasn't been downloaded
+	 *     "scan_available":    true                // false when the scanner has no discovered rows
 	 *   }
+	 *
+	 * `scan_available` lets the admin UI tell "no scanner data yet" apart
+	 * from "scanner ran but nothing matched" — parity with the Cookie
+	 * Policy /suggest-services endpoint.
 	 *
 	 * @param WP_REST_Request $request Request object.
 	 * @return WP_REST_Response
@@ -340,7 +345,8 @@ class Api extends Rest_Controller {
 	public function suggest_from_cookies( $request ) {
 		unset( $request );
 		$gvl       = Gvl::get_instance();
-		$suggested = $gvl->suggest_vendor_ids_from_scanned_cookies();
+		$scan      = $gvl->suggest_vendor_ids_from_scanned_cookies();
+		$suggested = $scan['vendor_ids'];
 		$selected  = (array) get_option( 'faz_gvl_selected_vendors', array() );
 		$selected  = array_map( 'intval', $selected );
 
@@ -354,6 +360,7 @@ class Api extends Rest_Controller {
 			'already_selected' => $already_selected,
 			'newly_suggested'  => $newly_suggested,
 			'gvl_available'    => $gvl->has_data(),
+			'scan_available'   => $scan['scan_available'],
 		), 200 );
 	}
 

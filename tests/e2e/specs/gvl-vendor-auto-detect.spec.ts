@@ -91,6 +91,7 @@ async function suggest(): Promise<{
   already_selected: number[];
   newly_suggested: number[];
   gvl_available: boolean;
+  scan_available: boolean;
 }> {
   const res = await adminPage.request.get(`${REST_BASE}/suggest`, {
     headers: { 'X-WP-Nonce': nonce },
@@ -152,10 +153,12 @@ test.describe('GVL vendor auto-detect from cookies', () => {
     expect(r).toHaveProperty('already_selected');
     expect(r).toHaveProperty('newly_suggested');
     expect(r).toHaveProperty('gvl_available');
+    expect(r).toHaveProperty('scan_available');
     expect(Array.isArray(r.vendor_ids)).toBeTruthy();
     expect(Array.isArray(r.already_selected)).toBeTruthy();
     expect(Array.isArray(r.newly_suggested)).toBeTruthy();
     expect(typeof r.gvl_available).toBe('boolean');
+    expect(typeof r.scan_available).toBe('boolean');
   });
 
   test('2. With Google + LinkedIn + TikTok cookies planted, those vendor IDs surface', async () => {
@@ -237,6 +240,10 @@ test.describe('GVL vendor auto-detect from cookies', () => {
     expect(r.vendor_ids).toEqual([]);
     expect(r.already_selected).toEqual([]);
     expect(r.newly_suggested).toEqual([]);
+    // F006: a discovered-but-unmatched domain means the scanner DID run, so
+    // scan_available must be true — the UI shows "no match" here, NOT the
+    // "run the cookie scanner first" hint (which is for scan_available=false).
+    expect(r.scan_available).toBe(true);
   });
 
   test('8. discovered=0 rows are ignored — only scanner-discovered cookies feed suggestions', async () => {
