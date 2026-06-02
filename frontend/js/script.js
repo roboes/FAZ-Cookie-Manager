@@ -1387,6 +1387,27 @@ function _fazSetCategoryToggle(element, category = {}, revisit = false) {
     }
 }
 function _fazSetPreferenceState(category) {
+    // A category with no cookies has nothing for the visitor to consent to,
+    // so hide it from the UI entirely — both the preference-center modal
+    // accordion AND the inline category preview chip, in normal and revisit
+    // mode alike. (Necessary always shows.) This runs for every category in
+    // _fazSetPreferenceCheckBoxStates regardless of `revisit`, which is why
+    // the removal lives here rather than in _fazSetCategoryPreview (the latter
+    // is skipped in revisit mode and only ever targets the inline chip).
+    // Use `!category.cookies || …length === 0` so an undefined cookies array
+    // counts as empty too.
+    if ((!category.cookies || category.cookies.length === 0) && !category.isNecessary) {
+        const accordionEl = document.getElementById(`fazDetailCategory${category.slug}`);
+        if (accordionEl) {
+            const accordionItem = accordionEl.closest(".faz-accordion-item") || accordionEl;
+            accordionItem.remove();
+        }
+        const inlineToggle = document.getElementById(`fazCategoryDirect${category.slug}`);
+        if (inlineToggle && inlineToggle.parentElement && inlineToggle.parentElement.parentElement) {
+            inlineToggle.parentElement.parentElement.remove();
+        }
+        return;
+    }
     if (_fazStore._bannerConfig.config.auditTable.status === false) {
         const tableElement = document.querySelector(
             `#fazDetailCategory${category.slug} [data-faz-tag="audit-table"]`
@@ -1399,7 +1420,7 @@ function _fazSetPreferenceState(category) {
     }
 }
 function _fazSetCategoryPreview(element, category) {
-    if ((category.cookies && category.cookies.length === 0) && !category.isNecessary)
+    if ((!category.cookies || category.cookies.length === 0) && !category.isNecessary)
         element.parentElement.parentElement.remove();
     // Necessary toggles are styled gray/disabled centrally in _fazSetCheckboxes
 }
