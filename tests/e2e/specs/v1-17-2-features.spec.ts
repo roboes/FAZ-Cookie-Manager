@@ -1,22 +1,25 @@
 /**
  * E2E — 1.17.2 feature & fix suite.
  *
- * Ten browser-level tests, one per contract the 1.17.2 work introduced.
+ * 13 browser-level tests, one per contract the 1.17.2 work introduced.
  * Each provisions a real published page carrying the relevant shortcode
  * (idempotently, so the file survives a DB rebuild / fresh CI install)
- * and exercises the true public render path, plus one frontend
- * interaction test for the revisit button.
+ * and exercises the true public render path, plus frontend interaction
+ * tests for the revisit button.
  *
- *  1. Smart-quote lang  → [faz_cookie_policy_complete lang=”it”] (curly) renders Italian, not English.
- *  2. Straight-quote     → [faz_cookie_policy_complete lang="it"] renders Italian (control).
- *  3. Unquoted lang=bg   → Bulgarian policy renders.
- *  4. Quoted lang="bg"   → Bulgarian title + "last updated" label present.
- *  5. Date localization   → Italian policy date uses an Italian month name, never an English one.
- *  6. Bulgarian date      → Bulgarian policy date uses a Cyrillic month + " г." suffix.
- *  7. Smart-quote juris   → jurisdiction=”ccpa-california” (curly) renders the CCPA policy.
- *  8. Revisit shortcode   → [faz_cookie_settings] renders the button with the open-preferences hook.
- *  9. Custom text/class    → text/class attributes honoured and sanitised.
- * 10. Button opens center  → clicking the [faz_cookie_settings] button opens the preference center.
+ *  1.  Smart-quote lang   → [faz_cookie_policy_complete lang=”it”] (curly) renders Italian, not English.
+ *  2.  Straight-quote     → [faz_cookie_policy_complete lang="it"] renders Italian (control).
+ *  3.  Unquoted lang=bg   → Bulgarian policy renders.
+ *  4.  Quoted lang="bg"   → Bulgarian title + "last updated" label present.
+ *  5.  Date localization  → Italian policy date uses an Italian month name, never an English one.
+ *  6.  Bulgarian date     → Bulgarian policy date uses a Cyrillic month + " г." suffix.
+ *  7.  Smart-quote juris  → jurisdiction=”ccpa-california” (curly) renders the CCPA policy.
+ *  7b. Underscore locale  → lang="pt_BR" survives the attribute cleanup (renders Portuguese).
+ *  8.  Revisit shortcode  → [faz_cookie_settings] renders the button with the open-preferences hook.
+ *  9.  Custom text/class  → text/class attributes honoured and sanitised.
+ * 10.  Button styled      → the button carries the banner primary-button styling, not raw browser chrome.
+ * 11.  Button opens center → clicking the [faz_cookie_settings] button opens the preference center.
+ * 12.  Warn, no silent no-op → button warns when no preference center is present.
  */
 
 import { test, expect, type Page } from '../fixtures/wp-fixture';
