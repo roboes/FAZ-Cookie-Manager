@@ -1961,6 +1961,13 @@ function _fazAttachShortCodeStyles() {
     // detail-view "Show more" link — they'd fall back to the hard-coded default
     // colour. Apply the per-element vars to every .faz-modal too.
     const targets = [root];
+    // Also expose the per-element vars on :root so shortcode buttons rendered
+    // OUTSIDE #faz-consent — e.g. the [faz_cookie_settings] revisit button in
+    // page content — inherit the admin-configured banner button colours
+    // (--faz-accept-button-*) instead of falling back to the hard-coded
+    // defaults. :root is the lowest-specificity scope, so the banner's own
+    // per-element overrides on #faz-consent / .faz-modal still win inside it.
+    if (document.documentElement) targets.push(document.documentElement);
     Array.prototype.forEach.call(document.querySelectorAll('.faz-modal'), function (m) {
         targets.push(m);
     });

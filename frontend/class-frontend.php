@@ -3446,7 +3446,35 @@ class Frontend {
 			. '.faz-modal .faz-accordion-header .faz-always-active{'
 			. 'margin-left:auto;margin-right:8px;white-space:nowrap;'
 			. '}';
-		$css = $css_reset . $css . $css_fixes;
+		// [faz_cookie_settings] revisit button. Rendered inside page content
+		// (outside #faz-consent), so it can't inherit the banner's scoped
+		// rules — replicate the primary "accept" button here, consuming the
+		// SAME --faz-accept-button-* / --faz-btn-* custom properties the admin
+		// sets in Banner > Colours (exposed on :root by script.js), with the
+		// gdpr.json defaults as fallback so it still looks right before JS runs.
+		$css_settings_btn = '.faz-cookie-settings-btn{'
+			. 'display:inline-block;'
+			. 'font-family:inherit;'
+			. 'font-size:var(--faz-btn-font-size,14px);'
+			. 'line-height:var(--faz-btn-line-height,24px);'
+			. 'font-weight:500;'
+			. 'padding:var(--faz-btn-padding,8px 27px);'
+			. 'border-radius:var(--faz-btn-border-radius,2px);'
+			. 'border-width:var(--faz-accept-button-border-width,2px);'
+			. 'border-style:var(--faz-accept-button-border-style,solid);'
+			. 'border-color:var(--faz-accept-button-border-color,#1863dc);'
+			. 'background:var(--faz-accept-button-background-color,#1863dc);'
+			. 'color:var(--faz-accept-button-color,#ffffff);'
+			. 'white-space:nowrap;text-align:center;text-transform:none;'
+			. 'text-decoration:none;text-shadow:none;box-shadow:none;'
+			. 'cursor:pointer;min-height:0;-webkit-appearance:none;appearance:none;'
+			. 'transition:opacity .15s ease;'
+			. '}'
+			. '.faz-cookie-settings-btn:hover{opacity:.8;}'
+			. '.faz-cookie-settings-btn:focus-visible{'
+			. 'outline:2px solid var(--faz-accept-button-background-color,#1863dc);outline-offset:2px;'
+			. '}';
+		$css = $css_reset . $css . $css_fixes . $css_settings_btn;
 
 		set_transient( $cache_key, $css, DAY_IN_SECONDS );
 		return $css;

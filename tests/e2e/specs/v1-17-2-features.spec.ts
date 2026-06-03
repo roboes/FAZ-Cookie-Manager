@@ -118,6 +118,32 @@ test.describe('1.17.2 — [faz_cookie_settings] revisit shortcode', () => {
     await expect(btn, 'custom text not applied').toHaveText('Gestisci cookie');
   });
 
+  test('11. button is styled like the banner primary button (not raw browser chrome)', async ({ page, wpBaseURL }) => {
+    await page.goto(`${wpBaseURL}/${PAGES.settings.slug}/`, { waitUntil: 'domcontentloaded' });
+    const btn = page.locator('button.faz-cookie-settings-btn').first();
+    await expect(btn).toBeVisible({ timeout: 15_000 });
+    const style = await btn.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return {
+        bg: s.backgroundColor,
+        color: s.color,
+        borderStyle: s.borderStyle,
+        borderWidth: s.borderTopWidth,
+        padding: `${s.paddingTop} ${s.paddingRight}`,
+        fontWeight: s.fontWeight,
+      };
+    });
+    // Defaults inherited from the accept-button vars / .faz-btn base (gdpr.json
+    // ships #1863dc / #fff). Proves the shortcode button picks up the banner
+    // button styling rather than the browser's default grey chrome.
+    expect(style.bg).toBe('rgb(24, 99, 220)');
+    expect(style.color).toBe('rgb(255, 255, 255)');
+    expect(style.borderStyle).toBe('solid');
+    expect(style.borderWidth).toBe('2px');
+    expect(style.padding).toBe('8px 27px');
+    expect(style.fontWeight).toBe('500');
+  });
+
   test('10. clicking the button opens the preference center (after consent)', async ({ page, context, wpBaseURL }) => {
     await context.clearCookies();
     await page.goto(`${wpBaseURL}/${PAGES.settings.slug}/`, { waitUntil: 'domcontentloaded' });
