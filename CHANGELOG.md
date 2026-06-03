@@ -21,6 +21,10 @@ All notable changes to FAZ Cookie Manager are documented in this file.
 
 - `aria-label`s on the new per-element colour-picker controls in the Banner → Colours tab.
 
+### i18n
+
+- Regenerated `languages/faz-cookie-manager.pot` (1114 → 1134 strings) and re-synced the bundled `.po` catalogs (cs_CZ, de_DE, fr_FR, hr_HR, it_IT, nl_NL) so the new admin / shortcode strings — the `[faz_cookie_settings]` button label and help text, and the "Bulgarian" Cookie Policy language option — are translatable. The brand-new strings are not yet translated into the shipped locales, so the compiled `.mo` files are unchanged (they only carry existing translations).
+
 ## [1.17.1] — 2026-06-02
 
 ### Fixed
