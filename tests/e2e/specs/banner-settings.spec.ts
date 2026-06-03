@@ -865,8 +865,14 @@ test.describe('Banner settings: persistence and frontend reflection', () => {
         .evaluate((el) => getComputedStyle(el).color);
       expect(showDescColor).toBe('rgb(227, 0, 15)'); // #e3000f — proves modal-scoped CSS var fix
 
-      const toggleBg = await visitor.page.locator('.faz-switch input[type="checkbox"]:checked').first()
-        .evaluate((el) => getComputedStyle(el).backgroundColor);
+      // Scope to an ENABLED modal toggle: the first ":checked" switch can be the
+      // disabled "necessary" toggle (different style), which makes the colour
+      // assertion flaky. Pick an enabled one in the modal and tick it explicitly.
+      const modalEnabledToggle = visitor.page
+        .locator('.faz-modal .faz-switch input[type="checkbox"]:not([disabled])')
+        .first();
+      await modalEnabledToggle.check();
+      const toggleBg = await modalEnabledToggle.evaluate((el) => getComputedStyle(el).backgroundColor);
       expect(toggleBg).toBe('rgb(255, 122, 0)'); // #ff7a00 — modal toggle driven by the catprev picker
     } finally {
       await visitor.ctx.close();
