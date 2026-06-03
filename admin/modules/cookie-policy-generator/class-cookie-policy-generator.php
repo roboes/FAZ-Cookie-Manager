@@ -126,11 +126,13 @@ class Cookie_Policy_Generator {
 		// part of the value (”it”), so the language never matched a supported
 		// code and the policy silently fell back to the site locale (reported by
 		// a user whose [...lang="it"] rendered in English). A language /
-		// jurisdiction code only ever contains ASCII letters, digits and
-		// hyphens, so strip everything else — this neutralises smart quotes,
-		// straight quotes and stray whitespace regardless of encoding.
+		// jurisdiction code only ever contains ASCII letters, digits, hyphens
+		// and underscores — the renderer normalises locale-style underscores
+		// (pt_BR → pt-BR), so the underscore must survive the cleanup; strip
+		// everything else to neutralise smart quotes, straight quotes and stray
+		// whitespace regardless of encoding.
 		foreach ( array( 'lang', 'jurisdiction' ) as $faz_attr_key ) {
-			$atts[ $faz_attr_key ] = preg_replace( '/[^A-Za-z0-9-]/', '', (string) $atts[ $faz_attr_key ] );
+			$atts[ $faz_attr_key ] = preg_replace( '/[^A-Za-z0-9_-]/', '', (string) $atts[ $faz_attr_key ] );
 		}
 		return Renderer::render( $atts );
 	}

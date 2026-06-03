@@ -710,9 +710,9 @@ defined( 'ABSPATH' ) || exit;
 				</div>
 				<div class="faz-form-group" style="border-top:1px solid var(--faz-border);padding-top:16px;margin-top:4px;">
 					<label><?php esc_html_e( 'Inline &quot;manage preferences&quot; button (shortcode)', 'faz-cookie-manager' ); ?></label>
-					<p style="margin:0 0 8px;font-size:13px;"><?php esc_html_e( 'As an alternative to the floating widget, drop this shortcode anywhere — a page, the cookie policy, a footer or menu — to render a button that re-opens this consent preference center:', 'faz-cookie-manager' ); ?></p>
+					<p style="margin:0 0 8px;font-size:13px;"><?php esc_html_e( 'As an alternative to the floating widget, place this shortcode in a page, post, footer or menu to render a button that re-opens this consent preference center:', 'faz-cookie-manager' ); ?></p>
 					<code style="display:inline-block;font-size:14px;padding:8px 12px;background:var(--faz-bg);border:1px solid var(--faz-border);border-radius:var(--faz-radius);user-select:all;">[faz_cookie_settings]</code>
-					<div class="faz-help"><?php echo wp_kses_post( __( 'Optional attributes: <code>text=&quot;Manage cookies&quot;</code> (custom label) and <code>class=&quot;my-button&quot;</code> (extra CSS classes). The button automatically inherits your banner&#39;s primary button colours.', 'faz-cookie-manager' ) ); ?></div>
+					<div class="faz-help"><?php echo wp_kses_post( __( 'Optional attributes: <code>text=&quot;Manage cookies&quot;</code> (custom label) and <code>class=&quot;my-button&quot;</code> (extra CSS classes). The button automatically inherits your banner&#39;s primary button colours. <strong>It needs the banner runtime to work, so place it on a page where the banner is active</strong> — pages added to the banner exclusion list don\'t load the consent runtime, so the button won\'t open the preferences there.', 'faz-cookie-manager' ) ); ?></div>
 				</div>
 			</div>
 		</div>

@@ -33,6 +33,7 @@ const PAGES = {
   bgUnquoted:   { slug: 'faz-v172-bg-unquoted',   sc: `[faz_cookie_policy_complete lang=bg]` },
   bgQuoted:     { slug: 'faz-v172-bg-quoted',     sc: `[faz_cookie_policy_complete lang="bg"]` },
   ccpaCurly:    { slug: 'faz-v172-ccpa-curly',    sc: `[faz_cookie_policy_complete lang="en" jurisdiction=${LQ}ccpa-california${RQ}]` },
+  ptUnderscore: { slug: 'faz-v172-pt-underscore', sc: `[faz_cookie_policy_complete lang="pt_BR" jurisdiction="lgpd-brazil"]` },
   settings:     { slug: 'faz-v172-settings',      sc: `[faz_cookie_settings]` },
   settingsCust: { slug: 'faz-v172-settings-cust', sc: `[faz_cookie_settings text="Gestisci cookie" class="my-revisit-btn"]` },
 } as const;
@@ -100,6 +101,14 @@ test.describe('1.17.2 — Cookie Policy language & date', () => {
   test('7. curly-quoted jurisdiction=”ccpa-california” renders the CCPA policy', async ({ page, wpBaseURL }) => {
     const text = await policyText(page, wpBaseURL, PAGES.ccpaCurly.slug);
     expect(text, 'jurisdiction smart quotes not stripped — CCPA policy not selected').toContain('California Consumer Privacy Act');
+  });
+
+  test('7b. underscore locale lang="pt_BR" survives the attribute cleanup (renders Portuguese)', async ({ page, wpBaseURL }) => {
+    // The smart-quote cleanup must keep "_" so pt_BR normalises to pt-BR instead
+    // of collapsing to "ptBR" and falling back to the default language.
+    const text = await policyText(page, wpBaseURL, PAGES.ptUnderscore.slug);
+    expect(text, 'pt_BR collapsed to ptBR and fell back to default language').toContain('Política de Cookies');
+    expect(text, 'English leaked into the pt_BR policy').not.toContain('Last updated:');
   });
 });
 

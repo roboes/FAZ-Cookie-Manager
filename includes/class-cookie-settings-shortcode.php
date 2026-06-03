@@ -3,14 +3,21 @@
  * Cookie Settings Shortcode — [faz_cookie_settings]
  *
  * Renders a button that re-opens the consent preference center, so visitors can
- * change their choices from anywhere on the site (e.g. inside the generated
- * cookie policy). The CookieYes equivalent is [cookie_settings].
+ * change their choices (e.g. inside the generated cookie policy). The CookieYes
+ * equivalent is [cookie_settings].
  *
  * The button carries `data-faz-open-preferences` and the `faz-cookie-settings-btn`
  * class; the frontend script (script.js) binds a delegated click handler that
  * calls the same preference-center opener the banner's "settings" button uses.
  * No inline JS and no extra asset — it relies on the banner script that is
  * already enqueued on the front end.
+ *
+ * IMPORTANT: the button depends on the banner runtime (script.js + the
+ * preference-center template + CSS) being present on the page. That runtime is
+ * NOT loaded on pages added to `banner_control.excluded_pages`, so the button
+ * will render but stay inert there. Place it on a page where the banner is
+ * active. (When the runtime is present but no preference center exists, the
+ * delegated handler logs a console warning instead of failing silently.)
  *
  * Attributes:
  *   - text  (string) custom button label (default: localized "Manage consent preferences")
