@@ -3,7 +3,7 @@
  * Module bootstrap for Cookie Policy Generator (Spec 002).
  *
  * Singleton; registers:
- *  - the `[faz_cookie_policy]` shortcode (frontend, FR-03)
+ *  - the `[faz_cookie_policy_complete]` shortcode (frontend, FR-03)
  *  - the admin menu entry "Cookie Policy" (via class-admin.php hook)
  *  - the REST endpoints under faz/v1/cookie-policy/*  (admin form)
  *
@@ -100,7 +100,7 @@ class Cookie_Policy_Generator {
 	}
 
 	/**
-	 * `[faz_cookie_policy]` shortcode callback.
+	 * `[faz_cookie_policy_complete]` shortcode callback.
 	 *
 	 * Attributes:
 	 *   - lang         (en, it, fr, de, es, pt-BR, bg) — override visitor locale

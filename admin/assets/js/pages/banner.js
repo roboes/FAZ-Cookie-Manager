@@ -281,7 +281,23 @@
 		if (typeEl) {
 			typeEl.addEventListener('change', updatePositionOptions);
 		}
+
+		// ── Hide the Read More link colour picker when the Read More button is
+		// toggled off (its colour would style an element that never renders). ──
+		var readmoreToggle = document.querySelector('#faz-b-readmore-toggle input[type="checkbox"]');
+		if (readmoreToggle) {
+			readmoreToggle.addEventListener('change', syncReadmoreColorVisibility);
+		}
+		syncReadmoreColorVisibility();
 	});
+
+	// Show/hide the Read More colour control to match the Read More button toggle.
+	function syncReadmoreColorVisibility() {
+		var group = document.getElementById('faz-readmore-color-group');
+		if (!group) return;
+		var cb = document.querySelector('#faz-b-readmore-toggle input[type="checkbox"]');
+		group.style.display = (cb && cb.checked) ? '' : 'none';
+	}
 
 	function updatePositionOptions() {
 		var type = getVal('faz-b-type') || 'box';
@@ -1075,6 +1091,8 @@
 		setChecked('faz-b-reject-toggle', getStatus(buttons.reject));
 		setChecked('faz-b-settings-toggle', getStatus(buttons.settings));
 		setChecked('faz-b-readmore-toggle', getStatus(buttons.readMore));
+		// Reflect the just-loaded Read More toggle state on its colour control.
+		syncReadmoreColorVisibility();
 
 		var closeBtn = (config.notice && config.notice.elements && config.notice.elements.closeButton) || {};
 		setChecked('faz-b-close-toggle', typeof closeBtn === 'object' ? getStatus(closeBtn) : true);

@@ -1172,7 +1172,14 @@ function _fazShowPreferenceCenter() {
         _fazShowOverLay();
         _fazHideBanner();
     } else {
-        _fazToggleAriaExpandStatus("=settings-button");
+        // FORCE "true" — this is an idempotent OPEN, not a toggle. Without the
+        // force value a second click of the [faz_cookie_settings] button (or any
+        // [data-faz-open-preferences] trigger) flips aria-expanded to "false"
+        // while the pushdown panel stays visually open (classList.add is
+        // idempotent), desyncing screen-reader state from the visible state. The
+        // real open/close toggle used by the banner's own settings button lives
+        // in _fazTogglePreferenceCenter() and is unaffected.
+        _fazToggleAriaExpandStatus("=settings-button", "true");
     }
 
     // Move focus into the preference center for keyboard/screen reader users.

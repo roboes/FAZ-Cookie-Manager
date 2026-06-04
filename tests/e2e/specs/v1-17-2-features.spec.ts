@@ -1,7 +1,7 @@
 /**
  * E2E — 1.17.2 feature & fix suite.
  *
- * 13 browser-level tests, one per contract the 1.17.2 work introduced.
+ * 14 browser-level tests, one per contract the 1.17.2 work introduced.
  * Each provisions a real published page carrying the relevant shortcode
  * (idempotently, so the file survives a DB rebuild / fresh CI install)
  * and exercises the true public render path, plus frontend interaction
@@ -20,10 +20,11 @@
  * 10.  Button styled      → the button carries the banner primary-button styling, not raw browser chrome.
  * 11.  Button opens center → clicking the [faz_cookie_settings] button opens the preference center.
  * 12.  Warn, no silent no-op → button warns when no preference center is present.
+ * 13.  Pushdown ARIA       → repeated button clicks keep aria-expanded true (no desync).
  */
 
 import { test, expect, type Page } from '../fixtures/wp-fixture';
-import { upsertPage } from '../utils/wp-env';
+import { upsertPage, wpEval } from '../utils/wp-env';
 
 // Curly / smart quotes the WordPress block & visual editors substitute
 // for straight quotes — the exact bytes that broke lang resolution.
@@ -197,5 +198,45 @@ test.describe('1.17.2 — [faz_cookie_settings] revisit shortcode', () => {
       warnings.some((w) => w.includes('FAZ Cookie Manager') && w.includes('no consent preference center')),
       'expected a console.warn diagnostic instead of a silent no-op',
     ).toBe(true);
+  });
+
+  test('13. pushdown: repeated button clicks keep aria-expanded true (no ARIA desync)', async ({ page, context, wpBaseURL }) => {
+    // In pushdown mode _fazShowPreferenceCenter() previously TOGGLED aria-expanded,
+    // so a 2nd click of the [faz_cookie_settings] button flipped it to "false"
+    // while the panel stayed visually open. The fix forces "true" on open.
+    const setBannerType = (type: string, pct: string) =>
+      wpEval(
+        `global $wpdb; $t = $wpdb->prefix . 'faz_banners';` +
+          ` $row = $wpdb->get_row("SELECT settings FROM $t WHERE banner_id=1");` +
+          ` if ($row) { $s = json_decode($row->settings, true);` +
+          ` $s['settings']['type'] = '${type}'; $s['settings']['preferenceCenterType'] = '${pct}';` +
+          ` $wpdb->update($t, array('settings' => wp_json_encode($s)), array('banner_id' => 1)); }` +
+          ` $wpdb->query("DELETE FROM {$wpdb->options} WHERE option_name LIKE '%faz_banner_template%' OR option_name LIKE '_transient_faz_%'");` +
+          ` echo 'ok';`,
+      );
+
+    setBannerType('classic', 'pushdown'); // classic forces pushdown
+    try {
+      await context.clearCookies();
+      await page.goto(`${wpBaseURL}/${PAGES.settings.slug}/?n=${Date.now()}`, { waitUntil: 'load' });
+      await page.locator('[data-faz-tag="accept-button"]').first().click({ timeout: 15_000 }).catch(() => {});
+      await page.waitForTimeout(800);
+
+      const settingsBtn = page.locator('[data-faz-tag="settings-button"]').first();
+      const revisitBtn = page.locator('button.faz-cookie-settings-btn').first();
+
+      await revisitBtn.click();
+      await page.waitForTimeout(400);
+      expect(await settingsBtn.getAttribute('aria-expanded'), 'aria-expanded should be true after opening').toBe('true');
+
+      await revisitBtn.click(); // 2nd click — must NOT flip aria-expanded to false
+      await page.waitForTimeout(400);
+      expect(
+        await settingsBtn.getAttribute('aria-expanded'),
+        'aria-expanded desynced to false on the 2nd click while the panel stayed open',
+      ).toBe('true');
+    } finally {
+      setBannerType('box', 'popup'); // restore the shared banner
+    }
   });
 });

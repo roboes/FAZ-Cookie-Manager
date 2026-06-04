@@ -70,8 +70,12 @@ class Cookie_Settings_Shortcode {
 			}
 		}
 
+		// aria-haspopup="dialog" tells assistive tech the button opens the
+		// consent preference center (a dialog), since this is the first such
+		// trigger that lives entirely outside the banner DOM in arbitrary page
+		// content (WCAG 4.1.2 Name, Role, Value).
 		return sprintf(
-			'<button type="button" class="%s" data-faz-open-preferences="1">%s</button>',
+			'<button type="button" class="%s" data-faz-open-preferences="1" aria-haspopup="dialog">%s</button>',
 			esc_attr( implode( ' ', $classes ) ),
 			esc_html( $label )
 		);

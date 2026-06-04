@@ -16,10 +16,13 @@ All notable changes to FAZ Cookie Manager are documented in this file.
 - **"Last updated" date localised to the wrong language.** `Renderer::format_date()` used `date_i18n()`, which localises month names to the *site* locale rather than the policy's template language — so an Italian policy rendered on an English-locale site printed "June" instead of "giugno". The date is now built from `gmdate()` numeric parts plus a per-template-language month-name table (`month_names()`), with the correct per-language date format: en `June 3, 2026`, de `3. Juni 2026`, es / pt-BR `3 de junio de 2026`, bg `3 юни 2026 г.`, it / fr (and default) `3 giugno 2026`.
 - **LiteSpeed Cache compatibility.** The anti-FOUC banner reveal hides every `[data-faz-tag]` element until `script.js` adds `faz-ready` to `<html>`, via an inline guard `<style>`. LiteSpeed's *CSS Combine* optimisation moved that inline style into a combined external stylesheet, so the reveal never fired and the banner stayed invisible with non-functional controls. The guard `<style>` and the reveal markup now carry `data-no-optimize` / `data-noptimize`, the opt-out attributes LiteSpeed Cache and Autoptimize both honour, so the guard stays inline. Verified on a live LiteSpeed Cache 7.8 server. Reported by Bozhidar.
 - **GVL auto-detect "already in session" count.** When the auto-detect added zero new vendors, the `added.length === 0` branch reported the *suggested* count instead of the already-in-session count; it now uses `alreadyInSession`.
+- **Admin polish.** The Banner → Colours "Read More / Cookie Policy Link" colour picker now hides when the Read More button is toggled off (it styled an element that wasn't rendered); the `[faz_cookie_policy_complete]` class docblocks no longer mis-name the shortcode as `[faz_cookie_policy]`; and the shortcode-snippet documentation block uses a heading rather than an empty `<label>`.
 
 ### Accessibility
 
 - `aria-label`s on the new per-element colour-picker controls in the Banner → Colours tab.
+- The `[faz_cookie_settings]` button now carries `aria-haspopup="dialog"` so assistive tech announces that it opens the consent preference center (WCAG 4.1.2) — it is the first such trigger living entirely outside the banner DOM.
+- Fixed an `aria-expanded` desync in pushdown mode: clicking the `[faz_cookie_settings]` button (or any `[data-faz-open-preferences]` trigger) a second time while the panel was open flipped `aria-expanded` to `false` even though the panel stayed visible, because the open path toggled instead of forcing the state. The open path now forces `aria-expanded="true"` (the banner's own settings button, a genuine open/close toggle, is unchanged). Covered by `v1-17-2-features.spec.ts` test 13.
 
 ### i18n
 
