@@ -453,13 +453,20 @@ class Frontend {
 						'token'     => $pv_token,
 					)
 				);
+				// Pre-consent banner/pageview metrics are AGGREGATE-ONLY: no
+				// per-visitor identifier is created or transmitted. We removed
+				// the former sessionStorage "faz_sid" + session_id field — it
+				// was a linkable identifier written before any consent (an
+				// ePrivacy/Art.5(3) risk) and, crucially, was never read back:
+				// every dashboard query is a COUNT(*) grouped by day/event, so
+				// dropping it is lossless. The events that remain (pageview,
+				// banner_view/accept/reject/settings) are unlinkable counters
+				// measuring the consent mechanism itself.
 				$pv_js = "(function(){" .
 					"if(typeof _fazPageviewConfig==='undefined')return;" .
-					"var sid=sessionStorage.getItem('faz_sid');" .
-					"if(!sid){sid=Math.random().toString(36).substring(2)+Date.now().toString(36);sessionStorage.setItem('faz_sid',sid);}" .
 					"function fazTrack(t){" .
 						"fetch(_fazPageviewConfig.restUrl,{method:'POST',headers:{'Content-Type':'application/json'}," .
-						"body:JSON.stringify({token:_fazPageviewConfig.token,page_url:_fazPageviewConfig.pageUrl,page_title:_fazPageviewConfig.pageTitle,event_type:t,session_id:sid})}).catch(function(){});" .
+						"body:JSON.stringify({token:_fazPageviewConfig.token,page_url:_fazPageviewConfig.pageUrl,page_title:_fazPageviewConfig.pageTitle,event_type:t})}).catch(function(){});" .
 					"}" .
 					"fazTrack('pageview');" .
 					"document.addEventListener('fazcookie_banner_loaded',function(){fazTrack('banner_view');});" .
@@ -2200,7 +2207,27 @@ class Frontend {
 			return false;
 		}
 
-		$is_url_pattern = false !== strpos( $pattern, '/' ) || false !== strpos( $pattern, '.' );
+		// Domain+path patterns ("googleapis.com/maps/api/", "hcaptcha.com/")
+		// — i.e. the pre-slash segment looks like a hostname (contains a dot)
+		// — are matched HOST-ANCHORED so that "googleapis.com/" cannot be
+		// spoofed by a look-alike host such as "evilgoogleapis.com/" or
+		// "googleapis.com.attacker.net/". Filename patterns ("jquery.min.js"),
+		// bare path fragments ("wp-includes/", "plugins/elementor/") and
+		// handle/class tokens fall through to the looser matching below — they
+		// are first-party infrastructure, not third-party domains.
+		$slash_pos = strpos( $pattern, '/' );
+		if ( false !== $slash_pos ) {
+			$pattern_host = substr( $pattern, 0, $slash_pos );
+			if ( false !== strpos( $pattern_host, '.' ) ) {
+				return $this->matches_domain_pattern(
+					$value,
+					$pattern_host,
+					ltrim( substr( $pattern, $slash_pos + 1 ), '/' )
+				);
+			}
+		}
+
+		$is_url_pattern = false !== $slash_pos || false !== strpos( $pattern, '.' );
 		if ( $is_url_pattern ) {
 			$parsed = wp_parse_url( $value );
 			if ( false !== $parsed && is_array( $parsed ) ) {
@@ -2239,6 +2266,51 @@ class Frontend {
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * Host-anchored match for a domain (+ optional path) whitelist pattern.
+	 *
+	 * The value's host must equal the pattern host or be a sub-domain of it
+	 * on a label boundary — so "googleapis.com" matches "maps.googleapis.com"
+	 * (legitimate sub-domain) but NOT "evilgoogleapis.com" or
+	 * "googleapis.com.attacker.net". When the pattern carries a path, the
+	 * request path must additionally begin with it (prefix-anchored).
+	 *
+	 * @param string $value        Attribute value (typically a src/href URL).
+	 * @param string $pattern_host Host portion of the pattern (pre-slash).
+	 * @param string $pattern_path Path portion of the pattern (post-slash, may be '').
+	 * @return bool
+	 */
+	private function matches_domain_pattern( $value, $pattern_host, $pattern_path ) {
+		$pattern_host = strtolower( trim( $pattern_host ) );
+		if ( '' === $pattern_host ) {
+			return false;
+		}
+
+		$parsed = wp_parse_url( $value );
+		$host   = ( is_array( $parsed ) && isset( $parsed['host'] ) ) ? strtolower( $parsed['host'] ) : '';
+		if ( '' === $host ) {
+			// Relative URL (no host) can never satisfy a domain pattern.
+			return false;
+		}
+
+		$host_ok = ( $host === $pattern_host )
+			|| (
+				strlen( $host ) > strlen( $pattern_host ) + 1
+				&& substr( $host, - ( strlen( $pattern_host ) + 1 ) ) === '.' . $pattern_host
+			);
+		if ( ! $host_ok ) {
+			return false;
+		}
+
+		$pattern_path = strtolower( $pattern_path );
+		if ( '' === $pattern_path ) {
+			return true;
+		}
+
+		$path = ( is_array( $parsed ) && isset( $parsed['path'] ) ) ? ltrim( strtolower( $parsed['path'] ), '/' ) : '';
+		return 0 === strpos( $path, $pattern_path );
 	}
 
 	/**

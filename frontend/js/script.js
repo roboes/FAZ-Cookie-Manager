@@ -4068,6 +4068,14 @@ window.addEventListener('message', function(event) {
         // their choice (e.g. reject → accept) without their knowledge.
         if (ref._fazGetFromStore("action") === "yes") return;
 
+        // Idempotency / anti-reload-loop guard: if the forwarded consent is
+        // byte-for-byte identical to the cookie already stored on this domain,
+        // there is nothing to apply. Without this, two domains that each
+        // forward to the other could trigger an endless reload ping-pong, and
+        // a single allowed origin re-posting the same message would needlessly
+        // reload the page on every event.
+        if (ref._fazGetCookie('fazcookie-consent') === consent) return;
+
         // Clear any vendor/TCF cookies the recipient domain may have from
         // a previous (possibly more permissive) choice. Without this, a
         // cross-domain forward that downgrades the consent state would
