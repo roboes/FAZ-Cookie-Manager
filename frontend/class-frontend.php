@@ -1100,12 +1100,28 @@ class Frontend {
 		$banner          = $this->banner;
 		$banner_settings = $banner->get_settings();
 
+		// Consent-cookie lifetime, with a law-aware hard cap applied here so the
+		// EFFECTIVE expiry can never exceed the legal maximum regardless of any
+		// larger value an admin saved (the UI allows up to 10 years). The
+		// Italian Garante (Linee guida cookie, 10 Jun 2021) caps consent
+		// validity at 6 months for opt-in (GDPR-family) banners, so those are
+		// clamped to 182 days. Opt-out (CCPA/CPRA) banners are NOT subject to
+		// that cap — a LONGER lifetime is actually preferable there (CPRA bars
+		// asking a user to re-confirm an opt-out more than once per 12 months),
+		// so their configured value (default 365) is honoured as-is.
+		$faz_configured_expiry = isset( $banner_settings['settings']['consentExpiry']['value'] )
+			? absint( $banner_settings['settings']['consentExpiry']['value'] )
+			: 180;
+		$faz_expiry = ( 'ccpa' === $banner->get_law() )
+			? max( 1, $faz_configured_expiry )
+			: max( 1, min( 182, $faz_configured_expiry ) );
+
 		$providers = array();
 		$store     = array(
 			'_ipData'       => array(),
 			'_assetsURL'    => FAZ_PLUGIN_URL . 'frontend/images/',
 			'_publicURL'    => set_url_scheme( get_site_url() ),
-			'_expiry'       => max( 1, isset( $banner_settings['settings']['consentExpiry']['value'] ) ? absint( $banner_settings['settings']['consentExpiry']['value'] ) : 180 ),
+			'_expiry'       => $faz_expiry,
 			'_categories'   => $this->get_cookie_groups(),
 			'_activeLaw'         => $banner->get_law(),
 			'_bannerSlug'        => $banner->get_slug(),

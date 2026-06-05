@@ -1024,7 +1024,12 @@
 		setVal('faz-b-position', s.position || 'bottom-right');
 		setVal('faz-b-theme', s.theme || 'light');
 		setVal('faz-b-pref-type', s.preferenceCenterType || 'popup');
-		setVal('faz-b-expiry', (s.consentExpiry && s.consentExpiry.value) || 365);
+		// Fallback expiry when the banner has no stored consentExpiry.value
+		// (newly cloned/migrated banners). Law-aware to match the JSON config
+		// defaults: opt-in (GDPR-family) banners default to 180 days — the
+		// Garante caps consent validity at 6 months, so the old blanket 365
+		// fallback silently exceeded it; opt-out (CCPA) banners default to 365.
+		setVal('faz-b-expiry', (s.consentExpiry && s.consentExpiry.value) || ((s.applicableLaw === 'ccpa') ? 365 : 180));
 		// Detect regulation mode: gdpr + donotSell.status=true → "Both" mode
 		var lawVal = s.applicableLaw || 'gdpr';
 		var donotSellEl = (config.notice && config.notice.elements && config.notice.elements.donotSell) || {};
