@@ -131,6 +131,13 @@ class Renderer {
 		// trailing whitespace/em-dashes/commas, visually broken on the public
 		// policy page. Reported by Gooloo on 1.16.1.
 		$markdown = self::strip_empty_label_lines( $markdown );
+		// By default drop the scaffold's leading H1 ("# Cookie Policy") so the
+		// rendered policy does not duplicate the WordPress page title it is
+		// usually placed inside. `show_title="true"` keeps it. The policy stays
+		// self-referential either way — the intro paragraph names itself.
+		if ( ! self::should_show_title( $atts ) ) {
+			$markdown = self::strip_leading_h1( $markdown );
+		}
 		$html     = Generator::markdown_to_html( $markdown );
 
 		foreach ( $html_tokens as $token_name => $html_value ) {
@@ -547,6 +554,43 @@ class Renderer {
 	 * @param string $markdown
 	 * @return string
 	 */
+	/**
+	 * Whether the shortcode asked to keep the scaffold's leading H1 title.
+	 *
+	 * Default is false (the title is dropped). Accepts the usual truthy strings
+	 * so `show_title="true"`, `="1"`, `="yes"`, `="on"` all enable it.
+	 *
+	 * @param array $atts Shortcode attributes.
+	 * @return bool
+	 */
+	private static function should_show_title( $atts ) {
+		if ( ! is_array( $atts ) || ! isset( $atts['show_title'] ) ) {
+			return false;
+		}
+		$val = strtolower( trim( (string) $atts['show_title'] ) );
+		return in_array( $val, array( '1', 'true', 'yes', 'on' ), true );
+	}
+
+	/**
+	 * Remove the scaffold's leading level-1 ATX heading ("# Cookie Policy").
+	 *
+	 * Only the FIRST line is touched, and only when it is a single-`#` heading;
+	 * deeper headings (`## …`) are body structure and are preserved. A scaffold
+	 * without a leading H1 is returned unchanged.
+	 *
+	 * @param string $markdown
+	 * @return string
+	 */
+	private static function strip_leading_h1( $markdown ) {
+		if ( ! is_string( $markdown ) || '' === $markdown ) {
+			return (string) $markdown;
+		}
+		// \A + optional leading blank lines, then a single `#` followed by at
+		// least one space/tab (so `## …` H2 does NOT match) and the heading text,
+		// then the line break(s). Replaced once.
+		return (string) preg_replace( '/\A\s*#[ \t]+\S[^\n]*\R+/u', '', $markdown, 1 );
+	}
+
 	private static function strip_empty_label_lines( $markdown ) {
 		if ( ! is_string( $markdown ) || '' === $markdown ) {
 			return (string) $markdown;

@@ -117,6 +117,12 @@ class Cookie_Policy_Generator {
 			array(
 				'lang'         => '',
 				'jurisdiction' => '',
+				// By default the generated policy does NOT render its own H1
+				// title: the shortcode is normally placed inside a WordPress
+				// page that already has a title ("Cookie Policy"), so emitting
+				// another one duplicates it. Set show_title="true" to render the
+				// scaffold's leading heading (e.g. for a title-less embed).
+				'show_title'   => '',
 			),
 			(array) $atts,
 			self::SHORTCODE

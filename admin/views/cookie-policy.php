@@ -220,6 +220,7 @@ $rest_url   = esc_url( rest_url( 'faz/v1/cookie-policy/' ) );
 				<code>[faz_cookie_policy_complete jurisdiction="ccpa-california"]</code><br>
 				<code>[faz_cookie_policy_complete lang="pt-BR" jurisdiction="lgpd-brazil"]</code>
 			</p>
+			<p class="faz-help"><?php echo wp_kses_post( __( 'By default the policy does <strong>not</strong> print its own title — your page already has one, so a second "Cookie Policy" heading would duplicate it. Add <code>show_title="true"</code> if you embed the policy somewhere without a page title and want the heading back.', 'faz-cookie-manager' ) ); ?></p>
 			<p class="faz-help" style="margin-top:14px;">
 				<?php echo wp_kses_post( __( '<strong>Note:</strong> the long-standing <code>[faz_cookie_policy]</code> shortcode (with <code>site_name</code> / <code>contact</code> / <code>show_table</code> attributes) is still supported for backward compatibility. The new <code>[faz_cookie_policy_complete]</code> renders the jurisdiction-aware template from the form above.', 'faz-cookie-manager' ) ); ?>
 			</p>

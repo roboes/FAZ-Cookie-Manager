@@ -24,6 +24,7 @@
  * 14.  Suppressed banner   → shortcode trigger binds + warns when the banner template is absent at init.
  * 15.  GPC opt-out        → navigator.globalPrivacyControl auto-applies a reject and suppresses the banner.
  * 15b. GPC absent         → no signal ⇒ banner shows, no auto consent recorded.
+ * 16.  Policy title       → policy omits its own H1 by default; show_title="true" restores it.
  */
 
 import { test, expect, type Page } from '../fixtures/wp-fixture';
@@ -43,6 +44,8 @@ const PAGES = {
   ptUnderscore: { slug: 'faz-v172-pt-underscore', sc: `[faz_cookie_policy_complete lang="pt_BR" jurisdiction="lgpd-brazil"]` },
   settings:     { slug: 'faz-v172-settings',      sc: `[faz_cookie_settings]` },
   settingsCust: { slug: 'faz-v172-settings-cust', sc: `[faz_cookie_settings text="Gestisci cookie" class="my-revisit-btn"]` },
+  titleHidden:  { slug: 'faz-v172-title-hidden',  sc: `[faz_cookie_policy_complete lang="it"]` },
+  titleShown:   { slug: 'faz-v172-title-shown',   sc: `[faz_cookie_policy_complete lang="it" show_title="true"]` },
 } as const;
 
 const IT_MONTHS = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
@@ -392,5 +395,27 @@ test.describe('GPC — Global Privacy Control honouring (1.17.2)', () => {
     expect(acted, 'no consent should be auto-recorded without GPC').toBe(false);
 
     await context.close();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// 16. Cookie-policy title is dropped by default (the WP page provides it).
+// ─────────────────────────────────────────────────────────────────────────
+test.describe('Cookie policy leading title (1.17.2)', () => {
+  test('policy omits its own H1 by default so it does not duplicate the page title', async ({ page, wpBaseURL }) => {
+    await page.goto(`${wpBaseURL}/${PAGES.titleHidden.slug}/`, { waitUntil: 'domcontentloaded' });
+    const article = page.locator(ARTICLE).first();
+    await expect(article).toBeVisible();
+    // No <h1> inside the generated policy.
+    await expect(article.locator('h1')).toHaveCount(0);
+    // …but the document still names itself in the intro prose.
+    await expect(article).toContainText('Cookie Policy');
+  });
+
+  test('show_title="true" restores the policy H1', async ({ page, wpBaseURL }) => {
+    await page.goto(`${wpBaseURL}/${PAGES.titleShown.slug}/`, { waitUntil: 'domcontentloaded' });
+    const article = page.locator(ARTICLE).first();
+    await expect(article).toBeVisible();
+    await expect(article.locator('h1')).toHaveCount(1);
   });
 });
