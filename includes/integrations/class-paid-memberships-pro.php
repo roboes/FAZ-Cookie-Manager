@@ -287,6 +287,10 @@ class Paid_Memberships_Pro {
 
 		$parsed     = function_exists( 'faz_parse_consent_cookie' ) ? faz_parse_consent_cookie( $cookie_value ) : array();
 		$consent_id = isset( $parsed['consentid'] ) ? preg_replace( '/[^A-Za-z0-9]/', '', (string) $parsed['consentid'] ) : '';
+		// Carry the policy revision baked into the cookie (set by
+		// build_exempted_consent_cookie_value) so the audit trail records the
+		// revision actually granted instead of the controller's default of 1.
+		$revision   = isset( $parsed['rev'] ) ? max( 1, absint( $parsed['rev'] ) ) : 1;
 
 		// Reduce the parsed cookie to category states only (drop meta + scope +
 		// per-service keys), so the logged `categories` blob mirrors what an
@@ -308,10 +312,11 @@ class Paid_Memberships_Pro {
 		call_user_func(
 			array( $controller::get_instance(), 'log_consent' ),
 			array(
-				'consent_id' => $consent_id,
-				'status'     => 'pmp_grant',
-				'categories' => $categories,
-				'url'        => '',
+				'consent_id'      => $consent_id,
+				'status'          => 'pmp_grant',
+				'categories'      => $categories,
+				'url'             => '',
+				'policy_revision' => $revision,
 			)
 		);
 	}

@@ -1219,6 +1219,7 @@ class Activator {
 		}
 		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- $table is $wpdb->prefix + literal "faz_banners" (escaped via esc_sql); one-time read inside the activation/upgrade migration runner.
 		$rows = $wpdb->get_results( "SELECT banner_id, settings FROM `" . esc_sql( $table ) . "`" );
+		$had_failures = false;
 		foreach ( $rows as $row ) {
 			$settings = json_decode( $row->settings, true );
 			if ( ! is_array( $settings ) ) {
@@ -1240,21 +1241,33 @@ class Activator {
 			}
 			$settings['behaviours']['respectGPC'] = array( 'status' => true );
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- one-shot migration write to the custom faz_banners table; banner_id comes from the SELECT above, value JSON-encoded with %s. Caches invalidated below.
-			$wpdb->update(
+			$result = $wpdb->update(
 				$table,
 				array( 'settings' => wp_json_encode( $settings, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) ),
 				array( 'banner_id' => $row->banner_id ),
 				array( '%s' ),
 				array( '%d' )
 			);
+			if ( false === $result ) {
+				// A write failed: stop and leave the migration flag unset so the
+				// upgrade path retries on the next load. Already-updated rows are
+				// re-skipped by the `true === $current` guard above (idempotent).
+				$had_failures = true;
+				break;
+			}
 		}
 		// Invalidate the banner-controller item cache (epoch) and template cache
-		// so the new respectGPC value is served on the next request.
+		// so any rows already updated above are served with the new respectGPC value.
 		if ( class_exists( '\FazCookie\Admin\Modules\Banners\Includes\Controller' ) ) {
 			\FazCookie\Admin\Modules\Banners\Includes\Controller::get_instance()->delete_cache();
 		}
 		faz_clear_banner_template_cache();
-		update_option( 'faz_ccpa_gpc_migrated', 1, false );
+		// Only mark the migration complete when every CCPA banner was flipped
+		// successfully; otherwise a transient DB failure would permanently leave
+		// some CCPA banners non-compliant with CPPA Reg. §7025.
+		if ( ! $had_failures ) {
+			update_option( 'faz_ccpa_gpc_migrated', 1, false );
+		}
 	}
 
 	/**

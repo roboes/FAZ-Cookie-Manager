@@ -3,8 +3,8 @@
  * Cookie Settings Shortcode — [faz_cookie_settings]
  *
  * Renders a button that re-opens the consent preference center, so visitors can
- * change their choices (e.g. inside the generated cookie policy). The CookieYes
- * equivalent is [cookie_settings].
+ * change their choices (e.g. inside the generated cookie policy). It is the
+ * equivalent of the common [cookie_settings] shortcode.
  *
  * The button carries `data-faz-open-preferences` and the `faz-cookie-settings-btn`
  * class; the frontend script (script.js) binds a delegated click handler that
