@@ -2662,6 +2662,19 @@ class Frontend {
 		// blanket pre-consent block would otherwise cause under an opt-out law.
 		$is_optout_law = ( $this->banner && 'ccpa' === $this->banner->get_law() );
 
+		// CPPA Reg. §7025: a browser Global Privacy Control signal (the
+		// `Sec-GPC: 1` request header, mirror of navigator.globalPrivacyControl)
+		// is a legally valid opt-out of the sale/sharing of personal information
+		// and must be honoured immediately — including on the very first
+		// response, before the JS opt-out (_fazApplyGpcOptOut) has had a chance
+		// to write the consent cookie. So under an opt-out law, when no consent
+		// is recorded yet and the request carries Sec-GPC:1, block the
+		// sell/share (ccpaDoNotSell) categories server-side too, mirroring the
+		// client-side behaviour. Opt-in laws are unaffected (already blocked).
+		$gpc_optout = $is_optout_law
+			&& isset( $_SERVER['HTTP_SEC_GPC'] )
+			&& '1' === sanitize_text_field( wp_unslash( $_SERVER['HTTP_SEC_GPC'] ) );
+
 		foreach ( $categories as $cat_data ) {
 			$category = new \FazCookie\Admin\Modules\Cookies\Includes\Cookie_Categories( $cat_data );
 			$slug     = $category->get_slug();
@@ -2671,8 +2684,12 @@ class Frontend {
 			if ( empty( $consent ) ) {
 				// No consent recorded yet. Under an opt-in law (GDPR/ePrivacy)
 				// block every non-necessary category until the visitor consents;
-				// under the CCPA opt-out model block nothing (see header above).
+				// under the CCPA opt-out model block nothing (see header above)
+				// UNLESS the visitor asserted GPC, which is an immediate opt-out
+				// of sale/sharing for the sold/shared categories.
 				if ( ! $is_optout_law ) {
+					$blocked[] = $slug;
+				} elseif ( $gpc_optout && ( $category->get_sell_personal_data() || $category->get_share_personal_data() ) ) {
 					$blocked[] = $slug;
 				}
 			} else {
@@ -3211,8 +3228,10 @@ class Frontend {
 				'isNecessary'    => 'necessary' === $category->get_slug() ? true : false,
 				// Subject to the combined "Do Not Sell or Share" opt-out when the
 				// category is SOLD or SHARED (CPRA treats sharing for cross-context
-				// behavioural advertising like a sale for opt-out purposes).
-				'ccpaDoNotSell'  => $category->get_sell_personal_data() || $category->get_share_personal_data(),
+				// behavioural advertising like a sale for opt-out purposes). The
+				// always-exempt `necessary` category is never opt-out-able,
+				// regardless of its stored flags (kept in sync with defaultConsent.ccpa).
+				'ccpaDoNotSell'  => 'necessary' !== $category->get_slug() && ( $category->get_sell_personal_data() || $category->get_share_personal_data() ),
 				'cookies'        => $cookies,
 				'active'         => true,
 				'defaultConsent' => array(

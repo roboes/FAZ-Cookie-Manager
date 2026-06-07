@@ -136,6 +136,7 @@ class Activator {
 			self::seed_default_whitelist();
 			self::enable_gpc_on_ccpa_banners();
 			self::ensure_share_personal_data_column();
+			self::clear_necessary_optout_flags();
 		} catch ( \Throwable $e ) {
 			// Do not mark migrations complete — retry on next admin load.
 			return;
@@ -1186,10 +1187,53 @@ class Activator {
 		$has_column = $wpdb->get_var( "SHOW COLUMNS FROM `" . esc_sql( $table ) . "` LIKE 'share_personal_data'" );
 		if ( ! $has_column ) {
 			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,PluginCheck.Security.DirectDB.UnescapedDBParameter -- $table is $wpdb->prefix + literal "faz_cookie_categories"; the column definition is a fixed literal (no user input); one-shot DDL on the activation/upgrade path.
-			$wpdb->query( "ALTER TABLE `" . esc_sql( $table ) . "` ADD COLUMN `share_personal_data` int(11) NOT NULL DEFAULT 1 AFTER `sell_personal_data`" );
+			$result = $wpdb->query( "ALTER TABLE `" . esc_sql( $table ) . "` ADD COLUMN `share_personal_data` int(11) NOT NULL DEFAULT 1 AFTER `sell_personal_data`" );
+			if ( false === $result ) {
+				// The ALTER failed: throw so run_pending_migrations() does not mark
+				// the migration set complete and the column is retried on the next
+				// admin load, instead of permanently flagging it as added.
+				throw new \RuntimeException( 'FAZ: failed to add the share_personal_data column; migration will retry.' );
+			}
 		}
 		Category_Controller::get_instance()->delete_cache();
 		update_option( 'faz_share_personal_data_column_added', 1, false );
+	}
+
+	/**
+	 * Clear the CCPA opt-out flags on the always-exempt `necessary` category.
+	 *
+	 * sell_personal_data / share_personal_data both default to 1 at the schema
+	 * level, so a seeded `necessary` row inherits sell/share = true even though
+	 * strictly-necessary processing is never subject to a CPRA "Do Not Sell or
+	 * Share" opt-out (and the admin editor hides those toggles for it). Left as
+	 * 1/1 the row is serialized as `ccpaDoNotSell: true` to the frontend and
+	 * carried through import/export, contradicting its always-exempt status.
+	 * Normalise the stored row to 0/0 so every layer agrees. Idempotent — only
+	 * writes when a value is actually non-zero. Runs after
+	 * ensure_share_personal_data_column() so the column is guaranteed to exist.
+	 */
+	public static function clear_necessary_optout_flags() {
+		global $wpdb;
+		$table = $wpdb->prefix . 'faz_cookie_categories';
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- one-time SHOW TABLES probe in the activation/upgrade path.
+		if ( $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) !== $table ) {
+			return;
+		}
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared,WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- $table is $wpdb->prefix + literal "faz_cookie_categories" (escaped via esc_sql); slug bound via %s; one-shot idempotent migration write.
+		$result = $wpdb->query(
+			$wpdb->prepare(
+				"UPDATE `" . esc_sql( $table ) . "` SET sell_personal_data = 0, share_personal_data = 0 WHERE slug = %s AND ( sell_personal_data <> 0 OR share_personal_data <> 0 )",
+				'necessary'
+			)
+		);
+		if ( false === $result ) {
+			// Throw so run_pending_migrations() does not bump the version and the
+			// normalisation is retried on the next admin load.
+			throw new \RuntimeException( 'FAZ: failed to clear opt-out flags on the necessary category; migration will retry.' );
+		}
+		if ( $result > 0 ) {
+			Category_Controller::get_instance()->delete_cache();
+		}
 	}
 
 	/**
@@ -1264,10 +1308,14 @@ class Activator {
 		faz_clear_banner_template_cache();
 		// Only mark the migration complete when every CCPA banner was flipped
 		// successfully; otherwise a transient DB failure would permanently leave
-		// some CCPA banners non-compliant with CPPA Reg. §7025.
-		if ( ! $had_failures ) {
-			update_option( 'faz_ccpa_gpc_migrated', 1, false );
+		// some CCPA banners non-compliant with CPPA Reg. §7025. Throw on failure
+		// so run_pending_migrations() does not bump the migration version and the
+		// flip is retried on the next admin load (already-flipped banners are
+		// re-skipped by the `true === $current` guard above, so this is idempotent).
+		if ( $had_failures ) {
+			throw new \RuntimeException( 'FAZ: failed enabling respectGPC on one or more CCPA banners; migration will retry.' );
 		}
+		update_option( 'faz_ccpa_gpc_migrated', 1, false );
 	}
 
 	/**
