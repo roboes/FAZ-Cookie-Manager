@@ -78,6 +78,15 @@ class Frontend {
 	protected $gcm_settings;
 
 	/**
+	 * Per-request memo for the runtime geo ruleset.
+	 *
+	 * `false` = not yet computed; `null` = none / flag off; array = ruleset.
+	 *
+	 * @var array|null|false
+	 */
+	private $faz_runtime_ruleset_memo = false;
+
+	/**
 	 * Banner template
 	 *
 	 * @var object
@@ -852,6 +861,16 @@ class Frontend {
 			$dependent = true;
 		}
 
+		// Runtime geo-routing (flag-gated): when the resolved ruleset drives the
+		// pre-consent category defaults, the GCM signals and the blocked-category
+		// set, the rendered HTML/JS varies by the visitor's country/region. A
+		// cached response would leak one jurisdiction's defaults to another, so
+		// the output must always be treated as country-dependent while the flag
+		// is on — independent of any multi-banner geo-targeting configuration.
+		if ( apply_filters( 'faz_geo_ruleset_runtime', false ) ) {
+			$dependent = true;
+		}
+
 		return (bool) apply_filters( 'faz_country_dependent_banner_output', $dependent, $settings );
 	}
 
@@ -1079,12 +1098,133 @@ class Frontend {
 	 *
 	 * @return array
 	 */
+	/**
+	 * Resolved geo ruleset for the current visitor, or null.
+	 *
+	 * Gated behind the opt-in `faz_geo_ruleset_runtime` filter (default false),
+	 * so existing installs see ZERO behaviour change until they enable it. When
+	 * on, the resolved ruleset (model + default_categories + CMv2) drives the
+	 * chosen banner's per-category consent defaults, the server-side blocking
+	 * decision and the GCM defaults — the banner SELECTION itself is unchanged.
+	 * Memoised per request.
+	 *
+	 * @return array|null
+	 */
+	private function get_runtime_ruleset() {
+		if ( false !== $this->faz_runtime_ruleset_memo ) {
+			return $this->faz_runtime_ruleset_memo;
+		}
+		$this->faz_runtime_ruleset_memo = null;
+		/**
+		 * Apply the resolved geo-routing ruleset to the live banner at runtime.
+		 *
+		 * @since 1.17.2
+		 * @param bool $enabled Default false (catalogue-only behaviour).
+		 */
+		if ( ! apply_filters( 'faz_geo_ruleset_runtime', false ) ) {
+			return null;
+		}
+		$class = '\\FazCookie\\Admin\\Modules\\Geo_Routing\\Geo_Routing';
+		if ( ! class_exists( $class ) || ! method_exists( $class, 'get_instance' ) ) {
+			return null;
+		}
+		try {
+			$ctx = $class::get_instance()->get_visitor_context();
+		} catch ( \Throwable $e ) {
+			return null;
+		}
+		if ( is_array( $ctx ) && isset( $ctx['ruleset'] ) && is_array( $ctx['ruleset'] ) ) {
+			$this->faz_runtime_ruleset_memo = $ctx['ruleset'];
+		}
+		return $this->faz_runtime_ruleset_memo;
+	}
+
+	/**
+	 * Map a ruleset `default_categories` state for a slug to a boolean default.
+	 *
+	 * @param array  $ruleset Ruleset array.
+	 * @param string $slug    Category slug.
+	 * @return bool|null true = granted, false = denied-until-action, null = unset.
+	 */
+	private function ruleset_category_default( $ruleset, $slug ) {
+		$cats = isset( $ruleset['ui']['default_categories'] ) && is_array( $ruleset['ui']['default_categories'] )
+			? $ruleset['ui']['default_categories'] : array();
+		if ( ! isset( $cats[ $slug ] ) ) {
+			return null;
+		}
+		$state = $cats[ $slug ];
+		if ( 'granted' === $state || 'granted-locked' === $state ) {
+			return true;
+		}
+		if ( 'denied' === $state || 'denied-until-action' === $state ) {
+			return false;
+		}
+		return null;
+	}
+
+	/**
+	 * Per-category default consent ({ gdpr, ccpa }) for the frontend store.
+	 *
+	 * Base behaviour (catalogue): gdpr = the category's prior-consent flag;
+	 * ccpa = exempt only when necessary or neither sold nor shared. When the
+	 * runtime geo-routing flag is on and the resolved ruleset specifies this
+	 * category, the ruleset's default_categories state wins for BOTH laws so the
+	 * chosen banner reflects the visitor's actual jurisdiction (necessary stays
+	 * granted regardless).
+	 *
+	 * @param \FazCookie\Admin\Modules\Cookies\Includes\Cookie_Categories $category Category.
+	 * @return array{gdpr: bool, ccpa: bool}
+	 */
+	private function category_default_consent( $category ) {
+		$slug = $category->get_slug();
+		$gdpr = (bool) $category->get_prior_consent();
+		$ccpa = ( 'necessary' === $slug || ( false === $category->get_sell_personal_data() && false === $category->get_share_personal_data() ) );
+
+		$ruleset = $this->get_runtime_ruleset();
+		if ( null !== $ruleset ) {
+			$rs_default = $this->ruleset_category_default( $ruleset, $slug );
+			if ( null !== $rs_default ) {
+				// necessary is always granted; for everything else the ruleset
+				// state drives both laws.
+				$value = ( 'necessary' === $slug ) ? true : $rs_default;
+				$gdpr  = $value;
+				$ccpa  = $value;
+			}
+		}
+
+		return array(
+			'gdpr' => $gdpr,
+			'ccpa' => $ccpa,
+		);
+	}
+
 	public function get_gcm_data() {
 		if ( ! $this->gcm_settings ) {
 			return;
 		}
 		$gcm          = $this->gcm_settings;
 		$gcm_settings = $gcm->get();
+
+		// When the runtime geo-routing flag is on, override the Google Consent
+		// Mode default signals from the resolved ruleset's CMv2 block so the
+		// per-jurisdiction defaults (e.g. Quebec: ad_storage/analytics_storage
+		// denied) actually drive GCM, not just the catalogue.
+		$ruleset = $this->get_runtime_ruleset();
+		if ( null !== $ruleset && isset( $ruleset['signals']['cmv2'] ) && is_array( $ruleset['signals']['cmv2'] )
+			&& isset( $gcm_settings['default_settings'] ) && is_array( $gcm_settings['default_settings'] ) ) {
+			$signals = $ruleset['signals']['cmv2'];
+			foreach ( $gcm_settings['default_settings'] as $idx => $row ) {
+				if ( ! is_array( $row ) ) {
+					continue;
+				}
+				foreach ( $signals as $key => $state ) {
+					// CMv2 states: granted / granted-locked → 'granted';
+					// denied / denied-until-action → 'denied'.
+					$gcm_settings['default_settings'][ $idx ][ $key ] =
+						( 'granted' === $state || 'granted-locked' === $state ) ? 'granted' : 'denied';
+				}
+			}
+		}
 		return $gcm_settings;
 	}
 	/**
@@ -2675,6 +2815,15 @@ class Frontend {
 			&& isset( $_SERVER['HTTP_SEC_GPC'] )
 			&& '1' === sanitize_text_field( wp_unslash( $_SERVER['HTTP_SEC_GPC'] ) );
 
+		// Runtime geo-routing (flag-gated, default off): when a ruleset is
+		// resolved it is authoritative for the pre-consent default of each
+		// category it names — denied-until-action → block now, granted → allow —
+		// regardless of the banner's own law. This is what makes a Quebec (opt-in)
+		// visitor actually have marketing/analytics blocked even when served a
+		// banner the admin saved as opt-out. Categories the ruleset doesn't name
+		// fall back to the law default below.
+		$ruleset = $this->get_runtime_ruleset();
+
 		foreach ( $categories as $cat_data ) {
 			$category = new \FazCookie\Admin\Modules\Cookies\Includes\Cookie_Categories( $cat_data );
 			$slug     = $category->get_slug();
@@ -2682,14 +2831,21 @@ class Frontend {
 				continue;
 			}
 			if ( empty( $consent ) ) {
-				// No consent recorded yet. Under an opt-in law (GDPR/ePrivacy)
-				// block every non-necessary category until the visitor consents;
-				// under the CCPA opt-out model block nothing (see header above)
-				// UNLESS the visitor asserted GPC, which is an immediate opt-out
-				// of sale/sharing for the sold/shared categories.
-				if ( ! $is_optout_law ) {
+				$rs_default = ( null !== $ruleset ) ? $this->ruleset_category_default( $ruleset, $slug ) : null;
+				if ( false === $rs_default ) {
+					// Ruleset denies this category until an explicit action.
+					$blocked[] = $slug;
+				} elseif ( true === $rs_default ) {
+					// Ruleset grants this category — do not block (overrides the
+					// blanket opt-in pre-consent block).
+					continue;
+				} elseif ( ! $is_optout_law ) {
+					// No ruleset opinion: opt-in law blocks every non-necessary
+					// category until the visitor consents.
 					$blocked[] = $slug;
 				} elseif ( $gpc_optout && ( $category->get_sell_personal_data() || $category->get_share_personal_data() ) ) {
+					// CCPA opt-out model: block nothing pre-consent UNLESS GPC
+					// asserts an immediate sale/share opt-out.
 					$blocked[] = $slug;
 				}
 			} else {
@@ -3234,12 +3390,7 @@ class Frontend {
 				'ccpaDoNotSell'  => 'necessary' !== $category->get_slug() && ( $category->get_sell_personal_data() || $category->get_share_personal_data() ),
 				'cookies'        => $cookies,
 				'active'         => true,
-				'defaultConsent' => array(
-					'gdpr' => $category->get_prior_consent(),
-					// Exempt from the CCPA opt-out only when necessary, or neither
-					// sold nor shared.
-					'ccpa' => ( 'necessary' === $category->get_slug() || ( false === $category->get_sell_personal_data() && false === $category->get_share_personal_data() ) ) ? true : false,
-				),
+				'defaultConsent' => $this->category_default_consent( $category ),
 			);
 		}
 		return $cookie_groups;
