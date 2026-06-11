@@ -118,6 +118,12 @@ class Settings extends Store {
 				'geo_targeting'       => false,
 				'target_regions'      => array( 'eu', 'uk' ),
 				'default_behavior'    => 'show_banner',
+				// Which GeoLite2 edition the downloader fetches and the lookup
+				// reads: 'country' (small, country-level only — the default and
+				// the historical behaviour) or 'city' (larger, adds region /
+				// subdivision detection needed by sub-national rulesets). User
+				// choice surfaced in Settings → GeoIP Database.
+				'geolite2_edition'    => 'country',
 			),
 			'script_blocking' => array(
 				'custom_rules'       => array(),

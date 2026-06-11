@@ -118,7 +118,7 @@ Privacy Policy:
 
 = MaxMind =
 
-Used to download a GeoLite2 database for optional geo-targeting. The smaller Country edition is downloaded by default; the larger City edition (which adds region subdivisions for sub-national province/state geo-routing) is fetched only when the runtime geo-routing feature is enabled. Installs with the older Country database keep working for country-level routing.
+Used to download a GeoLite2 database for optional geo-targeting. You choose the edition in Settings → GeoIP Database: the smaller Country edition (default, country-level only) or the larger City edition (adds region/subdivision data for sub-national province/state routing such as Quebec Law 25). City is a much larger download; pick it only if you rely on region-level routing.
 
 Triggered when: you enter a MaxMind license key in Settings and start the database download.
 

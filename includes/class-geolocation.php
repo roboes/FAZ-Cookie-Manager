@@ -456,24 +456,28 @@ class Geolocation {
 	}
 
 	/**
-	 * Download and install a MaxMind GeoLite2-City database.
+	 * Download and install a MaxMind GeoLite2 database.
 	 *
-	 * The edition is flag-gated: the City edition (which carries `subdivisions`
-	 * for sub-national geo-routing) is fetched ONLY when the runtime geo-routing
-	 * flag `faz_geo_ruleset_runtime` is enabled; otherwise the smaller Country
-	 * edition is downloaded, exactly as before — so installs that have not opted
-	 * into runtime geo-routing see no change in download size or behaviour.
+	 * The edition is the publisher's choice (Settings → GeoIP Database):
+	 * 'GeoLite2-Country' (default, small, country-level only) or 'GeoLite2-City'
+	 * (larger, adds region/subdivision data needed by sub-national rulesets).
 	 * Requires a MaxMind license key (free registration at maxmind.com).
 	 *
-	 * @param string $license_key MaxMind license key.
+	 * @param string      $license_key      MaxMind license key.
+	 * @param string|null $edition_override Optional explicit edition
+	 *                                      ('GeoLite2-Country' | 'GeoLite2-City').
+	 *                                      When omitted, the stored setting wins.
 	 * @return true|\WP_Error True on success, WP_Error on failure.
 	 */
-	public static function download_database( $license_key ) {
+	public static function download_database( $license_key, $edition_override = null ) {
 		if ( empty( $license_key ) ) {
 			return new \WP_Error( 'faz_geo_no_key', __( 'MaxMind license key is required.', 'faz-cookie-manager' ) );
 		}
 
-		$edition     = self::geolite2_edition();
+		$edition = ( is_string( $edition_override )
+			&& in_array( $edition_override, array( 'GeoLite2-City', 'GeoLite2-Country' ), true ) )
+			? $edition_override
+			: self::geolite2_edition();
 		$license_key = sanitize_text_field( $license_key );
 		$url         = add_query_arg(
 			array(
@@ -507,18 +511,33 @@ class Geolocation {
 	}
 
 	/**
-	 * Decide which GeoLite2 edition to download.
+	 * Decide which GeoLite2 edition to download and read.
 	 *
-	 * City only when the runtime geo-routing flag is on (it needs subdivisions);
-	 * Country otherwise — preserving the pre-feature behaviour for installs that
-	 * never opt into runtime geo-routing. Overridable via `faz_geolite2_edition`.
+	 * Driven by the publisher's explicit choice in Settings → GeoIP Database
+	 * (`geolocation.geolite2_edition`): 'city' → GeoLite2-City, anything else →
+	 * GeoLite2-Country (the default, so existing installs are unchanged). A
+	 * legacy install with the setting still unset falls back to the runtime
+	 * geo-routing flag (City when on). Overridable via `faz_geolite2_edition`.
 	 *
 	 * @return string 'GeoLite2-City' or 'GeoLite2-Country'.
 	 */
 	private static function geolite2_edition() {
-		$default = apply_filters( 'faz_geo_ruleset_runtime', false ) ? 'GeoLite2-City' : 'GeoLite2-Country';
+		$choice = '';
+		if ( class_exists( '\\FazCookie\\Admin\\Modules\\Settings\\Includes\\Settings' ) ) {
+			$settings = new \FazCookie\Admin\Modules\Settings\Includes\Settings();
+			$raw      = $settings->get( 'geolocation', 'geolite2_edition' );
+			$choice   = is_string( $raw ) ? strtolower( trim( $raw ) ) : '';
+		}
+		if ( 'city' === $choice ) {
+			$default = 'GeoLite2-City';
+		} elseif ( 'country' === $choice ) {
+			$default = 'GeoLite2-Country';
+		} else {
+			// Setting not yet saved (legacy) — honour the runtime flag.
+			$default = apply_filters( 'faz_geo_ruleset_runtime', false ) ? 'GeoLite2-City' : 'GeoLite2-Country';
+		}
 		/**
-		 * Filter the GeoLite2 edition the downloader fetches.
+		 * Filter the GeoLite2 edition the downloader fetches and the lookup reads.
 		 *
 		 * @since 1.17.2
 		 * @param string $edition 'GeoLite2-City' or 'GeoLite2-Country'.
@@ -558,6 +577,20 @@ class Geolocation {
 						return new \WP_Error( 'faz_geo_copy_failed', __( 'Failed to copy database file.', 'faz-cookie-manager' ) );
 					}
 					$found = true;
+					// Remove the OTHER edition's DB so a Country↔City switch
+					// doesn't leave a stale file that get_database_path() (which
+					// prefers City) would keep serving over the freshly-chosen
+					// edition. Only the just-written edition survives.
+					$superseded = array(
+						$data_dir . 'GeoLite2-City.mmdb',
+						$data_dir . 'GeoLite2-Country.mmdb',
+						$data_dir . 'dbip-country-lite.mmdb',
+					);
+					foreach ( $superseded as $old ) {
+						if ( $old !== $dest && file_exists( $old ) ) {
+							@unlink( $old ); // phpcs:ignore WordPress.PHP.NoSilencedErrors, WordPress.WP.AlternativeFunctions.unlink_unlink
+						}
+					}
 					break;
 				}
 			}
