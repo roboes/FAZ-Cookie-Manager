@@ -2729,19 +2729,6 @@ class Frontend {
 		// blanket pre-consent block would otherwise cause under an opt-out law.
 		$is_optout_law = ( $this->banner && 'ccpa' === $this->banner->get_law() );
 
-		// CPPA Reg. §7025: a browser Global Privacy Control signal (the
-		// `Sec-GPC: 1` request header, mirror of navigator.globalPrivacyControl)
-		// is a legally valid opt-out of the sale/sharing of personal information
-		// and must be honoured immediately — including on the very first
-		// response, before the JS opt-out (_fazApplyGpcOptOut) has had a chance
-		// to write the consent cookie. So under an opt-out law, when no consent
-		// is recorded yet and the request carries Sec-GPC:1, block the
-		// sell/share (ccpaDoNotSell) categories server-side too, mirroring the
-		// client-side behaviour. Opt-in laws are unaffected (already blocked).
-		$gpc_optout = $is_optout_law
-			&& isset( $_SERVER['HTTP_SEC_GPC'] )
-			&& '1' === sanitize_text_field( wp_unslash( $_SERVER['HTTP_SEC_GPC'] ) );
-
 		// Runtime geo-routing (flag-gated, default off): when a ruleset is
 		// resolved it is authoritative for the pre-consent default of each
 		// category it names — denied-until-action → block now, granted → allow —
@@ -2750,6 +2737,26 @@ class Frontend {
 		// banner the admin saved as opt-out. Categories the ruleset doesn't name
 		// fall back to the law default below.
 		$ruleset = $this->get_runtime_ruleset();
+
+		// CPPA Reg. §7025: a browser Global Privacy Control signal (the
+		// `Sec-GPC: 1` request header, mirror of navigator.globalPrivacyControl)
+		// is a legally valid opt-out of the sale/sharing of personal information
+		// and must be honoured immediately — including on the very first
+		// response, before the JS opt-out (_fazApplyGpcOptOut) has had a chance
+		// to write the consent cookie. So when no consent is recorded yet and the
+		// request carries Sec-GPC:1, block the sell/share (ccpaDoNotSell)
+		// categories server-side too, mirroring the client-side behaviour.
+		// GPC applies when EITHER the banner is an opt-out (CCPA) law OR the
+		// resolved runtime ruleset declares it honours GPC (signals.gpc_honored)
+		// — the latter covers US-state rulesets whose model maps to a gdpr-style
+		// banner (e.g. opt-out-with-sensitive-opt-in → California) yet still
+		// require GPC sale/share opt-out. Pure opt-in jurisdictions that don't
+		// honour GPC are unaffected (their non-necessary categories are already
+		// blocked pre-consent).
+		$gpc_header_on = isset( $_SERVER['HTTP_SEC_GPC'] )
+			&& '1' === sanitize_text_field( wp_unslash( $_SERVER['HTTP_SEC_GPC'] ) );
+		$ruleset_honors_gpc = ( null !== $ruleset && ! empty( $ruleset['signals']['gpc_honored'] ) );
+		$gpc_optout = $gpc_header_on && ( $is_optout_law || $ruleset_honors_gpc );
 
 		foreach ( $categories as $cat_data ) {
 			$category = new \FazCookie\Admin\Modules\Cookies\Includes\Cookie_Categories( $cat_data );
@@ -2762,6 +2769,16 @@ class Frontend {
 				if ( false === $rs_default ) {
 					// Ruleset denies this category until an explicit action.
 					$blocked[] = $slug;
+				} elseif ( $gpc_optout && ( $category->get_sell_personal_data() || $category->get_share_personal_data() ) ) {
+					// A Global Privacy Control sale/share opt-out is a
+					// legally-binding signal that OVERRIDES a ruleset 'granted'
+					// default — a Sec-GPC:1 request must block sold/shared
+					// categories even when the resolved ruleset grants them
+					// (CPPA §7025). This check runs BEFORE the ruleset-granted
+					// branch below so the grant can't bypass GPC. $gpc_optout
+					// already embeds $is_optout_law, so opt-in visitors are
+					// unaffected.
+					$blocked[] = $slug;
 				} elseif ( true === $rs_default ) {
 					// Ruleset grants this category — do not block (overrides the
 					// blanket opt-in pre-consent block).
@@ -2769,10 +2786,6 @@ class Frontend {
 				} elseif ( ! $is_optout_law ) {
 					// No ruleset opinion: opt-in law blocks every non-necessary
 					// category until the visitor consents.
-					$blocked[] = $slug;
-				} elseif ( $gpc_optout && ( $category->get_sell_personal_data() || $category->get_share_personal_data() ) ) {
-					// CCPA opt-out model: block nothing pre-consent UNLESS GPC
-					// asserts an immediate sale/share opt-out.
 					$blocked[] = $slug;
 				}
 			} else {

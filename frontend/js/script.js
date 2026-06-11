@@ -674,7 +674,11 @@ function _fazApplyGpcOptOut() {
             deny = !category.isNecessary;
         } else {
             // Opt-out regimes: exempt categories carry defaultConsent.ccpa === true.
-            deny = !(category.defaultConsent && category.defaultConsent.ccpa === true);
+            // A category flagged ccpaDoNotSell (sold or shared) is ALWAYS denied
+            // under a GPC opt-out, even when a runtime ruleset granted it — GPC is
+            // a legally-binding sale/share opt-out (CPPA §7025) that overrides the
+            // ruleset's default grant, mirroring the server-side get_blocked_categories.
+            deny = !!category.ccpaDoNotSell || !(category.defaultConsent && category.defaultConsent.ccpa === true);
         }
         var valueToSet = deny ? "no" : "yes";
         ref._fazSetInStore(category.slug, valueToSet);
@@ -1976,6 +1980,19 @@ function _fazAcceptCookies(choice = "all") {
                         (choice === "custom" && !_fazFindCheckBoxValue(category.slug)))
                     ? "no"
                     : "yes";
+        } else if (_fazStore._runtimeGeo && category.defaultFromRuleset && choice === "reject") {
+            // Runtime geo-routing can serve a CCPA (opt-out) banner as a
+            // fallback to a visitor whose resolved ruleset is opt-in. On an
+            // explicit reject/close the opt-out checkbox logic below would
+            // leave every non-necessary category "yes" (silently granting all
+            // cookies on what the visitor meant as a rejection). Instead honour
+            // the ruleset's per-category default — defaultConsent.gdpr is
+            // jurisdiction-authoritative and mirrors _fazSetInitialState — so a
+            // ruleset-denied category becomes "no" while a ruleset-granted one
+            // (e.g. functional under an opt-out ruleset) stays "yes". Necessary
+            // is always granted; categories the ruleset doesn't name fall
+            // through to the opt-out branch below.
+            valueToSet = (category.isNecessary || category.defaultConsent.gdpr) ? "yes" : "no";
         } else {
             valueToSet = ccpaCheckBoxValue && !category.defaultConsent.ccpa ? "no" : "yes";
         }
