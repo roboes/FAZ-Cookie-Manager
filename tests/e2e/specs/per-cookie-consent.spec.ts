@@ -7,7 +7,7 @@ import type { Page } from '@playwright/test';
  * Enables banner_control.per_service_consent + per_cookie_consent via the REST
  * settings endpoint, then drives the frontend preference center to verify the
  * nested per-cookie toggles render, sync with their category, persist as
- * override-only `ck.<service>.<index>` entries, and shred a denied cookie when
+ * override-only `ck.<service>.<cookie-name>` entries, and shred a denied cookie when
  * the visitor saves. Settings are restored afterwards.
  */
 
@@ -139,7 +139,7 @@ test.describe('Per-cookie consent (issue #135)', () => {
     const consent = cookies.find((c) => c.name === 'fazcookie-consent');
     const decoded = consent ? decodeURIComponent(consent.value) : '';
     expect(decoded).toContain(target.cat + ':yes');
-    expect(decoded).toContain('ck.' + target.svc + '.' + target.idx + ':no');
+    expect(decoded).toContain('ck.' + target.svc + '.' + target.name + ':no');
 
     // enforcement: the denied cookie was shredded inside the save action
     const stillThere = await fp.evaluate((p) => document.cookie.indexOf(p.name + '=') !== -1, target);
