@@ -99,6 +99,7 @@ class Settings extends Store {
 				'gtm_datalayer'          => false,
 				'alternative_asset_path' => false,
 				'per_service_consent'    => false,
+				'per_cookie_consent'     => false,
 			),
 			'microsoft'    => array(
 				'uet_consent_mode' => false,
@@ -285,6 +286,7 @@ class Settings extends Store {
 			case 'gtm_datalayer':
 			case 'alternative_asset_path':
 			case 'per_service_consent':
+			case 'per_cookie_consent':
 				$value = faz_sanitize_bool( $value );
 				break;
 			case 'scan_frequency':

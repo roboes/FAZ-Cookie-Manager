@@ -1163,6 +1163,8 @@ class Frontend {
 				'optout_preferences_label'              => __( 'Opt-out Preferences', 'faz-cookie-manager' ),
 				'customise_consent_preferences_label'   => __( 'Customise Consent Preferences', 'faz-cookie-manager' ),
 				'service_consent_label'                 => __( 'Service consent', 'faz-cookie-manager' ),
+				'cookies'                               => __( 'Cookies', 'faz-cookie-manager' ),
+				'cookie_consent_label'                  => __( 'Cookie consent', 'faz-cookie-manager' ),
 				'vendor_consent_label'                  => __( 'Vendor consent', 'faz-cookie-manager' ),
 			),
 			'_rtl'          => $this->is_rtl(),
@@ -1369,6 +1371,11 @@ class Frontend {
 			}
 			$store['_perServiceConsent'] = true;
 			$store['_services']         = $services;
+			// Per-cookie consent is a sub-mode of per-service: it nests an
+			// individual toggle under each service for every cookie the service
+			// declares. Only meaningful when per-service is on (the cookies are
+			// rendered beneath their service row), so it is gated on both flags.
+			$store['_perCookieConsent'] = ! empty( $settings['banner_control']['per_cookie_consent'] );
 		}
 
 		return $store;
