@@ -105,6 +105,15 @@ class Frontend {
 	private $settings_option_cache    = null;
 	private $always_allowed_cache     = null;
 	/**
+	 * Set when runtime geo-routing resolves an opt-in jurisdiction but no
+	 * matching active banner exists, so the country-selected (opt-out) banner
+	 * is kept only to drive server-side blocking — its visible UI is suppressed
+	 * to avoid showing opt-out copy while scripts are blocked opt-in style.
+	 *
+	 * @var bool
+	 */
+	private $faz_law_fallback_suppress = false;
+	/**
 	 * Initialize the class and set its properties.
 	 *
 	 * @since    3.0.0
@@ -710,6 +719,19 @@ class Frontend {
 				$law_banner = Controller::get_instance()->get_active_banner_for_law( $wanted_law, $visitor_country );
 				if ( false !== $law_banner ) {
 					$this->banner = $law_banner;
+				} elseif ( 'gdpr' === $wanted_law && false !== $this->banner ) {
+					// Fail-closed: the resolved ruleset enforces an opt-in
+					// (gdpr-style) regime but the publisher has no active GDPR
+					// banner, so the only candidate is the country-selected
+					// opt-out (CCPA) banner. Keep it so server-side blocking
+					// still runs (start_output_buffer needs $this->template),
+					// but suppress its visible UI — showing an opt-out notice
+					// ("we use cookies, opt out here") while scripts are blocked
+					// opt-in style would misrepresent the true state. Scripts
+					// stay blocked; the visitor simply sees no (misleading)
+					// banner. A correctly-configured install (a GDPR banner
+					// exists) never reaches this branch.
+					$this->faz_law_fallback_suppress = true;
 				}
 			}
 		}
@@ -1617,6 +1639,12 @@ class Frontend {
 	 */
 	protected function is_banner_ui_suppressed() {
 		if ( $this->is_banner_disabled_by_settings() ) {
+			return true;
+		}
+
+		// Runtime geo-routing opt-in fallback with no matching banner: keep
+		// blocking active (template loaded) but hide the mismatched opt-out UI.
+		if ( $this->faz_law_fallback_suppress ) {
 			return true;
 		}
 
