@@ -331,8 +331,18 @@ defined( 'ABSPATH' ) || exit;
 		</div>
 		<div class="faz-card-body">
 			<p style="margin:0 0 12px;color:var(--faz-text-secondary);">
-				<?php echo wp_kses_post( __( 'Geo-targeting requires a MaxMind GeoLite2-Country database. <a href="https://www.maxmind.com/en/geolite2/signup" target="_blank" rel="noopener">Get a free license key</a>.', 'faz-cookie-manager' ) ); ?>
+				<?php echo wp_kses_post( __( 'Geo-targeting requires a MaxMind GeoLite2 database. <a href="https://www.maxmind.com/en/geolite2/signup" target="_blank" rel="noopener">Get a free license key</a>.', 'faz-cookie-manager' ) ); ?>
 			</p>
+			<div class="faz-form-group">
+				<label><?php esc_html_e( 'Database edition', 'faz-cookie-manager' ); ?></label>
+				<select class="faz-select" data-path="geolocation.geolite2_edition" style="width:auto;max-width:340px;">
+					<option value="country"><?php esc_html_e( 'Country &#8212; country-level only (recommended)', 'faz-cookie-manager' ); ?></option>
+					<option value="city"><?php esc_html_e( 'City &#8212; adds region / state detection', 'faz-cookie-manager' ); ?></option>
+				</select>
+				<div class="faz-help">
+					<?php echo wp_kses_post( __( '<strong>Country</strong> (~10 MB) resolves the visitor&#8217;s country only &#8212; enough for country-based banner targeting and most per-jurisdiction rules. <strong>City</strong> (~60&#8211;110 MB) additionally resolves the region / province / state, which a few rules need: sub-national regimes such as <em>Quebec Law 25</em> apply only inside one region of a country, so without City (or a Cloudflare <code>CF-Region-Code</code> header) the plugin can only see &#8220;Canada&#8221; and cannot route that visitor to the Quebec ruleset. Choose City only if you rely on region-level routing &#8212; it is a much larger download. Changing this and clicking &#8220;Update Database&#8221; replaces the installed database.', 'faz-cookie-manager' ) ); ?>
+				</div>
+			</div>
 			<div class="faz-form-group">
 				<label><?php esc_html_e( 'MaxMind License Key', 'faz-cookie-manager' ); ?></label>
 				<input type="password" class="faz-input" data-path="geolocation.maxmind_license_key" placeholder="<?php esc_attr_e( 'Enter your MaxMind license key', 'faz-cookie-manager' ); ?>" style="max-width:400px;">

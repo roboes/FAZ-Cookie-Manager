@@ -674,7 +674,11 @@ function _fazApplyGpcOptOut() {
             deny = !category.isNecessary;
         } else {
             // Opt-out regimes: exempt categories carry defaultConsent.ccpa === true.
-            deny = !(category.defaultConsent && category.defaultConsent.ccpa === true);
+            // A category flagged ccpaDoNotSell (sold or shared) is ALWAYS denied
+            // under a GPC opt-out, even when a runtime ruleset granted it — GPC is
+            // a legally-binding sale/share opt-out (CPPA §7025) that overrides the
+            // ruleset's default grant, mirroring the server-side get_blocked_categories.
+            deny = !!category.ccpaDoNotSell || !(category.defaultConsent && category.defaultConsent.ccpa === true);
         }
         var valueToSet = deny ? "no" : "yes";
         ref._fazSetInStore(category.slug, valueToSet);
@@ -737,10 +741,27 @@ function _fazSetInitialState() {
     // (inside _fazAcceptCookies via _fazSetInStore).
     ref._fazConsentStore.set("consent", "no");
     const ccpaCheckBoxValue = _fazFindCheckBoxValue();
+    // When a runtime geo ruleset is active (_runtimeGeo), the per-category
+    // defaultConsent values are jurisdiction-authoritative: derive the
+    // pre-consent state straight from them, independent of the binary law.
+    // This is what keeps a denied-until-action category blocked on the very
+    // first visit even when the shown banner is an opt-out (CCPA) banner —
+    // otherwise the ccpa branch below would leave it "yes" until the visitor
+    // ticks the opt-out box, and _fazUnblock() would run the blocked scripts.
+    const runtimeGeo = !!(_fazStore && _fazStore._runtimeGeo);
     const responseCategories = { accepted: [], rejected: [], action: 'init' };
     for (const category of _fazStore._categories) {
         let valueToSet = "yes";
-        if (
+        // Only categories the ruleset actually NAMES are jurisdiction-authoritative
+        // here. Custom categories absent from the ruleset fall through to the
+        // effective-law branch below — matching the server's get_blocked_categories
+        // split — so a custom category is never recorded "no" on the client while
+        // the (opt-out) server runs it.
+        if (runtimeGeo && category.defaultFromRuleset) {
+            if (!category.isNecessary && !category.defaultConsent.gdpr) {
+                valueToSet = "no";
+            }
+        } else if (
             (activeLaw === "gdpr" &&
                 !category.isNecessary &&
                 !category.defaultConsent[activeLaw]) ||
@@ -1959,6 +1980,19 @@ function _fazAcceptCookies(choice = "all") {
                         (choice === "custom" && !_fazFindCheckBoxValue(category.slug)))
                     ? "no"
                     : "yes";
+        } else if (_fazStore._runtimeGeo && category.defaultFromRuleset && choice === "reject") {
+            // Runtime geo-routing can serve a CCPA (opt-out) banner as a
+            // fallback to a visitor whose resolved ruleset is opt-in. On an
+            // explicit reject/close the opt-out checkbox logic below would
+            // leave every non-necessary category "yes" (silently granting all
+            // cookies on what the visitor meant as a rejection). Instead honour
+            // the ruleset's per-category default — defaultConsent.gdpr is
+            // jurisdiction-authoritative and mirrors _fazSetInitialState — so a
+            // ruleset-denied category becomes "no" while a ruleset-granted one
+            // (e.g. functional under an opt-out ruleset) stays "yes". Necessary
+            // is always granted; categories the ruleset doesn't name fall
+            // through to the opt-out branch below.
+            valueToSet = (category.isNecessary || category.defaultConsent.gdpr) ? "yes" : "no";
         } else {
             valueToSet = ccpaCheckBoxValue && !category.defaultConsent.ccpa ? "no" : "yes";
         }
