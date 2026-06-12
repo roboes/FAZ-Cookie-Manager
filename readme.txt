@@ -4,7 +4,7 @@ Donate link: https://buymeacoffee.com/fabiodalez
 Tags: cookie, gdpr, ccpa, consent, privacy
 Requires at least: 5.0
 Tested up to: 7.0
-Stable tag: 1.17.2
+Stable tag: 1.18.0
 Requires PHP: 7.4
 License: GPL-3.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -324,6 +324,13 @@ The full changelog (every release back to 1.0.0) lives at:
 https://github.com/fabiodalez-dev/FAZ-Cookie-Manager/blob/main/CHANGELOG.md
 and on the GitHub Releases page:
 https://github.com/fabiodalez-dev/FAZ-Cookie-Manager/releases
+
+= 1.18.0 =
+* Feature: geo-routing runtime (opt-in). With the `faz_geo_ruleset_runtime` filter enabled, the resolved per-jurisdiction ruleset drives the live banner — pre-consent default state, script blocking, Google Consent Mode v2 defaults and banner selection follow the visitor's jurisdiction (GDPR, CCPA/CPRA, Quebec Law 25, POPIA, LGPD, …). Off by default: existing sites are unchanged until you enable the filter.
+* Feature: GeoLite2 edition choice (Country vs City) under Settings > GeoIP Database. Country (~10 MB) stays the default; City (~60 MB) adds province/state detection needed by sub-national rules such as Quebec's Law 25. The UI explains the size/use trade-off, and the existing Country download keeps working exactly as before.
+* Feature: granular per-cookie consent toggles (opt-in, requires per-service consent). A nested toggle for each cookie a service declares, so visitors can opt out of specific cookies within an accepted service. A denied cookie is deleted whenever it appears — the same enforcement used for per-service opt-out.
+* Fix: GeoLite2 database activation is validated and atomic. A corrupt or wrong-edition download is rejected instead of silently breaking lookups; the previous database is preserved on error, and the edition preference is saved only after a successful download.
+* Translations: all six bundled locales (Italian, French, German, Dutch, Croatian, Czech) completed and re-synced (1144 strings each).
 
 = 1.17.2 =
 * Feature: new `[faz_cookie_settings]` shortcode renders a "Manage consent preferences" button that re-opens the consent preference center on any page where the banner runtime is active (e.g. inside the generated Cookie Policy or a footer) — the equivalent of the common `[cookie_settings]` shortcode. It needs `script.js` + the preference-center template, so it stays inert on pages excluded from the banner (the admin snippet documents this). Accepts optional `text` (custom label) and `class` (extra CSS classes, sanitised) attributes. No inline JS: a single delegated click handler in the already-enqueued banner script binds every `.faz-cookie-settings-btn` / `[data-faz-open-preferences]` trigger to the same opener the banner's settings button uses. The button is styled to match the banner's primary button and inherits the colours configured in Banner > Colours (the `--faz-accept-button-*` custom properties), so it tracks the admin's theme automatically. A copyable shortcode snippet is shown on the Banner > Advanced > Revisit Consent card for discoverability.

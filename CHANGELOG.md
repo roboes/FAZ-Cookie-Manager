@@ -2,6 +2,22 @@
 
 All notable changes to FAZ Cookie Manager are documented in this file.
 
+## [1.18.0] — 2026-06-12
+
+### Added
+
+- **Geo-routing runtime (opt-in, flag-gated).** When the `faz_geo_ruleset_runtime` filter is enabled, the resolved per-jurisdiction ruleset is applied to the live banner: pre-consent default state, script blocking, Google Consent Mode v2 defaults and banner selection follow the visitor's jurisdiction (GDPR / CCPA-CPRA / Law 25 Quebec / POPIA / LGPD / …). **Off by default** — existing installs are byte-for-byte unchanged until the filter is turned on.
+- **GeoLite2 edition choice (Country vs City).** Settings → GeoIP Database lets the admin pick the MaxMind GeoLite2 edition. Country (~10 MB) stays the default; City (~60 MB) adds province/state (ISO 3166-2) detection needed by sub-national rulesets such as Quebec's Law 25. The choice is surfaced with a clear size/use explanation, and the existing Country download keeps working exactly as before.
+- **Granular per-cookie consent toggles (#135).** A new opt-in sub-mode of per-service consent (`banner_control.per_cookie_consent`, default off) renders an individual toggle for every cookie a service declares, so visitors can opt out of specific cookies within an accepted service. Consent is stored as compact, override-only entries keyed by cookie name; enforcement reuses the existing cookie-shredding path (a denied cookie is deleted whenever it appears — the service script, not the individual cookie, is what gets gated).
+
+### Fixed
+
+- **GeoLite2 database activation is now validated and atomic.** The MaxMind download endpoint previously reported success whenever the archive extracted, even if the `.mmdb` inside was corrupt or the wrong edition — leaving lookups silently broken and the saved edition preference pointing at a database that was never installed. The downloader now validates the database type before activation, swaps it in atomically (preserving the previous database on any error, with staging/temp files cleaned up in a `finally` block), and persists the edition preference only after a successful download.
+
+### Translations
+
+- Completed and re-synced all six bundled locales (Italian, French, German, Dutch, Croatian, Czech). Every UI string — including the new geo-routing, edition-picker and per-cookie strings — is translated (1144/1144 per locale), and several strings that had drifted out of sync with the source were re-extracted and translated.
+
 ## [1.17.2] — 2026-06-03
 
 ### Added
