@@ -18,6 +18,10 @@ All notable changes to FAZ Cookie Manager are documented in this file.
 
 - Completed and re-synced all six bundled locales (Italian, French, German, Dutch, Croatian, Czech). Every UI string — including the new geo-routing, edition-picker and per-cookie strings — is translated (1144/1144 per locale), and several strings that had drifted out of sync with the source were re-extracted and translated.
 
+### Hardening
+
+- Pre-release hardening from an internal multi-lens review: per-cookie consent keys now percent-escape `:`/`,`/`%` in cookie names so an exotic custom cookie name can't corrupt the consent cookie; a *custom* save under a runtime-geo CCPA-fallback banner honours the visitor's per-category toggles (instead of re-granting ruleset-denied categories) and the REST language-swap fails closed when an opt-in ruleset has no matching banner; the GeoLite2 edition setting is whitelisted; the resolver's sub-national stage is guarded against US bypass; and the law-banner default fallback is restricted to globally-applicable banners.
+
 ## [1.17.2] — 2026-06-03
 
 ### Added
