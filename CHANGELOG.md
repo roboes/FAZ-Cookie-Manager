@@ -2,6 +2,18 @@
 
 All notable changes to FAZ Cookie Manager are documented in this file.
 
+## [1.18.2] — 2026-06-13
+
+### Changed
+
+- **Experimental opt-in consent features temporarily disabled pending a correctness rework.** An external compliance review found that the three opt-in features added in 1.18.0 did not, when switched on, deliver the granular guarantees their UI and docs implied. They are now hard-disabled at their entry points so no install can enable a path that under-delivers; the default category-level consent flow (covered by the 113/113 compliance suite) is byte-for-byte unchanged.
+  - **Per-service / per-cookie consent toggles** (`banner_control.per_service_consent`, `banner_control.per_cookie_consent`) are hidden in Settings and forced off in the frontend. As shipped, a denied per-cookie/per-service decision was not enforced server-side or re-applied on page reload, the granular `svc.*` / `ck.*` decisions were never written to the consent log, a large override set could exceed the browser's ~4 KB per-cookie limit, and the toggle list showed the cookie-catalogue wildcards a service *can* set rather than the cookies actually detected.
+  - **Geo-routing runtime** (`faz_geo_ruleset_runtime` filter) no longer applies a resolved ruleset to the live banner. A jurisdiction whose model declares CCPA-style UI obligations (Do Not Sell link, Global Privacy Control handling, separate opt-in for sensitive data) was mapped onto a generic GDPR banner without rendering those obligations, so the runtime banner did not match what the ruleset declared. Catalogue-based multi-banner geo-routing (selecting which saved banner to show per country) is unaffected — only the experimental runtime ruleset application is gated off.
+
+### Fixed
+
+- **Corrected an overstated per-cookie enforcement claim.** The per-cookie consent help text previously stated a denied cookie "is deleted whenever it appears — the same enforcement used for per-service opt-out." That enforcement only ran client-side at save time and did not persist across reloads, so the claim was inaccurate. The text has been corrected (and the feature itself disabled, above) so no documentation implies a guarantee the code did not deliver.
+
 ## [1.18.1] — 2026-06-13
 
 ### Fixed

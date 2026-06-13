@@ -903,7 +903,10 @@ class Frontend {
 		// cached response would leak one jurisdiction's defaults to another, so
 		// the output must always be treated as country-dependent while the flag
 		// is on — independent of any multi-banner geo-targeting configuration.
-		if ( apply_filters( 'faz_geo_ruleset_runtime', false ) ) {
+		// 1.18.2 HOTFIX: routed through Geo_Runtime::is_enabled() (hard-false)
+		// so the disabled runtime no longer forces no-cache; restoring the
+		// feature restores the cache-bust automatically via the same gate.
+		if ( Geo_Runtime::is_enabled() ) {
 			$dependent = true;
 		}
 
@@ -1448,7 +1451,15 @@ class Frontend {
 		}
 
 		// Per-service consent: pass service list to frontend.
-		$per_service = ! empty( $settings['banner_control']['per_service_consent'] );
+		// 1.18.2 HOTFIX: per-service / per-cookie consent is temporarily disabled.
+		// Per-cookie revocation is not enforced server-side or on reload (P1-2),
+		// the granular svc.*/ck.* decisions are not written to the consent log
+		// (P1-3), a large override set can exceed the 4 KB cookie limit (P1-4),
+		// and the toggles list catalogue wildcards rather than detected cookies
+		// (P2). Force off until reworked — category-level consent (the default,
+		// covered by the 113/113 compliance suite) is unaffected. Restore by
+		// reading the banner_control.per_service_consent option again.
+		$per_service = false;
 		if ( $per_service ) {
 			$known    = Known_Providers::get_all();
 			$services = array();
@@ -2865,8 +2876,10 @@ class Frontend {
 			return $this->service_consent_cache;
 		}
 		$this->service_consent_cache = array();
-		$settings    = $this->get_faz_settings();
-		$per_service = ! empty( $settings['banner_control']['per_service_consent'] );
+		// 1.18.2 HOTFIX: per-service / per-cookie consent disabled (see the note
+		// at the store-payload site). Returning an empty map keeps the
+		// cookie-shredding path on pure category-level enforcement.
+		$per_service = false;
 		if ( ! $per_service ) {
 			return $this->service_consent_cache;
 		}

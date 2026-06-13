@@ -563,6 +563,10 @@ Value format: `consentid:{base64},consent:yes,action:yes,necessary:yes,functiona
 
 Only the most recent release is listed here. The complete history is in [CHANGELOG.md](CHANGELOG.md) (Keep-a-Changelog format) and on the [GitHub Releases page](https://github.com/fabiodalez-dev/FAZ-Cookie-Manager/releases).
 
+### 1.18.2 — 2026-06-13
+- **Change**: the experimental opt-in features from 1.18.0 (per-service / per-cookie consent toggles and the `faz_geo_ruleset_runtime` runtime geo-routing) are temporarily disabled pending a correctness rework — an external review found they did not deliver the granular guarantees their UI implied when enabled. They are hard-off at their entry points; the default category-level consent flow (covered by the 113/113 compliance suite) is byte-for-byte unchanged. Catalogue-based multi-banner geo-routing (per-country banner selection) is unaffected.
+- **Fix**: corrected an overstated per-cookie help text that claimed a denied cookie "is deleted whenever it appears" — that enforcement only ran client-side at save time and did not persist.
+
 ### 1.18.1 — 2026-06-13
 - **Fix**: the Cookies admin *Scan Site* / *Auto-categorize* dropdown menus are no longer clipped by the card's `overflow: hidden` — the menu drops over the table below and shows every option.
 
