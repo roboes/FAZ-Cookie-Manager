@@ -71,11 +71,17 @@ class Geo_Runtime {
 			$memo = self::$ruleset_memo[ $key ];
 			return ( false === $memo ) ? null : $memo;
 		}
-		self::$ruleset_memo[ $key ] = false;
-
+		// Check the flag BEFORE memoising. Writing the memo first would poison
+		// the per-request cache if this runs before the `faz_geo_ruleset_runtime`
+		// filter is hooked (e.g. a late-priority init): a subsequent call in the
+		// same PHP process — including tests that toggle the flag — would then
+		// return null from the memo even though the feature is on. When disabled
+		// we deliberately do NOT memo, so a later-enabled call re-resolves.
 		if ( ! self::is_enabled() ) {
 			return null;
 		}
+		self::$ruleset_memo[ $key ] = false;
+
 		$class = '\\FazCookie\\Admin\\Modules\\Geo_Routing\\Geo_Routing';
 		if ( ! class_exists( $class ) || ! method_exists( $class, 'get_instance' ) ) {
 			return null;

@@ -114,13 +114,16 @@ class Ruleset_Resolver {
 			return $fallback_id;
 		}
 
-		// Stage 3.5: generic non-US sub-national region → ruleset. Lets the
+		// Stage 3.5: generic NON-US sub-national region → ruleset. Lets the
 		// catalog expose province/state rulesets outside the US (e.g.
 		// CA-QC → law25-quebec) without special-casing each country. The US
 		// keeps its dedicated stage below (it carries the extra no-law-state
-		// policy). Region must already be ISO 3166-2 ('CC-RR'); it is populated
-		// by the GeoLite2-City subdivision lookup or a CF-Region-Code header.
-		if ( '' !== $region && is_array( $index_subnational ) && isset( $index_subnational[ $region ] ) ) {
+		// policy), so US is excluded here in code rather than relying on the
+		// catalog never mapping a US-* key in `_regions` — a future `_index.json`
+		// edit that did so must not be able to bypass the US no-law fallback.
+		// Region must already be ISO 3166-2 ('CC-RR'); it is populated by the
+		// GeoLite2-City subdivision lookup or a CF-Region-Code header.
+		if ( 'US' !== $country && '' !== $region && is_array( $index_subnational ) && isset( $index_subnational[ $region ] ) ) {
 			return (string) $index_subnational[ $region ];
 		}
 
