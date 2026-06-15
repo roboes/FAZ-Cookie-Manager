@@ -2,7 +2,7 @@
 
 **Poslední aktualizace:** {{LAST_UPDATED_DATE}}
 
-Tyto Zásady používání cookies vysvětlují, jak společnost **{{COMPANY_NAME}}** („my", „nás", „náš") využívá soubory cookies a podobné technologie na tomto webu, a to v souladu s nařízením EU o ochraně osobních údajů (GDPR, nař. 2016/679) a směrnicí o soukromí v elektronických komunikacích (2002/58/ES, čl. 5 odst. 3).
+Tyto Zásady používání cookies vysvětlují, jak společnost **{{COMPANY_NAME}}** („my“, „nás“, „náš“) využívá soubory cookies a podobné technologie na tomto webu, a to v souladu s nařízením EU o ochraně osobních údajů (GDPR, nař. 2016/679) a směrnicí o soukromí v elektronických komunikacích (2002/58/ES, čl. 5 odst. 3).
 
 ## Kdo jsme
 
