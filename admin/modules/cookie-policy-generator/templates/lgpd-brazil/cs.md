@@ -2,7 +2,7 @@
 
 **Poslední aktualizace:** {{LAST_UPDATED_DATE}}
 
-Tyto Zásady používání cookies popisují, jak společnost **{{COMPANY_NAME}}** („my") využívá soubory cookies a podobné technologie na tomto webu, a to v souladu s brazilským obecným zákonem o ochraně osobních údajů (Lei Geral de Proteção de Dados Pessoais — LGPD, Lei nº 13.709/2018) a zákonem o občanských právech na internetu (Marco Civil da Internet, Lei nº 12.965/2014).
+Tyto Zásady používání cookies popisují, jak společnost **{{COMPANY_NAME}}** („my“) využívá soubory cookies a podobné technologie na tomto webu, a to v souladu s brazilským obecným zákonem o ochraně osobních údajů (Lei Geral de Proteção de Dados Pessoais — LGPD, Lei nº 13.709/2018) a zákonem o občanských právech na internetu (Marco Civil da Internet, Lei nº 12.965/2014).
 
 > **Poznámka pro provozovatele:** Tato šablona je určena pro správce osobních údajů, kteří zpracovávají údaje fyzických osob nacházejících se v Brazílii. Pro weby obsluhující výhradně české nebo evropské zákazníky doporučujeme místo této šablony použít šablonu GDPR.
 
