@@ -700,7 +700,14 @@ class Controller extends Base_Controller {
 			} elseif ( empty( $targets ) ) {
 				$anyland_ids[] = $entry;
 			}
-			if ( 1 === (int) $item->banner_default && null === $default_id ) {
+			// The default-banner fallback must be GLOBALLY applicable (empty
+			// target list). A banner_default row that is country-restricted is
+			// already captured in $match_ids when it targets the visitor's
+			// country (which outranks $default_id); using it as the law-global
+			// fallback for a visitor it does NOT target would serve a banner the
+			// admin scoped to other countries. Requiring empty targets here makes
+			// the method return false instead — callers then fail closed.
+			if ( 1 === (int) $item->banner_default && empty( $targets ) && null === $default_id ) {
 				$default_id = $iid;
 			}
 		}

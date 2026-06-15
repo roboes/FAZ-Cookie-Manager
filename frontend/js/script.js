@@ -332,7 +332,7 @@ if (!_fazConsentInvalidated && _fazStore._perServiceConsent && _fazStore._servic
         // silently remap a stored choice onto a different cookie.
         if (_fazStore._perCookieConsent && Array.isArray(svc.cookies)) {
             svc.cookies.forEach(function(cookieName) {
-                const ckKey = "ck." + svc.id + "." + cookieName;
+                const ckKey = _fazCkKey(svc.id, cookieName);
                 if (fazcookieConsentMap[ckKey]) {
                     ref._fazConsentStore.set(ckKey, fazcookieConsentMap[ckKey]);
                 }
@@ -2020,19 +2020,27 @@ function _fazAcceptCookies(choice = "all") {
                         (choice === "custom" && !_fazFindCheckBoxValue(category.slug)))
                     ? "no"
                     : "yes";
-        } else if (_fazStore._runtimeGeo && category.defaultFromRuleset && choice === "reject") {
+        } else if (_fazStore._runtimeGeo && category.defaultFromRuleset && (choice === "reject" || choice === "custom")) {
             // Runtime geo-routing can serve a CCPA (opt-out) banner as a
-            // fallback to a visitor whose resolved ruleset is opt-in. On an
-            // explicit reject/close the opt-out checkbox logic below would
-            // leave every non-necessary category "yes" (silently granting all
-            // cookies on what the visitor meant as a rejection). Instead honour
-            // the ruleset's per-category default — defaultConsent.gdpr is
-            // jurisdiction-authoritative and mirrors _fazSetInitialState — so a
-            // ruleset-denied category becomes "no" while a ruleset-granted one
-            // (e.g. functional under an opt-out ruleset) stays "yes". Necessary
-            // is always granted; categories the ruleset doesn't name fall
-            // through to the opt-out branch below.
-            valueToSet = (category.isNecessary || category.defaultConsent.gdpr) ? "yes" : "no";
+            // fallback to a visitor whose resolved ruleset is opt-in. The
+            // opt-out checkbox logic in the else branch would leave every
+            // non-necessary category "yes" (silently granting all cookies),
+            // which is wrong for both an explicit reject AND a custom save
+            // from the preference center (where the visitor's per-category
+            // toggles, not the single opt-out checkbox, express intent).
+            if (choice === "custom") {
+                // Honour the visitor's explicit per-category toggle; the
+                // preference-center toggles were seeded from the ruleset in
+                // _fazSetInitialState, so an untouched toggle already reflects
+                // the jurisdiction default. Necessary is always granted.
+                valueToSet = (category.isNecessary || _fazFindCheckBoxValue(category.slug)) ? "yes" : "no";
+            } else {
+                // reject/close → ruleset-authoritative default. defaultConsent.gdpr
+                // is jurisdiction-authoritative and mirrors _fazSetInitialState, so
+                // a ruleset-denied category becomes "no" while a ruleset-granted one
+                // (e.g. functional under an opt-out ruleset) stays "yes".
+                valueToSet = (category.isNecessary || category.defaultConsent.gdpr) ? "yes" : "no";
+            }
         } else {
             valueToSet = ccpaCheckBoxValue && !category.defaultConsent.ccpa ? "no" : "yes";
         }
@@ -2076,6 +2084,27 @@ function _fazClearStoredServiceConsent() {
     keys.forEach(function(key) {
         ref._fazConsentStore.delete(key);
     });
+}
+
+/**
+ * Build the consent-store key for a per-cookie override.
+ *
+ * The fazcookie-consent cookie is a comma-joined list of `key:value` pairs, so
+ * a cookie name containing `,` or `:` (which a publisher can enter as a custom
+ * cookie name even though browsers reject such names) would corrupt the whole
+ * cookie on the next parse — silently dropping unrelated consent entries.
+ * Percent-escape `%`, `:` and `,` in the name so the key is always safe. The
+ * service id is sanitize_key()'d server-side (no special characters), and the
+ * store serialiser parses svcId with the first dot, so escaping the name never
+ * affects that split.
+ *
+ * @param {string} serviceId  Sanitised service id.
+ * @param {string} cookieName Cookie name/pattern as declared by the service.
+ * @return {string} The `ck.<service>.<escaped-name>` store key.
+ */
+function _fazCkKey(serviceId, cookieName) {
+    var safe = String(cookieName).replace(/%/g, "%25").replace(/:/g, "%3A").replace(/,/g, "%2C");
+    return "ck." + serviceId + "." + safe;
 }
 
 /**
@@ -2137,7 +2166,7 @@ function _fazServiceEffectiveConsent(serviceId, category) {
  * @return {string} "yes" or "no".
  */
 function _fazCookieEffectiveConsent(serviceId, category, cookieName) {
-    var ck = ref._fazGetFromStore("ck." + serviceId + "." + cookieName);
+    var ck = ref._fazGetFromStore(_fazCkKey(serviceId, cookieName));
     if (ck) return ck === "yes" ? "yes" : "no";
     return _fazServiceEffectiveConsent(serviceId, category);
 }
@@ -2158,7 +2187,7 @@ function _fazStoreCustomCookieConsent(choice) {
         var serviceId = toggle.getAttribute('data-service');
         var cookieName = toggle.getAttribute('data-cookie-name');
         if (!serviceId || !cookieName) return;
-        ref._fazSetInStore("ck." + serviceId + "." + cookieName, toggle.checked ? "yes" : "no");
+        ref._fazSetInStore(_fazCkKey(serviceId, cookieName), toggle.checked ? "yes" : "no");
     });
 }
 function _fazSetShowMoreLess() {
@@ -3375,7 +3404,7 @@ function _fazCleanupRevokedCookies() {
             // the same post-hoc enforcement used for a denied service.
             if (_fazStore._perCookieConsent && svc.cookies && svc.cookies.length) {
                 svc.cookies.forEach(function(pat) {
-                    if (ref._fazGetFromStore("ck." + svc.id + "." + pat) === "no") {
+                    if (ref._fazGetFromStore(_fazCkKey(svc.id, pat)) === "no") {
                         svcCookieMap[pat] = svc.id;
                     }
                 });

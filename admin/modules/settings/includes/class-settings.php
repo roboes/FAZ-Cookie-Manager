@@ -299,6 +299,14 @@ class Settings extends Store {
 				$allowed = array( 'daily', 'weekly', 'monthly' );
 				$value   = in_array( $value, $allowed, true ) ? $value : 'weekly';
 				break;
+			case 'geolite2_edition':
+				// Whitelist the GeoLite2 edition so a direct settings PUT cannot
+				// persist an arbitrary string. The runtime reader already falls
+				// back to Country on unknown values, but the stored value should
+				// never hold anything but the two valid editions.
+				$allowed = array( 'country', 'city' );
+				$value   = in_array( $value, $allowed, true ) ? $value : 'country';
+				break;
 			case 'installed':
 			case 'step':
 			case 'max_pages':

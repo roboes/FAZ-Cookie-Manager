@@ -41,13 +41,17 @@ class Geo_Runtime {
 	 * @return bool
 	 */
 	public static function is_enabled() {
-		/**
-		 * Apply the resolved geo-routing ruleset to the live banner at runtime.
-		 *
-		 * @since 1.17.2
-		 * @param bool $enabled Default false (catalogue-only behaviour).
-		 */
-		return (bool) apply_filters( 'faz_geo_ruleset_runtime', false );
+		// 1.18.2 HOTFIX: the runtime application of geo rulesets is temporarily
+		// hard-disabled. A resolved jurisdiction (e.g. California, model
+		// "opt-out-with-sensitive-opt-in") is mapped to a GDPR banner and the
+		// ruleset's declared CCPA UI obligations — Do Not Sell link, GPC
+		// handling, sensitive-data separate opt-in — are NOT yet enforced, so
+		// the banner would not deliver the compliant UI the ruleset declares.
+		// Re-enable once those obligations are wired (see CHANGELOG 1.18.2).
+		// Catalogue-only (default) banner behaviour is unaffected by this.
+		// To restore after the rework, return:
+		//   (bool) apply_filters( 'faz_geo_ruleset_runtime', false );
+		return false;
 	}
 
 	/**
@@ -71,11 +75,17 @@ class Geo_Runtime {
 			$memo = self::$ruleset_memo[ $key ];
 			return ( false === $memo ) ? null : $memo;
 		}
-		self::$ruleset_memo[ $key ] = false;
-
+		// Check the flag BEFORE memoising. Writing the memo first would poison
+		// the per-request cache if this runs before the `faz_geo_ruleset_runtime`
+		// filter is hooked (e.g. a late-priority init): a subsequent call in the
+		// same PHP process — including tests that toggle the flag — would then
+		// return null from the memo even though the feature is on. When disabled
+		// we deliberately do NOT memo, so a later-enabled call re-resolves.
 		if ( ! self::is_enabled() ) {
 			return null;
 		}
+		self::$ruleset_memo[ $key ] = false;
+
 		$class = '\\FazCookie\\Admin\\Modules\\Geo_Routing\\Geo_Routing';
 		if ( ! class_exists( $class ) || ! method_exists( $class, 'get_instance' ) ) {
 			return null;

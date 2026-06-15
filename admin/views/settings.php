@@ -51,6 +51,15 @@ defined( 'ABSPATH' ) || exit;
 				</label>
 				<div class="faz-help"><?php esc_html_e( 'Uses generic script handle names to prevent ad blockers from blocking the cookie banner. Enable if visitors report the banner not appearing.', 'faz-cookie-manager' ); ?></div>
 			</div>
+			<?php
+			// 1.18.2 HOTFIX: the per-service and per-cookie consent toggles are
+			// hidden pending a correctness rework. As shipped they did not enforce
+			// per-cookie revocation server-side or on reload, did not log the
+			// granular decisions, could exceed the 4 KB cookie limit, and listed
+			// catalogue wildcards rather than detected cookies. The markup is kept
+			// (gated off) for an easy restore once those are fixed.
+			if ( false ) :
+			?>
 			<div class="faz-form-group">
 				<label class="faz-toggle">
 					<input type="checkbox" data-path="banner_control.per_service_consent">
@@ -65,8 +74,9 @@ defined( 'ABSPATH' ) || exit;
 					<span class="faz-toggle-track"></span>
 					<span class="faz-toggle-label"><?php esc_html_e( 'Enable per-cookie consent', 'faz-cookie-manager' ); ?></span>
 				</label>
-				<div class="faz-help"><?php esc_html_e( 'Requires per-service consent. Adds a nested toggle for each individual cookie a service declares, so visitors can opt out of specific cookies within an accepted service. A denied cookie cannot be prevented from being set (the service script controls that) but is deleted whenever it appears — the same enforcement used for per-service opt-out. Most useful for strict data-sovereignty setups.', 'faz-cookie-manager' ); ?></div>
+				<div class="faz-help"><?php esc_html_e( 'Requires per-service consent. Adds a nested toggle for each individual cookie a service declares, so visitors can opt out of specific cookies within an accepted service.', 'faz-cookie-manager' ); ?></div>
 			</div>
+			<?php endif; ?>
 			<div class="faz-form-group">
 				<label class="faz-toggle">
 					<input type="checkbox" data-path="banner_control.subdomain_sharing">

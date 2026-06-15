@@ -53,7 +53,12 @@ if ( 1 === preg_match( '/^[A-Z]{2}$/', $faz_e2e_cc ) ) {
 }
 `;
 
-test.describe('geo-runtime enforcement (flag on, POPIA/ZA opt-in)', () => {
+// 1.18.2 HOTFIX: the geo-routing runtime is hard-disabled (Geo_Runtime::is_enabled()
+// returns false), so even with the faz_geo_ruleset_runtime filter forced on the
+// ruleset no longer drives the live banner — these enforcement assertions can no
+// longer hold. Skipped until the runtime is reworked and re-enabled (see the
+// CHANGELOG 1.18.2 entry); flip back to test.describe(...) at that point.
+test.describe.skip('geo-runtime enforcement (flag on, POPIA/ZA opt-in)', () => {
   test.beforeAll(() => {
     if (!existsSync(MU_DIR)) {
       mkdirSync(MU_DIR, { recursive: true });

@@ -151,6 +151,20 @@ class Banner_Rest {
 				$law_banner = $controller->get_active_banner_for_law( $wanted_law, $country );
 				if ( $law_banner ) {
 					$banner = $law_banner;
+				} elseif ( 'gdpr' === $wanted_law ) {
+					// Fail-closed parity with load_banner(): the resolved ruleset
+					// is opt-in (gdpr) but no GDPR banner exists, so the initial
+					// render suppressed the opt-out banner's UI while keeping
+					// scripts blocked (faz_law_fallback_suppress). Serving the
+					// CCPA banner here on a language swap would re-show an opt-out
+					// UI and flip JS enforcement to opt-out, contradicting the
+					// suppression. Return 404 so the client keeps the suppressed
+					// state instead of swapping in a contradicting banner.
+					return new WP_Error(
+						'faz_no_law_banner',
+						__( 'No banner available for the resolved jurisdiction.', 'faz-cookie-manager' ),
+						array( 'status' => 404 )
+					);
 				}
 			}
 		}

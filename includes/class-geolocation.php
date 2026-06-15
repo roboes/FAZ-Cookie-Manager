@@ -533,8 +533,13 @@ class Geolocation {
 		} elseif ( 'country' === $choice ) {
 			$default = 'GeoLite2-Country';
 		} else {
-			// Setting not yet saved (legacy) — honour the runtime flag.
-			$default = apply_filters( 'faz_geo_ruleset_runtime', false ) ? 'GeoLite2-City' : 'GeoLite2-Country';
+			// Setting not yet saved (legacy). 1.18.2 HOTFIX: previously this
+			// honoured the faz_geo_ruleset_runtime flag (City when on), but that
+			// runtime is now hard-disabled — selecting City here would download a
+			// ~60 MB DB the disabled runtime never uses. Default to Country; an
+			// admin who wants City picks it explicitly (saved option above) or
+			// forces it via the faz_geolite2_edition filter below.
+			$default = 'GeoLite2-Country';
 		}
 		/**
 		 * Filter the GeoLite2 edition the downloader fetches and the lookup reads.

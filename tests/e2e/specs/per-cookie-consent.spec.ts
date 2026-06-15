@@ -36,7 +36,12 @@ async function postSettings(page: Page, nonce: string, payload: FazSettings): Pr
   expect(res.status(), `settings update status ${res.status()}`).toBe(200);
 }
 
-test.describe('Per-cookie consent (issue #135)', () => {
+// 1.18.2 HOTFIX: per-service / per-cookie consent is hard-disabled — the store
+// payload forces $per_service = false and the Settings toggles are gated off, so
+// the frontend never renders the nested per-cookie toggles this spec drives.
+// Skipped until the feature is reworked (server-side ck.* enforcement, granular
+// logging, 4 KB guard) and re-enabled; flip back to test.describe(...) then.
+test.describe.skip('Per-cookie consent (issue #135)', () => {
   test.describe.configure({ mode: 'serial' });
 
   let original: FazSettings | null = null;
