@@ -10,7 +10,9 @@ namespace FazCookie\Includes {
 }
 
 namespace {
-	define( 'ABSPATH', __DIR__ );
+	if ( ! defined( 'ABSPATH' ) ) {
+		define( 'ABSPATH', __DIR__ );
+	}
 
 	function faz_sanitize_bool( $value ) {
 		return filter_var( $value, FILTER_VALIDATE_BOOLEAN );

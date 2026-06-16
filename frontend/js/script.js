@@ -209,6 +209,13 @@ ref._fazSetInStore = function (key, value) {
             }
         });
         svcAllowedEntries.forEach(function (svcEntry) {
+            // Defence in depth: never emit an svc.<id>:yes for a category that
+            // was fail-closed to "no" in the denial pass above. The serializer
+            // cannot currently produce such an entry (a downgraded category was
+            // "yes" at serialize time, so its surviving overrides are all :no),
+            // but skipping it keeps the invariant explicit and robust against
+            // future changes to the divergence filter.
+            if (svcEntry.category && downgradedCategories[svcEntry.category]) return;
             keptServices.push(svcEntry);
             kept.push(svcEntry.entry);
             if (_fazEncodedLen(kept) > FAZ_COOKIE_VALUE_BUDGET) {
@@ -219,8 +226,9 @@ ref._fazSetInStore = function (key, value) {
             }
         });
         // Per-cookie entries are considered only when every service decision
-        // fitted, so a shorter ck.* key can never displace a higher-priority
-        // svc.* key or a fail-closed category downgrade.
+        // fitted. serviceDropped is set whenever ANY svc.* entry (a denial OR
+        // an allow) overflowed the budget, so a shorter ck.* key can never
+        // displace a higher-priority svc.* key.
         if (!serviceDropped) {
             ckEntries.forEach(function (entry) {
                 kept.push(entry);
@@ -3356,6 +3364,13 @@ function _fazShouldChangeType(element, src) {
     var serviceCategory = element.getAttribute && element.hasAttribute("data-fazcookie")
         ? element.getAttribute("data-fazcookie").replace("fazcookie-", "")
         : "";
+    // When the category tag is not (yet) set on a dynamically-created element,
+    // resolve the service's catalogue category so the override is validated
+    // against the registered category — matching _fazShouldBlockResource's
+    // semantics — instead of letting an empty category short-circuit the check.
+    if (!serviceCategory && serviceId) {
+        serviceCategory = _fazKnownServiceCategory(serviceId);
+    }
     if (_fazStore._perServiceConsent && serviceId && _fazIsKnownService(serviceId, serviceCategory)) {
         var explicit = ref._fazGetFromStore("svc." + serviceId);
         if (explicit === "no") return true;

@@ -1606,8 +1606,9 @@ class Frontend {
 			$store['_perServiceConsent'] = true;
 			$store['_services']         = $services;
 			// Per-cookie consent remains gated until its rework is complete.
-			// Keep the runtime hard-off even if a legacy DB row or direct API
-			// payload still carries banner_control.per_cookie_consent=true.
+			// New writes can no longer persist it as true (the settings
+			// sanitiser forces it false on the REST/import path), so this is a
+			// defensive runtime guard for a pre-gate legacy DB row only.
 			$store['_perCookieConsent'] = false;
 		}
 
