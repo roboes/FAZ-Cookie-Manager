@@ -13,9 +13,10 @@ import { expect, test } from '../fixtures/wp-fixture';
  *  - #136: a per-service toggle click inside an expanded accordion collapsed it.
  *    The category listener now ignores service-toggle / switch / checkbox clicks.
  *
- * The cookie-state assertions exercise the real frontend runtime: _fazAcceptService
- * writes the consent cookie regardless of whether the service exists in the
- * catalogue, so the per-service isolation guarantees are deterministic.
+ * The cookie-state assertions exercise the real frontend runtime. Services are
+ * injected into _fazConfig._services before each direct call so the tested path
+ * matches the production contract: only scanner-exposed services can receive a
+ * granular svc.<id> grant.
  */
 
 const EXCLUDED = ['consentid', 'consent', 'action', 'necessary', '__scope.banner', '__scope.law', '__scope.fp'];
@@ -26,7 +27,29 @@ async function gotoFresh(page, context) {
   await page.waitForFunction(() => typeof (window as any)._fazAcceptService === 'function', undefined, { timeout: 10_000 });
 }
 
-async function acceptService(page, serviceId: string) {
+async function exposeServices(page, serviceIds: string[], category = 'marketing') {
+  await page.evaluate(
+    ({ ids, cat }) => {
+      const cfg = (window as any)._fazConfig || {};
+      cfg._perServiceConsent = true;
+      const byId = new Map((cfg._services || []).map((service: any) => [service.id, service]));
+      ids.forEach((id: string) => {
+        byId.set(id, {
+          id,
+          label: id,
+          category: cat,
+          patterns: [],
+          cookies: [],
+        });
+      });
+      cfg._services = Array.from(byId.values());
+    },
+    { ids: serviceIds, cat: category },
+  );
+}
+
+async function acceptService(page, serviceId: string, knownServices: string[] = [serviceId]) {
+  await exposeServices(page, knownServices);
   await page.evaluate((svc) => { (window as any)._fazAcceptService(svc); }, serviceId);
 }
 
@@ -119,6 +142,7 @@ test.describe('Service-level consent — placeholder button (#134)', () => {
   // 14: placeholder with a service id grants only the service.
   test('placeholder with data-faz-accept-service grants the service only', async ({ page, context, getConsentCookie, parseConsentCookie }) => {
     await gotoFresh(page, context);
+    await exposeServices(page, ['youtube']);
     await injectPlaceholder(page, { 'data-faz-accept': 'marketing', 'data-faz-accept-service': 'youtube' });
     const parsed = parseConsentCookie((await getConsentCookie(context))!.value);
     expect(parsed['svc.youtube']).toBe('yes');
@@ -144,7 +168,17 @@ test.describe('Service-level consent — placeholder button (#134)', () => {
     expect(Object.keys(parsed).some((k) => k === 'svc.')).toBeFalsy();
   });
 
-  // 17: the PHP builder ships the data-faz-accept-service attribute.
+  // 17: a placeholder service id not present in _services falls back to the category.
+  test('placeholder with an unknown service id does not create an arbitrary svc grant', async ({ page, context, getConsentCookie, parseConsentCookie }) => {
+    await gotoFresh(page, context);
+    await exposeServices(page, []);
+    await injectPlaceholder(page, { 'data-faz-accept': 'marketing', 'data-faz-accept-service': 'definitely-not-a-rendered-service' });
+    const parsed = parseConsentCookie((await getConsentCookie(context))!.value);
+    expect(parsed['svc.definitely-not-a-rendered-service'] === 'yes').toBeFalsy();
+    expect(parsed.marketing).toBe('yes');
+  });
+
+  // 18: the PHP builder ships the data-faz-accept-service attribute.
   test('PHP placeholder builder emits data-faz-accept-service', () => {
     const src = readFileSync(join(process.cwd(), 'frontend/includes/class-placeholder-builder.php'), 'utf8');
     expect(src).toMatch(/data-faz-accept-service="' \. esc_attr\( \$service_id \)/);

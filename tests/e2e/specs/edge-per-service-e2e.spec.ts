@@ -427,6 +427,95 @@ test.describe('Per-service consent — edge cases (per-service-e2e)', () => {
     await ctx.close();
   });
 
+  test('overflowed svc:no entries fail closed through their category', async ({ browser }) => {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+
+    const result = await page.evaluate(() => {
+      const w = window as unknown as {
+        _fazConfig?: { _services?: Array<Record<string, unknown>> };
+        fazcookie?: { _fazSetInStore?: (k: string, v: string) => void };
+      };
+      const fz = w.fazcookie;
+      if (!fz || typeof fz._fazSetInStore !== 'function' || !w._fazConfig) {
+        return { ok: false } as Record<string, unknown>;
+      }
+      w._fazConfig._services = [];
+      for (let i = 0; i < 500; i++) {
+        w._fazConfig._services.push({
+          id: 'very-long-denied-analytics-service-' + i,
+          category: 'analytics',
+          patterns: [],
+          cookies: [],
+        });
+      }
+      fz._fazSetInStore('analytics', 'yes');
+      for (let i = 0; i < 500; i++) {
+        fz._fazSetInStore('svc.very-long-denied-analytics-service-' + i, 'no');
+      }
+
+      const raw = document.cookie
+        .split(';')
+        .map((s) => s.trim())
+        .find((s) => s.startsWith('fazcookie-consent='));
+      const encoded = raw ? raw.substring('fazcookie-consent='.length) : '';
+      const decoded = decodeURIComponent(encoded);
+      return {
+        ok: true,
+        encodedLen: encoded.length,
+        categoryDenied: /(?:^|,)analytics:no(?:,|$)/.test(decoded),
+        categoryAllowed: /(?:^|,)analytics:yes(?:,|$)/.test(decoded),
+        droppedSomeDenials:
+          decoded.split(',').filter((part) => part.indexOf('svc.very-long-denied-analytics-service-') === 0)
+            .length < 500,
+      };
+    });
+
+    expect(result.ok, '_fazSetInStore exposed').toBe(true);
+    expect(result.encodedLen).toBeGreaterThan(0);
+    expect(result.encodedLen).toBeLessThan(4096);
+    expect(result.droppedSomeDenials, 'the fixture really overflowed some svc:no entries').toBe(true);
+    expect(result.categoryDenied, 'overflowed explicit denials force the parent category to no').toBe(true);
+    expect(result.categoryAllowed, 'category yes is not left behind after denied overflow').toBe(false);
+
+    await ctx.close();
+  });
+
+  test('unknown data-faz-service overrides are ignored by direct resource checks', async ({
+    browser,
+  }) => {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+
+    const result = await page.evaluate(() => {
+      const w = window as unknown as {
+        fazcookie?: { _fazSetInStore?: (k: string, v: string) => void };
+        _fazShouldBlockResource?: (cat: string, target: string, svc: string) => boolean;
+      };
+      const fz = w.fazcookie;
+      if (!fz || typeof fz._fazSetInStore !== 'function' || typeof w._fazShouldBlockResource !== 'function') {
+        return { ok: false } as Record<string, unknown>;
+      }
+      fz._fazSetInStore('analytics', 'no');
+      fz._fazSetInStore('svc.unlisted-service', 'yes');
+      return {
+        ok: true,
+        blocked: w._fazShouldBlockResource(
+          'analytics',
+          'https://example.test/tracker.js',
+          'unlisted-service',
+        ),
+      };
+    });
+
+    expect(result.ok, 'frontend helpers exposed').toBe(true);
+    expect(result.blocked, 'unknown svc:yes cannot override category:no').toBe(true);
+
+    await ctx.close();
+  });
+
   // ───────────────────────────────────────────────────────────────────────
   // 7. EDGE: _fazAcceptService persists svc.<id>:yes (NOT the whole category)
   //    even when NO toggle is rendered for that service in the DOM.
