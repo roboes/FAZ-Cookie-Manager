@@ -936,6 +936,47 @@ class Admin {
 					$theme_file = plugin_dir_path( __FILE__ ) . 'modules/banners/includes/templates/6.2.0/theme.json';
 					$presets    = file_exists( $theme_file ) ? json_decode( file_get_contents( $theme_file ), true ) : array(); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
 					wp_add_inline_script( 'faz-admin', 'fazConfig.themePresets=' . wp_json_encode( $presets ) . ';', 'after' );
+
+					// Per-law default notice descriptions for every selected or bundled
+					// language. Banner rows preserve unselected translations, so those
+					// defaults must remain available for the all-language mismatch scan.
+					$faz_law_langs = faz_selected_languages();
+					$faz_contents_dir = plugin_dir_path( __FILE__ ) . 'modules/banners/includes/contents/';
+					$faz_content_files = glob( $faz_contents_dir . '*.json' );
+					if ( is_array( $faz_content_files ) ) {
+						foreach ( $faz_content_files as $faz_content_file ) {
+							$faz_content_lang = basename( $faz_content_file, '.json' );
+							if ( 'default' !== $faz_content_lang ) {
+								$faz_law_langs[] = $faz_content_lang;
+							}
+						}
+					}
+					// Also include downloaded translations (validated against the
+					// plugin's translated-language list, is_faz_translated()) that
+					// may no longer be selected: a banner
+					// can still carry such a language, and the all-language reload +
+					// save-time mismatch scan need its per-law defaults available.
+					$faz_uploads   = wp_upload_dir();
+					$faz_trans_dir = trailingslashit( $faz_uploads['basedir'] ) . 'fazcookie/languages/banners/';
+					$faz_trans_files = glob( $faz_trans_dir . '*.json' );
+					if ( is_array( $faz_trans_files ) ) {
+						$faz_lang_ctrl = \FazCookie\Admin\Modules\Languages\Includes\Controller::get_instance();
+						foreach ( $faz_trans_files as $faz_trans_file ) {
+							$faz_trans_lang = basename( $faz_trans_file, '.json' );
+							if ( '' !== $faz_trans_lang && $faz_lang_ctrl->is_faz_translated( $faz_trans_lang ) ) {
+								$faz_law_langs[] = $faz_trans_lang;
+							}
+						}
+					}
+					$faz_law_langs = array_values( array_unique( $faz_law_langs ) );
+					if ( empty( $faz_law_langs ) ) {
+						$faz_law_langs = array( faz_default_language() );
+					}
+					$faz_law_descs = array();
+					foreach ( $faz_law_langs as $faz_law_lang ) {
+						$faz_law_descs[ $faz_law_lang ] = \FazCookie\Admin\Modules\Banners\Includes\Banner::get_law_notice_descriptions( $faz_law_lang );
+					}
+					wp_add_inline_script( 'faz-admin', 'fazConfig.lawNoticeDescriptions=' . wp_json_encode( $faz_law_descs ) . ';', 'after' );
 				}
 
 				// Preload REST API responses so page JS gets instant data.

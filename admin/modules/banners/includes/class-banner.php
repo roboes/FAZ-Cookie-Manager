@@ -276,6 +276,181 @@ class Banner extends Store {
 	}
 
 	/**
+	 * Apply non-persistent runtime fixes required for a working opt-out UI.
+	 *
+	 * Classic (including the legacy banner+pushdown combination) has no
+	 * opt-out popup. A CCPA banner, or a GDPR+CCPA banner with Do Not Sell
+	 * enabled, must therefore render with a popup-capable layout. This changes
+	 * only the in-memory Banner object used for frontend output; the editor
+	 * remains responsible for migrating and saving the stored configuration.
+	 *
+	 * @return bool Whether the in-memory settings changed.
+	 */
+	public function apply_runtime_layout_compatibility() {
+		$properties = $this->get_settings();
+		if ( ! is_array( $properties ) ) {
+			return false;
+		}
+
+		$settings = isset( $properties['settings'] ) && is_array( $properties['settings'] )
+			? $properties['settings']
+			: array();
+		$config   = isset( $properties['config'] ) && is_array( $properties['config'] )
+			? $properties['config']
+			: array();
+
+		$law        = isset( $settings['applicableLaw'] ) ? sanitize_key( $settings['applicableLaw'] ) : 'gdpr';
+		$type       = isset( $settings['type'] ) ? sanitize_key( $settings['type'] ) : 'box';
+		$ptype      = isset( $settings['preferenceCenterType'] ) ? sanitize_key( $settings['preferenceCenterType'] ) : 'popup';
+		// The nested buttons.elements.donotSell branch is the only Do-Not-Sell
+		// flag that survives sanitize_settings — the legacy direct
+		// notice.elements.donotSell key is absent from the default config and is
+		// dropped on every get_settings(), so it is never readable here.
+		$dns_status = isset( $config['notice']['elements']['buttons']['elements']['donotSell']['status'] )
+			? (bool) $config['notice']['elements']['buttons']['elements']['donotSell']['status']
+			: false;
+		$changed    = false;
+
+		// CCPA and "Both" (gdpr + Do-Not-Sell on) require the first-party opt-out
+		// entry point; the block below enables the canonical nested button branch
+		// when missing, covering both cases (a separate ccpa-only enable here
+		// would be redundant — its write can never win over this one).
+		$shows_do_not_sell = 'ccpa' === $law || $dns_status;
+		if ( $shows_do_not_sell ) {
+			if ( empty( $properties['config']['notice']['elements']['buttons']['elements']['donotSell']['status'] ) ) {
+				if ( ! isset( $properties['config']['notice']['elements']['buttons']['elements']['donotSell'] )
+					|| ! is_array( $properties['config']['notice']['elements']['buttons']['elements']['donotSell'] ) ) {
+					$properties['config']['notice']['elements']['buttons']['elements']['donotSell'] = array();
+				}
+				$properties['config']['notice']['elements']['buttons']['elements']['donotSell']['status'] = true;
+				$changed = true;
+			}
+		}
+		if ( $shows_do_not_sell && empty( $config['optoutPopup']['status'] ) ) {
+			if ( ! isset( $properties['config']['optoutPopup'] ) || ! is_array( $properties['config']['optoutPopup'] ) ) {
+				$properties['config']['optoutPopup'] = array();
+			}
+			$properties['config']['optoutPopup']['status'] = true;
+			$changed = true;
+		}
+
+		if ( $shows_do_not_sell && 'classic' === $type ) {
+			$properties['settings']['type']                 = 'box';
+			$properties['settings']['preferenceCenterType'] = 'popup';
+			$position = isset( $settings['position'] ) ? sanitize_key( $settings['position'] ) : '';
+			if ( ! in_array( $position, array( 'bottom-left', 'bottom-right' ), true ) ) {
+				$properties['settings']['position'] = 'bottom-left';
+			}
+			if ( isset( $properties['config']['categoryPreview'] ) && is_array( $properties['config']['categoryPreview'] ) ) {
+				$properties['config']['categoryPreview']['status'] = false;
+			}
+			$changed = true;
+		} elseif ( $shows_do_not_sell && 'banner' === $type && 'pushdown' === $ptype ) {
+			$properties['settings']['preferenceCenterType'] = 'popup';
+			if ( isset( $properties['config']['categoryPreview'] ) && is_array( $properties['config']['categoryPreview'] ) ) {
+				$properties['config']['categoryPreview']['status'] = false;
+			}
+			$changed = true;
+		}
+
+		if ( $changed ) {
+			$this->data['settings'] = $properties;
+		}
+
+		return $changed;
+	}
+
+	/**
+	 * Repair untouched notice copy that belongs to the other law.
+	 *
+	 * This is deliberately non-persistent and only changes an empty description
+	 * or one that still exactly matches the bundled default for the other law.
+	 * Customised copy is never changed.
+	 *
+	 * @return bool Whether the in-memory contents changed.
+	 */
+	public function apply_runtime_law_content_compatibility() {
+		if ( ! array_key_exists( 'contents', $this->data ) ) {
+			return false;
+		}
+
+		$properties = $this->get_settings();
+		$settings   = isset( $properties['settings'] ) && is_array( $properties['settings'] )
+			? $properties['settings']
+			: array();
+		$law        = isset( $settings['applicableLaw'] ) ? sanitize_key( $settings['applicableLaw'] ) : 'gdpr';
+		// "Both" is stored as applicableLaw='gdpr' (+ Do-Not-Sell on) and, like
+		// pure GDPR, uses the neutral GDPR default copy — see fazLawToDescKey()
+		// in banner.js for the mixed-audience rationale.
+		$new_key    = 'ccpa' === $law ? 'ccpa' : 'gdpr';
+		$old_key    = 'ccpa' === $new_key ? 'gdpr' : 'ccpa';
+		$contents   = $this->normalize_multilingual_data( $this->data['contents'] );
+		$changed    = false;
+
+		foreach ( $contents as $lang => &$content ) {
+			// A language entry may still be a JSON string (not yet decoded by
+			// normalize_multilingual_data); decode it so its description is read
+			// correctly instead of being treated as empty and wrongly repaired.
+			if ( is_string( $content ) ) {
+				$decoded = json_decode( $content, true );
+				if ( is_array( $decoded ) ) {
+					$content = $decoded;
+				}
+			}
+			if ( ! is_array( $content ) ) {
+				continue;
+			}
+			// Skip languages whose stored content is effectively blank. Such a
+			// language is rendered entirely from its bundled {lang}.json
+			// translation by get_contents()'s array_empty_assoc() fallback —
+			// writing only the law-default description here would leave a
+			// partial entry (description set, title/buttons still empty) that
+			// makes the language look "non-blank", defeating that whole-language
+			// fallback and blanking the title/labels on non-default locales.
+			if ( empty( self::array_empty_assoc( $content ) ) ) {
+				continue;
+			}
+			$defaults    = self::get_law_notice_descriptions( $lang );
+			$current     = isset( $content['notice']['elements']['description'] )
+				? $content['notice']['elements']['description']
+				: '';
+			$current     = self::normalize_notice_description( $current );
+			$old_default = self::normalize_notice_description( $defaults[ $old_key ] );
+			$new_default = isset( $defaults[ $new_key ] ) ? $defaults[ $new_key ] : '';
+
+			if ( ( '' === $current || $current === $old_default )
+				&& '' !== $new_default
+				&& self::normalize_notice_description( $new_default ) !== $current ) {
+				if ( ! isset( $content['notice'] ) || ! is_array( $content['notice'] ) ) {
+					$content['notice'] = array();
+				}
+				if ( ! isset( $content['notice']['elements'] ) || ! is_array( $content['notice']['elements'] ) ) {
+					$content['notice']['elements'] = array();
+				}
+				$content['notice']['elements']['description'] = $new_default;
+				$changed = true;
+			}
+		}
+		unset( $content );
+
+		if ( $changed ) {
+			$this->data['contents'] = $contents;
+		}
+
+		return $changed;
+	}
+
+	/**
+	 * Normalize notice HTML for conservative default-copy comparisons.
+	 *
+	 * @param mixed $value Notice description.
+	 * @return string
+	 */
+	private static function normalize_notice_description( $value ) {
+		return trim( preg_replace( '/\s+/', ' ', (string) $value ) );
+	}
+
+	/**
 	 * Pick the matching default config tree for sanitization.
 	 *
 	 * Partial admin payloads must be backfilled from the correct law-specific
@@ -403,6 +578,41 @@ class Banner extends Store {
 			return isset( $contents[ $language ] ) ? $contents[ $language ] : array();
 		}
 		return $contents;
+	}
+
+	/**
+	 * Notice description for a SINGLE language, resolved cheaply.
+	 *
+	 * Unlike get_contents() this does not loop over and sanitize every selected
+	 * language — it resolves only the requested language (with the same
+	 * empty→get_translations() fallback) and returns its raw notice description.
+	 * Used by the template cache signature so a cache-hit render does not
+	 * re-sanitize the whole multilingual content tree on every page load. The
+	 * raw value is a valid fingerprint: sanitize_contents() is deterministic, so
+	 * the raw description changes iff the rendered one does.
+	 *
+	 * @param string $lang Language code; defaults to the current language.
+	 * @return string
+	 */
+	public function get_notice_description( $lang = '' ) {
+		if ( ! array_key_exists( 'contents', $this->data ) ) {
+			return '';
+		}
+		$lang    = '' !== $lang ? $lang : $this->get_language();
+		$data    = $this->normalize_multilingual_data( $this->data['contents'] );
+		$content = isset( $data[ $lang ] ) ? $data[ $lang ] : array();
+		if ( empty( self::array_empty_assoc( $content ) ) ) {
+			$content = $this->get_translations( $lang );
+		}
+		if ( is_string( $content ) ) {
+			$content = json_decode( $content, true );
+		}
+		if ( ! is_array( $content ) ) {
+			return '';
+		}
+		return isset( $content['notice']['elements']['description'] )
+			? (string) $content['notice']['elements']['description']
+			: '';
 	}
 	/**
 	 * Sanitize all the banner before insert or retrieval
@@ -582,6 +792,65 @@ class Banner extends Store {
 			wp_cache_set( 'faz_contents_default', $contents, 'faz_banner_contents', 12 * HOUR_IN_SECONDS );
 		}
 		return $contents;
+	}
+
+	/**
+	 * Default notice description text for each law, in a given language.
+	 *
+	 * Used by the banner editor so that switching the law dropdown can re-load
+	 * the law-appropriate copy. The CCPA description names the "Do Not Sell"
+	 * link and the consent-preferences icon; the GDPR description does not.
+	 * Without this, changing the law updates donotSell.status but leaves the
+	 * old copy in place, so a CCPA description can survive on a GDPR banner and
+	 * promise a link the layout no longer renders.
+	 *
+	 * @param string $lang Language code (falls back to the bundled en.json).
+	 * @return array { gdpr: string, ccpa: string }
+	 */
+	public static function get_law_notice_descriptions( $lang = 'en' ) {
+		$safe_lang = sanitize_file_name( (string) $lang );
+		$cache_key = 'faz_law_notice_desc_' . ( '' !== $safe_lang ? $safe_lang : 'en' );
+		// Object-cached: this is called per language on every frontend render
+		// (the runtime law-content compatibility pass) and on the banner-editor
+		// page load, so avoid re-reading the JSON files each time.
+		$cached = wp_cache_get( $cache_key, 'faz_banner_contents' );
+		if ( is_array( $cached ) ) {
+			return $cached;
+		}
+
+		$dir  = dirname( __FILE__ ) . '/contents/';
+		$data = array();
+
+		// Prefer a downloaded translation, but ONLY when the language is
+		// registered as translated — the same gate get_translations() uses, so
+		// the untouched-default baseline is read from the same source the
+		// frontend actually renders (an orphaned file on disk is ignored).
+		if ( '' !== $safe_lang
+			&& \FazCookie\Admin\Modules\Languages\Includes\Controller::get_instance()->is_faz_translated( $safe_lang ) ) {
+			$upload_dir      = wp_upload_dir();
+			$translated_file = trailingslashit( $upload_dir['basedir'] ) . 'fazcookie/languages/banners/' . $safe_lang . '.json';
+			if ( file_exists( $translated_file ) ) {
+				$translated = faz_read_json_file( $translated_file );
+				if ( isset( $translated['banner_data'] ) && is_array( $translated['banner_data'] ) ) {
+					$data = $translated['banner_data'];
+				}
+			}
+		}
+		if ( empty( $data ) ) {
+			$file = ( '' !== $safe_lang && file_exists( $dir . $safe_lang . '.json' ) ) ? $dir . $safe_lang . '.json' : $dir . 'en.json';
+			$data = faz_read_json_file( $file );
+		}
+		$out = array(
+			'gdpr' => '',
+			'ccpa' => '',
+		);
+		foreach ( array( 'gdpr', 'ccpa' ) as $law ) {
+			if ( isset( $data[ $law ]['notice']['elements']['description'] ) && is_string( $data[ $law ]['notice']['elements']['description'] ) ) {
+				$out[ $law ] = $data[ $law ]['notice']['elements']['description'];
+			}
+		}
+		wp_cache_set( $cache_key, $out, 'faz_banner_contents', 12 * HOUR_IN_SECONDS );
+		return $out;
 	}
 
 	/**
