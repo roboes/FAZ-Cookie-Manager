@@ -1632,8 +1632,8 @@ class Frontend {
 		$store = apply_filters( 'faz_store_data', $store, $this );
 
 		// Per-cookie consent stays hard-off until its enforcement rework is
-		// complete — reassert it AFTER the legacy faz_store_data filter so a
-		// stale filter callback cannot re-enable the unsupported control.
+		// complete — reassert it AFTER the faz_store_data filter so a third-party
+		// filter callback cannot re-enable the unsupported control.
 		$store['_perCookieConsent'] = false;
 
 		return $store;
@@ -2825,7 +2825,15 @@ class Frontend {
 		}
 
 		foreach ( $this->always_allowed_cache as $allowed_pattern ) {
-			if ( false !== stripos( $pattern, $allowed_pattern ) || false !== stripos( $allowed_pattern, $pattern ) ) {
+			// Forward: the provider pattern contains a gateway token.
+			if ( false !== stripos( $pattern, $allowed_pattern ) ) {
+				return true;
+			}
+			// Reverse: a gateway token contains the provider pattern. Guard with
+			// a minimum needle length so a short, generic provider/custom pattern
+			// (e.g. "co", "net") can't be a substring of a gateway URL and
+			// silently exempt unrelated services from blocking/shredding.
+			if ( strlen( $pattern ) >= 4 && false !== stripos( $allowed_pattern, $pattern ) ) {
 				return true;
 			}
 		}
@@ -3280,8 +3288,11 @@ class Frontend {
 	}
 
 	/**
-	 * Build the set of cookie patterns owned by services the user has
-	 * whitelisted (Settings → Script Blocking → whitelist_patterns).
+	 * Build the set of cookie patterns that must be exempt from shredding —
+	 * the cookies of services the user has whitelisted (Settings → Script
+	 * Blocking → whitelist_patterns) AND of always-allowed payment gateways
+	 * (Stripe etc.), whose scripts run pre-consent so their cookies must
+	 * persist too. The gateway exemption applies even with no user whitelist.
 	 *
 	 * Used both by `get_store_data()` to populate
 	 * `_whitelistedCookiePatterns` for the frontend network interceptors,

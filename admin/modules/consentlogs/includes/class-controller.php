@@ -270,8 +270,9 @@ class Controller {
 			// A scalar value (e.g. a DNSMPI opt-out passes '' and the audit /
 			// export contract expects '' for that column — NOT the '[]' that
 			// wp_json_encode( array() ) would produce). Keep it as a sanitized
-			// string instead of coercing it into an empty JSON array.
-			$categories = sanitize_text_field( (string) $categories );
+			// string, length-bounded so a crafted REST payload (the param has no
+			// validate_callback) cannot write an unbounded blob into the log.
+			$categories = substr( sanitize_text_field( (string) $categories ), 0, 1000 );
 		}
 
 		// L2-SP1-S003 fix (1.15.0): populate the 7 geo-routing v2

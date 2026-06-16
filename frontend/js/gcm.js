@@ -92,8 +92,8 @@ if (initialCookieObj) {
     // unlawful under ePrivacy/Consent Mode v2 in EEA/UK/CH). Under Consent Mode
     // v2 a denied ad_storage already lets Google serve non-personalized,
     // cookieless ads; for legacy (non-Consent-Mode) ad tags we additionally
-    // signal `npa: 1` (see emitNpaSignal()). This keeps the behaviour compliant
-    // in every region with no geofencing required.
+    // signal `npa: 1` (emitted inline in buildConsentState() below). This keeps
+    // the behaviour compliant in every region with no geofencing required.
     var npFallback = !!data.non_personalized_ads_fallback;
     for (var index = 0; index < regionSettings.length; index++) {
         var regionSetting = regionSettings[index];

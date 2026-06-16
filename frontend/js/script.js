@@ -2664,7 +2664,9 @@ document.createElement = (...args) => {
                 if (_fazShouldChangeType(createdElement, value)) {
                     rememberOriginalType();
                     originalSetAttribute("type", "javascript/blocked");
-                } else if (createdElement.getAttribute("type") === "javascript/blocked") {
+                } else if (createdElement.getAttribute("data-faz-original-type")) {
+                    // Restore only a type WE clobbered (marked by
+                    // data-faz-original-type), not one a third party set.
                     restoreOriginalType();
                 }
                 originalSetAttribute("src", value);
@@ -2707,9 +2709,12 @@ document.createElement = (...args) => {
             if (_fazShouldChangeType(createdElement)) {
                 rememberOriginalType();
                 originalSetAttribute("type", "javascript/blocked");
-            } else if (createdElement.getAttribute("type") === "javascript/blocked") {
-                // Only restore when WE blocked it — never downgrade a script that
-                // was never blocked (e.g. a legitimate type="module").
+            } else if (createdElement.getAttribute("data-faz-original-type")) {
+                // Only restore when WE blocked it — rememberOriginalType() sets
+                // data-faz-original-type, so its presence is the reliable marker
+                // that this interceptor clobbered the type. Never downgrade a
+                // script that was javascript/blocked by a third party, nor a
+                // legitimate type="module" we never touched.
                 restoreOriginalType();
             }
         }
@@ -3386,11 +3391,12 @@ function _fazShouldChangeType(element, src) {
         if (explicit === "no") return true;
         if (explicit === "yes") return false;
     }
+    // Category-level fallback: block when the element's declared category
+    // (from data-fazcookie OR data-faz-category, already resolved into
+    // serviceCategory above) is to be blocked — matching the MutationObserver
+    // path, which also honours data-faz-category.
     return (
-        (element.hasAttribute("data-fazcookie") &&
-            _fazIsCategoryToBeBlocked(
-                element.getAttribute("data-fazcookie").replace("fazcookie-", "")
-            )) ||
+        (serviceCategory && _fazIsCategoryToBeBlocked(serviceCategory)) ||
         _fazShouldBlockProvider(url)
     );
 }
