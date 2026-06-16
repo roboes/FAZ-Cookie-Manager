@@ -526,6 +526,11 @@ class Frontend {
 								"url:safeUrl," .
 								"banner_slug:_fazConsentLog.bannerSlug||''," .
 								"policy_revision:_fazConsentLog.policyRevision||1," .
+								// TCF TC string (euconsent-v2 cookie) and GPP string
+								// (__gpp API), forwarded so the tc_string / gpp_string
+								// audit columns are populated for TCF/GPP-enabled sites.
+								"tc_string:(function(){var m=document.cookie.match(/euconsent-v2=([^;]+)/);return m?m[1]:''})()," .
+								"gpp_string:(function(){try{if(typeof window.__gpp!=='function')return '';var s='';window.__gpp('getGPPData',function(d){if(d&&d.gppString)s=d.gppString});return s}catch(e){return ''}})()," .
 								"token:_fazConsentLog.token" .
 						"})" .
 					"}).catch(function(){});" .
@@ -2813,10 +2818,31 @@ class Frontend {
 		$ruleset_honors_gpc = ( null !== $ruleset && ! empty( $ruleset['signals']['gpc_honored'] ) );
 		$gpc_optout = $gpc_header_on && ( $is_optout_law || $ruleset_honors_gpc );
 
+		// Standalone "Do Not Sell or Share My Personal Information" opt-out: the
+		// [faz_do_not_sell] form sets the `fazcookie-dnsmpi` cookie. That cookie
+		// is a binding opt-out of the sale/sharing of personal information
+		// (CCPA/CPRA §1798.120), so — like a GPC signal — it must actually stop
+		// the sale/share scripts server-side, not merely record the request.
+		// NOT gated on `$is_optout_law`: the cookie is only ever set by the
+		// Do-Not-Sell form, which the admin enables for CCPA *and* for the
+		// combined "GDPR + US" banner (saved with applicableLaw='gdpr' but with
+		// the donotSell control on — see banner.js). Honouring the cookie
+		// whenever it is present covers that mode too; under a pure opt-in law
+		// the sell/share categories are already blocked, so this is a no-op
+		// there.
+		$dnsmpi_optout = isset( $_COOKIE['fazcookie-dnsmpi'] )
+			&& '1' === sanitize_text_field( wp_unslash( $_COOKIE['fazcookie-dnsmpi'] ) );
+
 		foreach ( $categories as $cat_data ) {
 			$category = new \FazCookie\Admin\Modules\Cookies\Includes\Cookie_Categories( $cat_data );
 			$slug     = $category->get_slug();
 			if ( 'necessary' === $slug ) {
+				continue;
+			}
+			// A DNSMPI form opt-out blocks the sell/share categories outright,
+			// overriding any consent-cookie value (mirrors the GPC override).
+			if ( $dnsmpi_optout && ( $category->get_sell_personal_data() || $category->get_share_personal_data() ) ) {
+				$blocked[] = $slug;
 				continue;
 			}
 			if ( empty( $consent ) ) {
