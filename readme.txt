@@ -325,6 +325,18 @@ https://github.com/fabiodalez-dev/FAZ-Cookie-Manager/blob/main/CHANGELOG.md
 and on the GitHub Releases page:
 https://github.com/fabiodalez-dev/FAZ-Cookie-Manager/releases
 
+= 1.19.0 =
+* Feature: per-service consent is reintroduced and now actually enforced. Granular per-service sub-toggles return under each category in the preference center (opt-in, sourced from the cookies actually detected on the site). A denied service is enforced server-side (pre-consent script block + cookie shredder) and client-side, an explicit allow overrides a denied category, and the choice persists across reloads and is written to the consent log. Enable it in Settings > Per-service consent. Extension filters: `faz_per_service_services`, `faz_store_data`.
+* Feature: Czech (cs_CZ) cookie-policy templates for the GDPR, CCPA and LGPD generators, with correct legal terminology and date grammar.
+* Feature: opt-out success message for US state-law / CCPA "Do Not Sell or Share" — an accessible confirmation (`role="status"` + `aria-live`, focus moved, countdown, auto-close) instead of a silent disappear. Headline/subtext editable via `[faz_optout_success_text]` / `[faz_optout_success_subtext]`.
+* Compliance: Quebec / Law 25 sub-national routing, Do-Not-Sell-My-Personal-Information enforcement, DSAR export/erase wiring, scanner TLS verify-by-default (loopback-exempt), and new geo rulesets (Minnesota, Maryland, New Hampshire, New Jersey, Texas, Canada / PIPEDA).
+* Fix: changing the banner's applicable law now reloads the law-appropriate notice copy — a CCPA description could survive on a GDPR banner and tell visitors to click a Do-Not-Sell link no longer rendered — without overwriting a customised description.
+* Fix: the "Do Not Sell or Share" link on a Classic-layout CCPA (or "Both") banner is no longer a dead click; such banners are migrated to a popup-capable layout in the editor and at runtime, with a re-show fallback.
+* Fix: the banner template cache signature now includes the plugin version and the per-service / per-cookie flags, so a plugin update can no longer serve a stale cached template to the updated script.
+* Fix: blocked-embed placeholder keeps its branded styling; a service-level placeholder accept records the choice; toggling a service no longer collapses its category accordion.
+* Fix: the geo "source not configured" admin notice no longer fires when a GeoLite2 database (or `FAZ_MAXMIND_DB_PATH`) is actually configured.
+* Change: per-cookie consent remains hard-off pending its correctness rework, and is now also rejected on the settings REST / import path.
+
 = 1.18.2 =
 * Change: the experimental opt-in features added in 1.18.0 (per-service / per-cookie consent toggles and the `faz_geo_ruleset_runtime` runtime geo-routing) are temporarily disabled pending a correctness rework — they did not, when enabled, deliver the granular guarantees their UI implied. They are now hard-off at their entry points. The default category-level consent flow (the path covered by the compliance suite) is byte-for-byte unchanged.
 * Change: per-service / per-cookie toggles are hidden in Settings and forced off. As shipped a denied cookie was not enforced server-side or on reload, the granular decisions were not written to the consent log, a large override set could exceed the browser's ~4 KB cookie limit, and the list showed catalogue wildcards rather than detected cookies.
@@ -462,6 +474,9 @@ https://github.com/fabiodalez-dev/FAZ-Cookie-Manager/releases
 * Added: WordPress Playground Live Preview on the plugin directory page.
 
 == Upgrade Notice ==
+
+= 1.19.0 =
+Per-service consent returns, now properly enforced (server-side block + cookie shredder, persisted across reloads, written to the consent log). Adds Czech cookie-policy templates, an accessible Do-Not-Sell opt-out confirmation, Quebec/Law 25 and more US-state geo rulesets, and several compliance fixes. The default category-level consent flow is unchanged; per-cookie consent stays gated.
 
 = 1.18.2 =
 Recommended for anyone who enabled the 1.18.0 opt-in features. The per-service / per-cookie consent toggles and the runtime geo-routing filter are temporarily disabled pending a correctness rework — they did not deliver the granular guarantees their UI implied. Default category-level consent is unchanged.

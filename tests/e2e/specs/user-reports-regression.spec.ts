@@ -319,7 +319,7 @@ test.describe('User-reported regressions (v1.11.0 publisher report)', () => {
 	/* ─────────────────────────────────────────────────────────────────
 	 * Report 2 — "Shouldn't it fallback to unpersonalized ads?"
 	 * ───────────────────────────────────────────────────────────────── */
-	test('R2: non_personalized_ads_fallback keeps ad_storage granted while ad_user_data/ad_personalization stay denied', async ({ page, context, loginAsAdmin }) => {
+	test('R2: non_personalized_ads_fallback keeps ad_storage denied + emits npa:1 while ad_user_data/ad_personalization stay denied', async ({ page, context, loginAsAdmin }) => {
 		// Arrange — admin enables GCM + fallback.
 		await loginAsAdmin(page);
 		await page.goto(`${WP_BASE}/wp-admin/admin.php?page=faz-cookie-manager-gcm`, { waitUntil: 'domcontentloaded' });
@@ -336,30 +336,35 @@ test.describe('User-reported regressions (v1.11.0 publisher report)', () => {
 			const visitorPage = await visitor.newPage();
 			// Act — visitor rejects all marketing (click "Reject All").
 			await rejectAllOnFrontend(visitorPage);
-			// Wait for GCM to settle (either the fallback-friendly default emitted
-			// at page load, or a subsequent consent update from the banner click).
-			// Both cases produce an `ad_storage: "granted"` entry when the
-			// non-personalized ads fallback is enabled and marketing is denied.
+			// Wait for the non-personalized-ads fallback to fire. With marketing
+			// denied it does NOT grant ad_storage (that would set ad cookies
+			// without consent — unlawful in EEA/UK/CH); instead Consent Mode v2
+			// serves cookieless non-personalized ads with ad_storage="denied" and
+			// the plugin emits gtag('set', { npa: 1 }) for legacy ad tags. Wait
+			// for that npa signal, which only appears on the fallback path.
 			await visitorPage.waitForFunction(() => {
 				const dlName = (window as unknown as { fazSettings?: { dataLayerName?: string } }).fazSettings?.dataLayerName || 'dataLayer';
 				const dl = (window as unknown as Record<string, unknown[]>)[dlName] ?? [];
 				return (dl as Array<Record<number, unknown>>).some((entry) => {
 					if (!entry || typeof entry !== 'object') return false;
-					if (entry[0] !== 'consent') return false;
-					const payload = entry[2] as Record<string, string> | undefined;
-					return !!payload && payload.ad_storage === 'granted';
+					return entry[0] === 'set' && !!entry[1] && (entry[1] as Record<string, unknown>).npa === 1;
 				});
-			}, undefined, { timeout: 5_000 });
+			}, undefined, { timeout: 8_000 });
 
 			// After a reject, GCM must emit an `update` call with the
 			// non-personalized combination. Walk dataLayer and merge to find
 			// the final consent state.
-			const consentState = await visitorPage.evaluate(() => {
+			const result = await visitorPage.evaluate(() => {
 				const dlName = (window as unknown as { fazSettings?: { dataLayerName?: string } }).fazSettings?.dataLayerName || 'dataLayer';
 				const dl = (window as unknown as Record<string, unknown[]>)[dlName] ?? [];
 				const merged: Record<string, string> = {};
+				let npa = false;
 				for (const entry of dl as Array<Record<number, unknown>>) {
 					if (!entry || typeof entry !== 'object') continue;
+					if (entry[0] === 'set' && entry[1] && (entry[1] as Record<string, unknown>).npa === 1) {
+						npa = true;
+						continue;
+					}
 					if (entry[0] !== 'consent') continue;
 					const payload = entry[2] as Record<string, string> | undefined;
 					if (!payload) continue;
@@ -367,10 +372,15 @@ test.describe('User-reported regressions (v1.11.0 publisher report)', () => {
 						merged[key] = payload[key];
 					}
 				}
-				return merged;
+				return { consent: merged, npa };
 			});
+			const consentState = result.consent;
 
-			expect(consentState.ad_storage, 'ad_storage must stay granted to serve non-personalized ads').toBe('granted');
+			// Consent Mode v2: non-personalized ads are served with ad_storage
+			// DENIED (cookieless) — never granted without consent. The fallback is
+			// signalled to legacy ad tags via npa:1, not by granting ad_storage.
+			expect(consentState.ad_storage, 'ad_storage must stay denied — non-personalized ads are cookieless under GCM v2').toBe('denied');
+			expect(result.npa, 'npa:1 fallback signal must be emitted when marketing is rejected').toBe(true);
 			expect(consentState.ad_user_data, 'ad_user_data must be denied when marketing consent is rejected').toBe('denied');
 			expect(consentState.ad_personalization, 'ad_personalization must be denied when marketing consent is rejected').toBe('denied');
 		} finally {

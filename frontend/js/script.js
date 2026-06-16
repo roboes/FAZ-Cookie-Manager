@@ -2664,7 +2664,9 @@ document.createElement = (...args) => {
                 if (_fazShouldChangeType(createdElement, value)) {
                     rememberOriginalType();
                     originalSetAttribute("type", "javascript/blocked");
-                } else if (createdElement.getAttribute("type") === "javascript/blocked") {
+                } else if (createdElement.getAttribute("data-faz-original-type")) {
+                    // Restore only a type WE clobbered (marked by
+                    // data-faz-original-type), not one a third party set.
                     restoreOriginalType();
                 }
                 originalSetAttribute("src", value);
@@ -2703,11 +2705,16 @@ document.createElement = (...args) => {
         // marks the script javascript/blocked) and only then set
         // `data-faz-service`; without re-checking here an explicit svc.<id>:yes
         // would never unblock that dynamically-created script.
-        if (name === "data-fazcookie" || name === "data-faz-service") {
+        if (name === "data-fazcookie" || name === "data-faz-category" || name === "data-faz-service") {
             if (_fazShouldChangeType(createdElement)) {
                 rememberOriginalType();
                 originalSetAttribute("type", "javascript/blocked");
-            } else {
+            } else if (createdElement.getAttribute("data-faz-original-type")) {
+                // Only restore when WE blocked it — rememberOriginalType() sets
+                // data-faz-original-type, so its presence is the reliable marker
+                // that this interceptor clobbered the type. Never downgrade a
+                // script that was javascript/blocked by a third party, nor a
+                // legitimate type="module" we never touched.
                 restoreOriginalType();
             }
         }
@@ -3361,10 +3368,18 @@ function _fazShouldChangeType(element, src) {
     // must block one whose category is allowed). Without this the dynamic
     // document.createElement path ignored per-service choices.
     var serviceId = element.getAttribute ? (element.getAttribute("data-faz-service") || "") : "";
-    var serviceCategory = element.getAttribute && element.hasAttribute("data-fazcookie")
-        ? element.getAttribute("data-fazcookie").replace("fazcookie-", "")
-        : "";
-    // When the category tag is not (yet) set on a dynamically-created element,
+    // Derive the category from either tag the other blocker paths accept
+    // (data-fazcookie OR data-faz-category), so a per-service override is always
+    // validated against the element's declared category.
+    var serviceCategory = "";
+    if (element.getAttribute) {
+        serviceCategory = (
+            element.getAttribute("data-fazcookie") ||
+            element.getAttribute("data-faz-category") ||
+            ""
+        ).replace("fazcookie-", "");
+    }
+    // When no category tag is (yet) set on a dynamically-created element,
     // resolve the service's catalogue category so the override is validated
     // against the registered category — matching _fazShouldBlockResource's
     // semantics — instead of letting an empty category short-circuit the check.
@@ -3376,11 +3391,12 @@ function _fazShouldChangeType(element, src) {
         if (explicit === "no") return true;
         if (explicit === "yes") return false;
     }
+    // Category-level fallback: block when the element's declared category
+    // (from data-fazcookie OR data-faz-category, already resolved into
+    // serviceCategory above) is to be blocked — matching the MutationObserver
+    // path, which also honours data-faz-category.
     return (
-        (element.hasAttribute("data-fazcookie") &&
-            _fazIsCategoryToBeBlocked(
-                element.getAttribute("data-fazcookie").replace("fazcookie-", "")
-            )) ||
+        (serviceCategory && _fazIsCategoryToBeBlocked(serviceCategory)) ||
         _fazShouldBlockProvider(url)
     );
 }
