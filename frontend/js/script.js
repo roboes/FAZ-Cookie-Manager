@@ -6,6 +6,12 @@ if ( typeof window._fazConfig === 'undefined' && typeof window._fazCfg !== 'unde
 }
 const _fazStore = window._fazConfig;
 
+// Opt-out success message (US state laws / CCPA): after the visitor confirms an
+// opt-out, the popup shows a confirmation message and auto-closes after a short
+// countdown instead of disappearing immediately.
+const _FAZ_OPTOUT_SUCCESS_SECONDS = 15;
+const _FAZ_OPTOUT_SUCCESS_DISMISS_MS = _FAZ_OPTOUT_SUCCESS_SECONDS * 1000;
+
 if ( ! _fazStore ) {
     // _fazConfig is injected by wp_localize_script. If it is missing (e.g. a
     // JS-defer plugin scoped the localize block inside a DOMContentLoaded
@@ -20,6 +26,9 @@ _fazStore._backupNodes = [];
 _fazStore._resetConsentID = false;
 _fazStore._bannerState = false;
 _fazStore._preferenceOriginTag = false;
+_fazStore._optoutSuccessCountdownInterval = null;
+_fazStore._optoutSuccessAutoCloseTimer = null;
+_fazStore._optoutSuccessSubtextTemplate = "";
 
 window.fazcookie = window.fazcookie || {};
 const ref = window.fazcookie;
@@ -106,6 +115,142 @@ ref._fazSetInStore = function (key, value) {
             }
         }
         cookieStringArray.push(`${k}:${v}`);
+    }
+
+    // P1-4: hard size cap. The redundant-entry filter above already trims
+    // the cookie, but a site with very many active services can still push
+    // the per-service (`svc.*`) and per-cookie (`ck.*`) overrides past the
+    // 4 KB per-cookie limit every major browser enforces. A browser over the
+    // limit silently DROPS the whole cookie write, corrupting even the core
+    // category consent. So if the URL-encoded value would exceed the budget
+    // we deterministically drop the lowest-priority entries — `ck.*` first,
+    // then service grants. Explicit service denials are fail-closed: when a
+    // denial cannot fit, the parent category is downgraded to "no" so a
+    // granular opt-out never becomes an allow after reload.
+    const FAZ_COOKIE_VALUE_BUDGET = 3500; // encoded bytes; headroom under 4096
+    const _fazEncodedLen = function (arr) {
+        return encodeURIComponent(arr.join(",")).length;
+    };
+    if (_fazEncodedLen(cookieStringArray) > FAZ_COOKIE_VALUE_BUDGET) {
+        const coreEntries = [];
+        const coreIndex = {};
+        const svcDeniedEntries = [];
+        const svcAllowedEntries = [];
+        const ckEntries = [];
+        cookieStringArray.forEach(function (entry) {
+            if (entry.indexOf("ck.") === 0) {
+                ckEntries.push(entry);
+            } else if (entry.indexOf("svc.") === 0) {
+                const sep = entry.indexOf(":");
+                const svcId = sep > 4 ? entry.substring(4, sep) : "";
+                const svcEntry = {
+                    entry: entry,
+                    id: svcId,
+                    category: svcCatMap[svcId] || "",
+                };
+                if (/:no$/.test(entry)) {
+                    svcDeniedEntries.push(svcEntry);
+                } else {
+                    svcAllowedEntries.push(svcEntry);
+                }
+            } else {
+                const sep = entry.indexOf(":");
+                if (sep > 0) {
+                    coreIndex[entry.substring(0, sep)] = coreEntries.length;
+                }
+                coreEntries.push(entry);
+            }
+        });
+        const downgradedCategories = {};
+        const setCoreEntry = function (coreKey, coreValue) {
+            const next = coreKey + ":" + coreValue;
+            if (Object.prototype.hasOwnProperty.call(coreIndex, coreKey)) {
+                coreEntries[coreIndex[coreKey]] = next;
+            } else {
+                coreIndex[coreKey] = coreEntries.length;
+                coreEntries.push(next);
+            }
+        };
+        const rebuildKept = function (serviceEntries) {
+            const rebuilt = coreEntries.slice();
+            serviceEntries.forEach(function (svcEntry) {
+                if (svcEntry.category && downgradedCategories[svcEntry.category] && /:no$/.test(svcEntry.entry)) return;
+                rebuilt.push(svcEntry.entry);
+            });
+            return rebuilt;
+        };
+        // Core entries are always kept. Explicit service denials have the
+        // highest granular priority, followed by service allows. If an explicit
+        // denial still cannot fit, fail closed by downgrading its category to
+        // "no"; this may block extra services, but it never turns a granular
+        // opt-out into an allow after reload.
+        const kept = coreEntries.slice();
+        const keptServices = [];
+        let dropped = 0;
+        let serviceDropped = false;
+        svcDeniedEntries.forEach(function (svcEntry) {
+            if (svcEntry.category && downgradedCategories[svcEntry.category]) return;
+            keptServices.push(svcEntry);
+            kept.push(svcEntry.entry);
+            if (_fazEncodedLen(kept) > FAZ_COOKIE_VALUE_BUDGET) {
+                kept.pop();
+                keptServices.pop();
+                dropped++;
+                serviceDropped = true;
+                if (svcEntry.category) {
+                    downgradedCategories[svcEntry.category] = true;
+                    setCoreEntry(svcEntry.category, "no");
+                    const rebuilt = rebuildKept(keptServices);
+                    kept.length = 0;
+                    rebuilt.forEach(function (entry) {
+                        kept.push(entry);
+                    });
+                }
+            }
+        });
+        svcAllowedEntries.forEach(function (svcEntry) {
+            // Defence in depth: never emit an svc.<id>:yes for a category that
+            // was fail-closed to "no" in the denial pass above. The serializer
+            // cannot currently produce such an entry (a downgraded category was
+            // "yes" at serialize time, so its surviving overrides are all :no),
+            // but skipping it keeps the invariant explicit and robust against
+            // future changes to the divergence filter.
+            if (svcEntry.category && downgradedCategories[svcEntry.category]) return;
+            keptServices.push(svcEntry);
+            kept.push(svcEntry.entry);
+            if (_fazEncodedLen(kept) > FAZ_COOKIE_VALUE_BUDGET) {
+                kept.pop();
+                keptServices.pop();
+                dropped++;
+                serviceDropped = true;
+            }
+        });
+        // Per-cookie entries are considered only when every service decision
+        // fitted. serviceDropped is set whenever ANY svc.* entry (a denial OR
+        // an allow) overflowed the budget, so a shorter ck.* key can never
+        // displace a higher-priority svc.* key.
+        if (!serviceDropped) {
+            ckEntries.forEach(function (entry) {
+                kept.push(entry);
+                if (_fazEncodedLen(kept) > FAZ_COOKIE_VALUE_BUDGET) {
+                    kept.pop();
+                    dropped++;
+                }
+            });
+        } else {
+            dropped += ckEntries.length;
+        }
+        if (dropped > 0 && typeof console !== "undefined" && console.warn) {
+            console.warn(
+                "[FAZ Cookie Manager] consent cookie exceeded " +
+                    FAZ_COOKIE_VALUE_BUDGET +
+                    " encoded bytes; dropped " +
+                    dropped +
+                    " per-service/per-cookie override(s) to avoid browser truncation. " +
+                    "Denied services that could not fit fail closed through category-level opt-out."
+            );
+        }
+        cookieStringArray = kept;
     }
 
     const scriptExpiry =
@@ -422,9 +567,10 @@ var _revisitFazConsent = function () {
     //     `classic` template type does NOT include the optout-popup
     //     element (verified across templates/6.2.0/template.json: box /
     //     banner / banner-sidebar / box-sidebar all carry it, classic
-    //     does not). If a future install uses classic + CCPA together,
-    //     fall back to the legacy `_fazShowBanner()` path so the user
-    //     never lands on a non-existent popup.
+    //     does not). The server-side runtime migration normally rewrites a
+    //     classic + CCPA banner to a popup-capable layout before render, but
+    //     if one still reaches here without the popup, fall back to the legacy
+    //     `_fazShowBanner()` path so the user never lands on a non-existent popup.
     //
     // _fazGetLaw() resolves the active law for THIS visitor (multi-
     // banner geo-routing aware), so an EU visitor on a CCPA+GDPR
@@ -707,6 +853,12 @@ function _fazApplyGpcOptOut() {
     var law = _fazGetLaw();
     var responseCategories = { accepted: [], rejected: [], action: "reject", gpc: true };
     var categories = _fazStore._categories || [];
+    // GPC is a legally-binding opt-out (CPPA §7025) that overrides ANY prior
+    // consent, including explicit per-service allows. Clear the svc.*/ck.*
+    // overrides BEFORE the per-category shredder runs below, otherwise a stale
+    // svc.<id>:yes would make _fazRemoveDeadCookies skip a cookie the GPC signal
+    // requires deleting.
+    _fazClearStoredServiceConsent();
     for (var i = 0; i < categories.length; i++) {
         var category = categories[i];
         var deny;
@@ -730,8 +882,8 @@ function _fazApplyGpcOptOut() {
         }
     }
 
-    // Clear any per-service overrides and deny IAB vendors, mirroring reject.
-    _fazClearStoredServiceConsent();
+    // Deny IAB vendors, mirroring reject. (Per-service overrides were already
+    // cleared above, before the shredder, so GPC fully overrides them.)
     _fazSaveVendorConsent("reject");
 
     _fazUnblock();
@@ -1035,6 +1187,7 @@ async function _fazMaybeSwapLanguage() {
  */
 async function _fazInit() {
     try {
+        _fazRunDeadCookieCleanup();
         try {
             await _fazMaybeSwapLanguage();
         } finally {
@@ -1047,11 +1200,23 @@ async function _fazInit() {
             }
         }
         _fazInitOperations();
-        _fazRemoveAllDeadCookies();
+        _fazRunDeadCookieCleanup();
         _fazWatchBannerElement();
+        _fazScheduleDeadCookieCleanup();
     } catch (err) {
         console.error(err);
     }
+}
+
+function _fazRunDeadCookieCleanup() {
+    _fazRemoveAllDeadCookies();
+    _fazCleanupRevokedCookies();
+}
+
+function _fazScheduleDeadCookieCleanup() {
+    [250, 1000, 2000].forEach(function (delay) {
+        window.setTimeout(_fazRunDeadCookieCleanup, delay);
+    });
 }
 
 /**
@@ -1125,16 +1290,29 @@ function _fazRegisterListeners() {
     _fazAttachListener("=detail-close", () => _fazHidePreferenceCenter());
     _fazAttachListener("=optout-cancel-button", () => _fazHidePreferenceCenter());
     _fazAttachListener("=close-button", () => _fazActionClose());
-    _fazAttachListener("=donotsell-button", () => _fazSetPreferenceAction('donotsell-button'));
+    _fazAttachListener("=donotsell-button", () => {
+        // The "Do Not Sell" opt-out toggle lives inside the optout-popup. The
+        // `classic` template type does NOT render that popup, so opening the
+        // preference center would have nothing to show and the click looks
+        // dead. New CCPA/Do-Not-Sell banners can't select Classic (admin
+        // guard), but a banner saved before that guard can still be Classic —
+        // fall back to re-showing the banner so the click is never a silent
+        // no-op. Mirrors the revisit-path fallback in _revisitFazConsent.
+        if ( ! document.querySelector('[data-faz-tag="optout-popup"]') ) {
+            _fazShowBanner();
+            return;
+        }
+        _fazSetPreferenceAction('donotsell-button');
+    });
     _fazAttachListener("=reject-button", _fazAcceptReject("reject"));
     _fazAttachListener("=accept-button", _fazAcceptReject("all"));
     _fazAttachListener("=detail-accept-button", _fazAcceptReject("all"));
     _fazAttachListener("=detail-save-button", _fazAcceptReject());
     _fazAttachListener("=detail-category-preview-save-button", _fazAcceptReject());
-    _fazAttachListener("=optout-confirm-button", _fazAcceptReject());
+    _fazAttachListener("=optout-confirm-button", _fazHandleOptoutConfirm());
     _fazAttachListener("=detail-reject-button", _fazAcceptReject("reject"));
     _fazAttachListener("=revisit-consent", () => _revisitFazConsent());
-    _fazAttachListener("=optout-close", () => _fazHidePreferenceCenter());
+    _fazAttachListener("=optout-close", () => _fazHandleOptoutPopupClose());
 
     // NOTE: the [faz_cookie_settings] / [data-faz-open-preferences] delegated
     // click handler is NOT registered here. It lives in
@@ -1187,11 +1365,24 @@ function _fazAttachCategoryListeners() {
         }
 
         _fazToggleAriaExpandStatus(accordionButtonSelector, "false");
-        _fazAttachListener(selector, ({ target: { id } }) => {
+        _fazAttachListener(selector, (event) => {
+            const target = event && event.target;
+            const id = target && target.id;
+            // A click on the category switch OR a per-service toggle inside the
+            // accordion must NOT open/close it (#136). The old guard only matched
+            // the category switch id (`fazSwitch<category>`); a service toggle has
+            // a different id, so it fell through to `_fazClassToggle()` — which
+            // toggles the accordion as a side effect, collapsing it under the
+            // user. Short-circuit on any toggle/checkbox click and leave the
+            // accordion exactly as it is.
             if (
                 id === `fazSwitch${category}` ||
-                !_fazClassToggle(selector, "faz-accordion-active", false)
+                (target && target.closest && target.closest('.faz-service-toggle, .faz-switch')) ||
+                (target && 'checkbox' === target.type)
             ) {
+                return;
+            }
+            if (!_fazClassToggle(selector, "faz-accordion-active", false)) {
                 _fazToggleAriaExpandStatus(accordionButtonSelector, "false");
                 return;
             }
@@ -1313,6 +1504,9 @@ function _fazGetPreferenceCenter() {
     return element && element.closest('.faz-modal') || false;
 }
 function _fazHidePreferenceCenter() {
+    // Reset the opt-out success UI (timers + visibility) on every close so a
+    // re-opened popup never shows a stale "honored" message or a dead countdown.
+    _fazResetOptoutSuccessMessage();
     const element = _fazGetPreferenceCenter();
     element && element.classList.remove(_fazGetPreferenceClass());
 
@@ -1337,6 +1531,38 @@ function _fazHidePreferenceCenter() {
         _fazStore._prefTriggerElement.focus();
         _fazStore._prefTriggerElement = null;
     }
+    // Clear the trigger origin so a later open via a path that does NOT set it
+    // (the revisit widget or the [faz_cookie_settings] shortcode) falls back to
+    // the law default instead of inheriting the previous trigger's panel.
+    _fazStore._preferenceOriginTag = false;
+}
+// Which preference panel to show: the opt-out popup when the visitor reached it
+// via the Do-Not-Sell control, the GDPR detail panel via the settings control,
+// else the law default. Decisive for a "Both" banner, where the detail panel and
+// the opt-out popup live inside the SAME modal — without this the modal would
+// reveal both stacked panels.
+function _fazActivePreferenceTag() {
+    const origin = _fazStore._preferenceOriginTag;
+    if (origin === 'donotsell-button') return 'optout-popup';
+    if (origin === 'settings-button') return 'detail';
+    return _fazGetLaw() === 'ccpa' ? 'optout-popup' : 'detail';
+}
+// Reveal the active panel and hide its sibling when both share one modal.
+function _fazSelectActivePreferencePanel() {
+    const detail = _fazGetElementByTag('detail');
+    const optout = _fazGetElementByTag('optout-popup');
+    if (!detail || !optout) return; // only one panel is present — nothing to isolate
+    const wantOptout = _fazActivePreferenceTag() === 'optout-popup';
+    const active = wantOptout ? optout : detail;
+    const other = wantOptout ? detail : optout;
+    active.classList.remove('faz-hide', 'faz-hidden');
+    active.removeAttribute('aria-hidden');
+    // Hidden via display:none AND aria-hidden, so the inactive panel can't be
+    // reached visually, by Tab, or as a second role="dialog" in the AT tree.
+    // `faz-hidden` is the authoritative utility (`display:none!important`);
+    // keep `faz-hide` too for compatibility with the template state classes.
+    other.classList.add('faz-hide', 'faz-hidden');
+    other.setAttribute('aria-hidden', 'true');
 }
 function _fazShowPreferenceCenter() {
     _fazStore._prefTriggerElement = document.activeElement;
@@ -1348,8 +1574,13 @@ function _fazShowPreferenceCenter() {
     if (!element) return false;
     element.classList.add(_fazGetPreferenceClass());
 
-    // Ensure ARIA attributes are always present on the preference center div
-    const preferenceCenter = element.querySelector('.faz-preference-center');
+    // For a "Both" banner, isolate the panel matching the trigger.
+    _fazSelectActivePreferencePanel();
+
+    // Ensure ARIA attributes are present on the ACTIVE preference center panel.
+    const preferenceCenter =
+        element.querySelector('[data-faz-tag="' + _fazActivePreferenceTag() + '"]') ||
+        element.querySelector('.faz-preference-center');
     _fazSetPreferenceCenterAccessibility(preferenceCenter);
     const isPushdown = _fazGetPtype() === 'pushdown' && _fazGetType() !== 'box';
 
@@ -1371,6 +1602,11 @@ function _fazShowPreferenceCenter() {
     // Target the inner .faz-preference-center so we don't focus a banner button
     // when pushdown mode embeds preferences inside the consent bar wrapper.
     _fazFocusIntoElement(preferenceCenter || element);
+    // Re-bind the focus trap to the panel now open. The initial render bound it
+    // to the law-default panel; on a "Both" banner the visitor may have just
+    // opened the OTHER panel via its trigger. Done AFTER initial focus so it
+    // never interferes with it. Idempotent — the WeakMap handler map replaces.
+    _fazLoopFocus();
     return true;
 }
 function _fazTogglePreferenceCenter() {
@@ -1441,7 +1677,7 @@ function _fazGetFocusableElements(element) {
         wrapperElement.querySelectorAll(
             'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([disabled]):not([tabindex="-1"])'
         )
-    ).filter((element) => !element.closest('.faz-hidden') && !element.hasAttribute('hidden'));
+    ).filter((element) => !element.closest('.faz-hidden') && !element.closest('.faz-hide') && !element.hasAttribute('hidden'));
     if (focussableElements.length <= 0) return [];
     return [
         focussableElements[0],
@@ -1449,13 +1685,14 @@ function _fazGetFocusableElements(element) {
     ];
 }
 function _fazLoopFocus() {
-    const activeLaw = _fazGetLaw();
     const [firstElementBanner, lastElementBanner] =
         _fazGetFocusableElements("notice");
     _fazAttachFocusLoop(firstElementBanner, lastElementBanner, true);
     _fazAttachFocusLoop(lastElementBanner, firstElementBanner);
+    // Trap focus in the panel that is actually open (trigger-aware), so a "Both"
+    // banner loops the opt-out popup when reached via Do-Not-Sell.
     const [firstElementPopup, lastElementPopup] = _fazGetFocusableElements(
-        activeLaw === "ccpa" ? "optout-popup" : "detail"
+        _fazActivePreferenceTag()
     );
     _fazAttachFocusLoop(firstElementPopup, lastElementPopup, true);
     _fazAttachFocusLoop(lastElementPopup, firstElementPopup);
@@ -1529,6 +1766,9 @@ function _fazRemoveDeadCookies({ cookies }) {
         // Never delete the plugin's own consent-mechanism cookies.
         if (cookieID === "fazcookie-consent" || cookieID === "fazVendorConsent" || cookieID === "euconsent-v2") continue;
         if (_fazIsCookieWhitelisted(cookieID)) continue;
+        // An explicit per-service/per-cookie allow overrides the denied
+        // category fallback. Explicit denies are still deleted.
+        if (_fazGetServiceCookieDecision(cookieID) === "yes") continue;
         if (currentCookieMap[cookieID])
             [domain, ""].forEach((cookieDomain) =>
                 ref._fazSetCookie(cookieID, "", 0, cookieDomain)
@@ -1728,7 +1968,10 @@ function _fazTranslate(key, fallback) {
 }
 
 function _fazGetPreferenceCenterAriaLabel() {
-    return _fazGetLaw() === 'ccpa'
+    // Key off the panel actually shown (trigger-aware), not the law: a "Both"
+    // banner (law=gdpr) opened via Do-Not-Sell shows the opt-out panel and must
+    // announce the opt-out label, not the consent-preferences one.
+    return _fazActivePreferenceTag() === 'optout-popup'
         ? _fazTranslate('optout_preferences_label', 'Opt-out Preferences')
         : _fazTranslate('customise_consent_preferences_label', 'Customise Consent Preferences');
 }
@@ -1985,6 +2228,9 @@ function _fazAcceptCookies(choice = "all") {
             }
         }
     }
+    if (_fazServicesBeforeConsent === null) {
+        _fazServicesBeforeConsent = _fazGetServiceConsentSnapshot();
+    }
     const activeLaw = _fazGetLaw();
     const ccpaCheckBoxValue = _fazFindCheckBoxValue();
     _fazClearStoredServiceConsent();
@@ -2011,6 +2257,7 @@ function _fazAcceptCookies(choice = "all") {
         ref._fazSetInStore("consent", ccpaCheckBoxValue ? "yes" : "no");
     }
     const responseCategories = { accepted: [], rejected: [], action: choice };
+    const rejectedCategoryObjects = [];
     for (const category of _fazStore._categories) {
         let valueToSet = "no";
         if (activeLaw === 'gdpr') {
@@ -2047,7 +2294,7 @@ function _fazAcceptCookies(choice = "all") {
         ref._fazSetInStore(`${category.slug}`, valueToSet);
         if (valueToSet === "no") {
             responseCategories.rejected.push(category.slug);
-            _fazRemoveDeadCookies(category);
+            rejectedCategoryObjects.push(category);
         } else responseCategories.accepted.push(category.slug);
     }
     // Handle per-service consent.
@@ -2059,6 +2306,10 @@ function _fazAcceptCookies(choice = "all") {
             _fazStoreCustomCookieConsent(choice);
         }
     }
+
+    // Clean up only after granular choices have been persisted, so an
+    // explicitly allowed service inside a denied category keeps its cookies.
+    rejectedCategoryObjects.forEach(_fazRemoveDeadCookies);
 
     // Handle IAB vendor consent.
     _fazSaveVendorConsent(choice);
@@ -2120,9 +2371,12 @@ function _fazCkKey(serviceId, cookieName) {
 function _fazStoreCustomServiceConsent(choice) {
     if (choice !== "custom") return;
     var togglesByCategory = {};
+    var seenServiceIds = {};
     document.querySelectorAll('.faz-service-toggle[data-service][data-category]').forEach(function(toggle) {
         var category = toggle.getAttribute('data-category');
+        var serviceId = toggle.getAttribute('data-service');
         if (!category) return;
+        if (serviceId) seenServiceIds[serviceId] = true;
         if (!togglesByCategory[category]) togglesByCategory[category] = [];
         togglesByCategory[category].push(toggle);
     });
@@ -2139,6 +2393,17 @@ function _fazStoreCustomServiceConsent(choice) {
             ref._fazSetInStore("svc." + serviceId, toggle.checked ? "yes" : "no");
         });
     });
+    if (_fazServicesBeforeConsent && Array.isArray(_fazStore._services)) {
+        _fazStore._services.forEach(function(service) {
+            if (!service || !service.id || !service.category || seenServiceIds[service.id]) return;
+            var prior = _fazServicesBeforeConsent[service.id];
+            if (prior !== "yes" && prior !== "no") return;
+            var catConsent = ref._fazGetFromStore(service.category) || "no";
+            if (prior !== catConsent) {
+                ref._fazSetInStore("svc." + service.id, prior);
+            }
+        });
+    }
 }
 
 /**
@@ -2155,6 +2420,31 @@ function _fazServiceEffectiveConsent(serviceId, category) {
     return ref._fazGetFromStore(category) === "yes" ? "yes" : "no";
 }
 
+function _fazKnownServiceCategory(serviceId) {
+    if (!serviceId || !Array.isArray(_fazStore._services)) return "";
+    for (var i = 0; i < _fazStore._services.length; i++) {
+        var service = _fazStore._services[i];
+        if (service && service.id === serviceId && service.category) return service.category;
+    }
+    return "";
+}
+
+function _fazIsKnownService(serviceId, categorySlug) {
+    var serviceCategory = _fazKnownServiceCategory(serviceId);
+    if (!serviceCategory) return false;
+    return !categorySlug || serviceCategory === categorySlug;
+}
+
+function _fazGetServiceConsentSnapshot() {
+    var snapshot = {};
+    if (!_fazStore._perServiceConsent || !Array.isArray(_fazStore._services)) return snapshot;
+    _fazStore._services.forEach(function(service) {
+        if (!service || !service.id || !service.category) return;
+        snapshot[service.id] = _fazServiceEffectiveConsent(service.id, service.category);
+    });
+    return snapshot;
+}
+
 /**
  * Effective consent ("yes"/"no") for one cookie within a service: the explicit
  * ck.<service>.<cookie-name> override if present, otherwise the service's
@@ -2169,6 +2459,39 @@ function _fazCookieEffectiveConsent(serviceId, category, cookieName) {
     var ck = ref._fazGetFromStore(_fazCkKey(serviceId, cookieName));
     if (ck) return ck === "yes" ? "yes" : "no";
     return _fazServiceEffectiveConsent(serviceId, category);
+}
+
+/**
+ * Return the explicit granular decision for a cookie name/pattern.
+ *
+ * Per-cookie consent overrides its service. Across multiple matching
+ * services, any explicit denial wins; otherwise an explicit allow wins.
+ * An empty result means the caller must fall back to category consent.
+ *
+ * @param {string} cookieName Cookie or storage key to evaluate.
+ * @return {string} "yes", "no", or "".
+ */
+function _fazGetServiceCookieDecision(cookieName) {
+    if (!_fazStore._perServiceConsent || !Array.isArray(_fazStore._services)) return "";
+    var hasAllowedMatch = false;
+    for (var si = 0; si < _fazStore._services.length; si++) {
+        var service = _fazStore._services[si];
+        if (!service || !service.id || !Array.isArray(service.cookies)) continue;
+        for (var ci = 0; ci < service.cookies.length; ci++) {
+            var pattern = service.cookies[ci];
+            if (!pattern || !_fazCookieNameMatches(cookieName, pattern)) continue;
+            var decision = ref._fazGetFromStore("svc." + service.id);
+            if (_fazStore._perCookieConsent) {
+                var cookieDecision = ref._fazGetFromStore(_fazCkKey(service.id, pattern));
+                if (cookieDecision === "yes" || cookieDecision === "no") {
+                    decision = cookieDecision;
+                }
+            }
+            if (decision === "no") return "no";
+            if (decision === "yes") hasAllowedMatch = true;
+        }
+    }
+    return hasAllowedMatch ? "yes" : "";
 }
 
 /**
@@ -2341,7 +2664,9 @@ document.createElement = (...args) => {
                 if (_fazShouldChangeType(createdElement, value)) {
                     rememberOriginalType();
                     originalSetAttribute("type", "javascript/blocked");
-                } else if (createdElement.getAttribute("type") === "javascript/blocked") {
+                } else if (createdElement.getAttribute("data-faz-original-type")) {
+                    // Restore only a type WE clobbered (marked by
+                    // data-faz-original-type), not one a third party set.
                     restoreOriginalType();
                 }
                 originalSetAttribute("src", value);
@@ -2375,11 +2700,21 @@ document.createElement = (...args) => {
         if (name === "type" || name === "src")
             return (createdElement[name] = value);
         originalSetAttribute(name, value);
-        if (name === "data-fazcookie") {
+        // Re-evaluate the script type when EITHER the category tag or the
+        // per-service tag is set. A library may set `src` first (which already
+        // marks the script javascript/blocked) and only then set
+        // `data-faz-service`; without re-checking here an explicit svc.<id>:yes
+        // would never unblock that dynamically-created script.
+        if (name === "data-fazcookie" || name === "data-faz-category" || name === "data-faz-service") {
             if (_fazShouldChangeType(createdElement)) {
                 rememberOriginalType();
                 originalSetAttribute("type", "javascript/blocked");
-            } else {
+            } else if (createdElement.getAttribute("data-faz-original-type")) {
+                // Only restore when WE blocked it — rememberOriginalType() sets
+                // data-faz-original-type, so its presence is the reliable marker
+                // that this interceptor clobbered the type. Never downgrade a
+                // script that was javascript/blocked by a third party, nor a
+                // legitimate type="module" we never touched.
                 restoreOriginalType();
             }
         }
@@ -2464,8 +2799,8 @@ function _fazMutationObserver(mutations) {
                     ? (node.getAttribute("data-fazcookie") || node.getAttribute("data-faz-category") || "")
                     : "";
                 var nodeCategory = rawCategory.replace("fazcookie-", "");
-                var shouldBlockByCategory = nodeCategory && _fazIsCategoryToBeBlocked(nodeCategory);
-                if (!shouldBlockByCategory && !_fazShouldBlockProvider(blockingTarget)) continue;
+                var nodeService = node.getAttribute ? (node.getAttribute("data-faz-service") || "") : "";
+                if (!_fazShouldBlockResource(nodeCategory, blockingTarget, nodeService)) continue;
                 const uniqueID = ref._fazRandomString(8, false);
                 if (node.nodeName.toLowerCase() === "iframe")
                     _fazAddPlaceholder(node, uniqueID);
@@ -2509,11 +2844,14 @@ function _fazUnblock() {
                     ? (node.getAttribute("data-fazcookie") || node.getAttribute("data-faz-category") || "")
                     : "";
                 nodeCategory = nodeCategory.replace("fazcookie-", "");
-                if (nodeCategory && _fazIsCategoryToBeBlocked(nodeCategory)) return true;
                 var nodeSrc = (node && typeof node.getAttribute === "function")
                     ? (node.getAttribute("src") || node.src || "")
                     : (node && node.src ? node.src : "");
-                if (_fazShouldBlockProvider(nodeSrc)) return true;
+                var nodeTarget = nodeSrc || (node && node.textContent ? node.textContent : "");
+                var nodeService = node && typeof node.getAttribute === "function"
+                    ? (node.getAttribute("data-faz-service") || "")
+                    : "";
+                if (_fazShouldBlockResource(nodeCategory, nodeTarget, nodeService)) return true;
                 if (node.nodeName.toLowerCase() === "script") {
                     const scriptNode = _fazBuildRestoredScript(node);
                     if (!scriptNode) return false;
@@ -2559,6 +2897,7 @@ function _fazBuildRestoredScript(script, extraSkipAttributes) {
         'type',
         'src',
         'data-faz-category',
+        'data-faz-service',
         'data-faz-original-type',
     ]);
 
@@ -2598,7 +2937,7 @@ function _fazBuildRestoredScript(script, extraSkipAttributes) {
 function _fazBuildRestoredIframe(iframe, placeholder) {
     var clone = document.createElement('iframe');
     var iframeSrc = iframe.getAttribute('src') || iframe.src;
-    var skip = { 'src': 1, 'data-faz-category': 1, 'data-fazcookie': 1, 'data-faz-original-type': 1 };
+    var skip = { 'src': 1, 'data-faz-category': 1, 'data-faz-service': 1, 'data-fazcookie': 1, 'data-faz-original-type': 1 };
 
     for (var i = 0; i < iframe.attributes.length; i++) {
         var attr = iframe.attributes[i];
@@ -2624,6 +2963,7 @@ function _fazRestoreInlineScript(script, extraRemoveAttributes) {
     var origType = script.getAttribute('data-faz-original-type');
     var removeAttrs = (extraRemoveAttributes || []).concat([
         'data-faz-category',
+        'data-faz-service',
         'data-faz-original-type',
     ]);
 
@@ -2666,8 +3006,9 @@ function _fazUnblockServerSide() {
         .forEach(function (script) {
             var category = script.getAttribute("data-faz-category")
                 || (script.getAttribute("data-fazcookie") || "").replace("fazcookie-", "");
-            if (_fazIsCategoryToBeBlocked(category)) return;
             var scriptSrc = script.getAttribute('src') || script.src || '';
+            var scriptTarget = scriptSrc || script.textContent || '';
+            if (_fazShouldBlockResource(category, scriptTarget, script.getAttribute("data-faz-service") || "")) return;
             if (!scriptSrc) {
                 _fazRestoreInlineScript(script);
                 return;
@@ -2694,9 +3035,13 @@ function _fazUnblockServerSide() {
             // Skip social placeholders — handled separately in step 6.
             if (placeholder.classList.contains('faz-social-placeholder')) return;
             var cat = placeholder.getAttribute("data-faz-category");
-            if (_fazIsCategoryToBeBlocked(cat)) return;
             var tpl = placeholder.querySelector('template.faz-placeholder-content');
             if (!tpl) return;
+            if (_fazShouldBlockResource(
+                cat,
+                tpl.innerHTML || '',
+                placeholder.getAttribute("data-faz-service") || ""
+            )) return;
             // Clone template content into a document fragment for safe DOM insertion.
             // The template content is trusted server-rendered markup (the original
             // blocked iframe/oEmbed HTML), not user-supplied input.
@@ -2728,8 +3073,8 @@ function _fazUnblockServerSide() {
     document.querySelectorAll('iframe[data-faz-src][data-faz-category]')
         .forEach(function (el) {
             var cat = el.getAttribute("data-faz-category");
-            if (_fazIsCategoryToBeBlocked(cat)) return;
             var fazSrc = el.getAttribute("data-faz-src");
+            if (_fazShouldBlockResource(cat, fazSrc, el.getAttribute("data-faz-service") || "")) return;
             if (!_fazIsAllowedScheme(fazSrc)) return;
             el.src = fazSrc;
             el.removeAttribute("data-faz-src");
@@ -2746,8 +3091,8 @@ function _fazUnblockServerSide() {
     document.querySelectorAll('img[data-faz-src][data-faz-category]')
         .forEach(function (el) {
             var cat = el.getAttribute("data-faz-category");
-            if (_fazIsCategoryToBeBlocked(cat)) return;
             var imgSrc = el.getAttribute("data-faz-src");
+            if (_fazShouldBlockResource(cat, imgSrc, el.getAttribute("data-faz-service") || "")) return;
             if (!_fazIsAllowedScheme(imgSrc)) return;
             el.src = imgSrc;
             el.removeAttribute("data-faz-src");
@@ -2757,8 +3102,8 @@ function _fazUnblockServerSide() {
     document.querySelectorAll('link[data-faz-href][data-faz-category]')
         .forEach(function (el) {
             var cat = el.getAttribute("data-faz-category");
-            if (_fazIsCategoryToBeBlocked(cat)) return;
             var fazHref = el.getAttribute("data-faz-href");
+            if (_fazShouldBlockResource(cat, fazHref, el.getAttribute("data-faz-service") || "")) return;
             if (!_fazIsAllowedScheme(fazHref)) return;
             el.href = fazHref;
             el.removeAttribute("data-faz-href");
@@ -2788,9 +3133,14 @@ function _fazUnblockServerSide() {
     document.querySelectorAll('.faz-social-placeholder[data-faz-category]')
         .forEach(function (placeholder) {
             var cat = placeholder.getAttribute("data-faz-category");
-            if (_fazIsCategoryToBeBlocked(cat)) return;
             // Show the hidden social element that follows the placeholder.
             var next = placeholder.nextElementSibling;
+            var socialTarget = next ? (next.getAttribute("src") || next.outerHTML || "") : "";
+            if (_fazShouldBlockResource(
+                cat,
+                socialTarget,
+                placeholder.getAttribute("data-faz-service") || ""
+            )) return;
             if (next && next.getAttribute("data-faz-category") === cat) {
                 next.classList.remove('faz-hidden');
                 next.removeAttribute("data-faz-category");
@@ -2907,7 +3257,7 @@ function _fazIsCategoryToBeBlocked(category) {
 }
 
 /**
- * Build a lookup map from provider pattern → service ID (lazily cached).
+ * Build a lookup map from provider pattern → service IDs (lazily cached).
  * Used by _fazShouldBlockProvider when per-service consent is active.
  */
 var _fazPatternServiceMap = null;
@@ -2918,19 +3268,22 @@ function _fazGetPatternServiceMap() {
     _fazStore._services.forEach(function(svc) {
         if (!svc.patterns) return;
         svc.patterns.forEach(function(p) {
-            _fazPatternServiceMap[p] = svc.id;
+            if (!_fazPatternServiceMap[p]) _fazPatternServiceMap[p] = [];
+            if (_fazPatternServiceMap[p].indexOf(svc.id) === -1) {
+                _fazPatternServiceMap[p].push(svc.id);
+            }
         });
     });
     return _fazPatternServiceMap;
 }
 
-function _fazShouldBlockProvider(formattedRE) {
-    if (!formattedRE || typeof formattedRE !== "string") return false;
+function _fazMatchingProviders(formattedRE) {
+    if (!formattedRE || typeof formattedRE !== "string") return [];
     var matchTarget = _fazGetProviderMatchTarget(formattedRE);
-    if (!matchTarget) return false;
-    if (!_fazStore._providersToBlock || !_fazStore._providersToBlock.length) return false;
+    if (!matchTarget) return [];
+    if (!_fazStore._providersToBlock || !_fazStore._providersToBlock.length) return [];
     var normalizedTarget = matchTarget.toLowerCase();
-    const provider = _fazStore._providersToBlock.find(({ re }) => {
+    return _fazStore._providersToBlock.filter(({ re }) => {
         if (!re) return false;
         var needle = String(re).toLowerCase();
         var idx = normalizedTarget.indexOf(needle);
@@ -2938,21 +3291,55 @@ function _fazShouldBlockProvider(formattedRE) {
         if (!_fazHasProviderBoundary(matchTarget, idx, needle.length)) return false;
         return true;
     });
-    if (!provider) return false;
+}
 
-    // Per-service consent: check the specific service first.
-    if (_fazStore._perServiceConsent && _fazStore._services && provider.re) {
-        var psMap = _fazGetPatternServiceMap();
-        var serviceId = psMap[provider.re];
-        if (serviceId) {
-            var svcConsent = ref._fazGetFromStore("svc." + serviceId);
-            if (svcConsent === "yes") return false; // Explicitly allowed.
-            if (svcConsent === "no") return true;   // Explicitly blocked.
-            // No specific consent — fall through to category check.
+function _fazGetServiceConsentForTarget(formattedRE) {
+    if (!_fazStore._perServiceConsent || !_fazStore._services) return "";
+    var providers = _fazMatchingProviders(formattedRE);
+    if (!providers.length) return "";
+
+    var psMap = _fazGetPatternServiceMap();
+    var hasExplicitYes = false;
+    for (var pi = 0; pi < providers.length; pi++) {
+        var serviceIds = psMap[providers[pi].re] || [];
+        for (var si = 0; si < serviceIds.length; si++) {
+            var svcConsent = ref._fazGetFromStore("svc." + serviceIds[si]);
+            if (svcConsent === "no") return "no";
+            if (svcConsent === "yes") hasExplicitYes = true;
         }
     }
+    return hasExplicitYes ? "yes" : "";
+}
 
-    return provider.categories.some((category) => _fazIsCategoryToBeBlocked(category));
+function _fazShouldBlockResource(category, target, serviceId) {
+    if (_fazStore._perServiceConsent) {
+        if (serviceId && _fazIsKnownService(serviceId, category)) {
+            var explicit = ref._fazGetFromStore("svc." + serviceId);
+            if (explicit === "no") return true;
+            if (explicit === "yes") return false;
+        }
+        var targetConsent = _fazGetServiceConsentForTarget(target);
+        if (targetConsent === "no") return true;
+        if (targetConsent === "yes") return false;
+    }
+
+    if (category) return _fazIsCategoryToBeBlocked(category);
+    return _fazShouldBlockProvider(target);
+}
+
+function _fazShouldBlockProvider(formattedRE) {
+    var providers = _fazMatchingProviders(formattedRE);
+    if (!providers.length) return false;
+
+    var serviceConsent = _fazGetServiceConsentForTarget(formattedRE);
+    if (serviceConsent === "yes") return false;
+    if (serviceConsent === "no") return true;
+
+    return providers.some(function(provider) {
+        return provider.categories.some(function(category) {
+            return _fazIsCategoryToBeBlocked(category);
+        });
+    });
 }
 /**
  * Check if the URL matches a user-defined whitelist pattern.
@@ -2976,11 +3363,40 @@ function _fazShouldChangeType(element, src) {
     if (element.classList && element.classList.contains('faz-skip')) return false;
     var url = src ? src : element.src;
     if (_fazIsUserWhitelisted(url)) return false;
+    // Per-service override wins for dynamically-created scripts too: an explicit
+    // svc.<id>:yes must unblock a script whose category is denied (and svc:no
+    // must block one whose category is allowed). Without this the dynamic
+    // document.createElement path ignored per-service choices.
+    var serviceId = element.getAttribute ? (element.getAttribute("data-faz-service") || "") : "";
+    // Derive the category from either tag the other blocker paths accept
+    // (data-fazcookie OR data-faz-category), so a per-service override is always
+    // validated against the element's declared category.
+    var serviceCategory = "";
+    if (element.getAttribute) {
+        serviceCategory = (
+            element.getAttribute("data-fazcookie") ||
+            element.getAttribute("data-faz-category") ||
+            ""
+        ).replace("fazcookie-", "");
+    }
+    // When no category tag is (yet) set on a dynamically-created element,
+    // resolve the service's catalogue category so the override is validated
+    // against the registered category — matching _fazShouldBlockResource's
+    // semantics — instead of letting an empty category short-circuit the check.
+    if (!serviceCategory && serviceId) {
+        serviceCategory = _fazKnownServiceCategory(serviceId);
+    }
+    if (_fazStore._perServiceConsent && serviceId && _fazIsKnownService(serviceId, serviceCategory)) {
+        var explicit = ref._fazGetFromStore("svc." + serviceId);
+        if (explicit === "no") return true;
+        if (explicit === "yes") return false;
+    }
+    // Category-level fallback: block when the element's declared category
+    // (from data-fazcookie OR data-faz-category, already resolved into
+    // serviceCategory above) is to be blocked — matching the MutationObserver
+    // path, which also honours data-faz-category.
     return (
-        (element.hasAttribute("data-fazcookie") &&
-            _fazIsCategoryToBeBlocked(
-                element.getAttribute("data-fazcookie").replace("fazcookie-", "")
-            )) ||
+        (serviceCategory && _fazIsCategoryToBeBlocked(serviceCategory)) ||
         _fazShouldBlockProvider(url)
     );
 }
@@ -3202,6 +3618,7 @@ function _fazAttachManualLinksStyles() {
 }
 
 var _fazCategoriesBeforeConsent = null;
+var _fazServicesBeforeConsent = null;
 
 function _fazAfterConsent() {
     if (_fazGetLaw() === 'gdpr') _fazSetPreferenceCheckBoxStates(true);
@@ -3223,7 +3640,25 @@ function _fazAfterConsent() {
     _fazExecuteConsentScripts(_fazCategoriesBeforeConsent);
 
     // Clean up cookies from categories/services the user has not consented to.
-    var svcRevoked = _fazCleanupRevokedCookies();
+    var revokedServiceCookie = _fazCleanupRevokedCookies();
+
+    // A running third-party script cannot be unloaded. Reload on every
+    // effective yes → no service transition, even when that service has not
+    // created a cookie yet (cookie cleanup alone cannot detect that case).
+    var serviceRevoked = false;
+    if (_fazServicesBeforeConsent) {
+        var activeServices = _fazStore._services || [];
+        for (var sri = 0; sri < activeServices.length; sri++) {
+            var activeService = activeServices[sri];
+            if (
+                _fazServicesBeforeConsent[activeService.id] === "yes" &&
+                _fazServiceEffectiveConsent(activeService.id, activeService.category) === "no"
+            ) {
+                serviceRevoked = true;
+                break;
+            }
+        }
+    }
 
     // Best-effort cleanup of IndexedDB databases and Cache Storage entries
     // that belong to blocked tracking providers (e.g. Mixpanel, PWA trackers).
@@ -3299,7 +3734,9 @@ function _fazAfterConsent() {
     // Re-run server-side unblocking for newly accepted categories.
     _fazUnblockServerSide();
 
-    if (svcRevoked || revoked || _fazStore._bannerConfig.behaviours.reloadBannerOnAccept === true) {
+    if (revokedServiceCookie || serviceRevoked || revoked || _fazStore._bannerConfig.behaviours.reloadBannerOnAccept === true) {
+        _fazCategoriesBeforeConsent = null;
+        _fazServicesBeforeConsent = null;
         _storageCleanupPromise.then(function() { window.location.reload(); });
         return;
     }
@@ -3345,6 +3782,7 @@ function _fazAfterConsent() {
 
     // Reset snapshot so the next consent action starts with a clean diff.
     _fazCategoriesBeforeConsent = null;
+    _fazServicesBeforeConsent = null;
 }
 
 /**
@@ -3389,32 +3827,8 @@ function _fazDeleteCookie(name) {
 function _fazCleanupRevokedCookies() {
     var cookieMap = _fazStore._cookieCategoryMap;
 
-    // Build a per-service cookie map: pattern → service_id for denied services.
-    var svcCookieMap = {};
-    if (_fazStore._perServiceConsent && _fazStore._services) {
-        _fazStore._services.forEach(function(svc) {
-            var svcConsent = ref._fazGetFromStore("svc." + svc.id);
-            if (svcConsent === "no" && svc.cookies && svc.cookies.length) {
-                svc.cookies.forEach(function(pat) { svcCookieMap[pat] = svc.id; });
-            }
-            // Per-cookie shredding (issue #135): when the service itself is
-            // allowed but the visitor opted a single cookie out, add just that
-            // cookie pattern. A denied cookie can't be stopped from being set
-            // (its service script runs) but is deleted whenever it appears —
-            // the same post-hoc enforcement used for a denied service.
-            if (_fazStore._perCookieConsent && svc.cookies && svc.cookies.length) {
-                svc.cookies.forEach(function(pat) {
-                    if (ref._fazGetFromStore(_fazCkKey(svc.id, pat)) === "no") {
-                        svcCookieMap[pat] = svc.id;
-                    }
-                });
-            }
-        });
-    }
-
     var hasCategoryMap = cookieMap && typeof cookieMap === "object";
-    var hasSvcMap = Object.keys(svcCookieMap).length > 0;
-    if (!hasCategoryMap && !hasSvcMap) return;
+    if (!hasCategoryMap && !_fazStore._perServiceConsent) return;
 
     // Plugin cookies that must never be deleted.
     var protectedCookies = ['fazcookie-consent', 'fazVendorConsent', 'euconsent-v2'];
@@ -3431,28 +3845,17 @@ function _fazCleanupRevokedCookies() {
         if (protectedCookies.indexOf(cookieName) !== -1) continue;
         if (_fazIsCookieWhitelisted(cookieName)) continue;
 
-        var shouldDelete = false;
-
-        // Category-based shredding.
-        if (hasCategoryMap) {
+        var serviceDecision = _fazGetServiceCookieDecision(cookieName);
+        var shouldDelete = serviceDecision === "no";
+        if (shouldDelete) {
+            svcRevoked = true;
+        } else if (serviceDecision !== "yes" && hasCategoryMap) {
             for (var pattern in cookieMap) {
                 if (!cookieMap.hasOwnProperty(pattern)) continue;
                 var category = cookieMap[pattern];
                 if (!_fazIsCategoryToBeBlocked(category)) continue;
                 if (_fazCookieNameMatches(cookieName, pattern)) {
                     shouldDelete = true;
-                    break;
-                }
-            }
-        }
-
-        // Per-service shredding (service denied even if category allowed).
-        if (!shouldDelete && hasSvcMap) {
-            for (var svcPat in svcCookieMap) {
-                if (!svcCookieMap.hasOwnProperty(svcPat)) continue;
-                if (_fazCookieNameMatches(cookieName, svcPat)) {
-                    shouldDelete = true;
-                    svcRevoked = true;
                     break;
                 }
             }
@@ -3478,18 +3881,15 @@ function _fazCleanupRevokedCookies() {
                 // Never shred internal plugin session keys regardless of user-defined patterns.
                 if (key === 'faz_age_verified') continue;
                 if (_fazIsCookieWhitelisted(key)) continue;
-                var del = false;
-                if (hasCategoryMap) {
+                var storageServiceDecision = _fazGetServiceCookieDecision(key);
+                var del = storageServiceDecision === "no";
+                if (del) {
+                    svcRevoked = true;
+                } else if (storageServiceDecision !== "yes" && hasCategoryMap) {
                     for (var kPat in cookieMap) {
                         if (!cookieMap.hasOwnProperty(kPat)) continue;
                         if (!_fazIsCategoryToBeBlocked(cookieMap[kPat])) continue;
                         if (_fazCookieNameMatches(key, kPat)) { del = true; break; }
-                    }
-                }
-                if (!del && hasSvcMap) {
-                    for (var kSvc in svcCookieMap) {
-                        if (!svcCookieMap.hasOwnProperty(kSvc)) continue;
-                        if (_fazCookieNameMatches(key, kSvc)) { del = true; break; }
                     }
                 }
                 if (del) keysToDelete.push(key);
@@ -3818,11 +4218,28 @@ function _fazWatchBannerElement() {
         _revisitFazConsent();
     });
 
-    // Delegate clicks on placeholder "Accept cookies" buttons.
+    // Delegate clicks on placeholder "Accept cookies" buttons. Prefer the
+    // specific service (#134): a YouTube placeholder enables only YouTube, not
+    // the entire Marketing category. Fall back to the category when no service
+    // id is present (older markup / non-service blocks).
     document.querySelector("body").addEventListener("click", function (event) {
         var btn = event.target.closest("[data-faz-accept]");
         if (!btn) return;
         var cat = btn.getAttribute("data-faz-accept");
+        var serviceId = btn.getAttribute("data-faz-accept-service");
+        if (
+            serviceId &&
+            _fazStore._perServiceConsent &&
+            typeof window._fazAcceptService === "function"
+        ) {
+            var activeService = (_fazStore._services || []).some(function(service) {
+                return service.id === serviceId && service.category === cat;
+            });
+            if (activeService) {
+                window._fazAcceptService(serviceId, cat);
+                return;
+            }
+        }
         if (cat && typeof window._fazAcceptCategory === "function") {
             window._fazAcceptCategory(cat);
         }
@@ -3834,6 +4251,197 @@ function _fazRemoveAllDeadCookies() {
         if (ref._fazGetFromStore(category.slug) !== "yes")
             _fazRemoveDeadCookies(category);
     }
+}
+
+/**
+ * Clear the opt-out success countdown timers (interval + auto-close timeout).
+ *
+ * @return {void}
+ */
+function _fazClearOptoutSuccessTimers() {
+    if ( _fazStore._optoutSuccessCountdownInterval ) {
+        clearInterval( _fazStore._optoutSuccessCountdownInterval );
+        _fazStore._optoutSuccessCountdownInterval = null;
+    }
+    if ( _fazStore._optoutSuccessAutoCloseTimer ) {
+        clearTimeout( _fazStore._optoutSuccessAutoCloseTimer );
+        _fazStore._optoutSuccessAutoCloseTimer = null;
+    }
+}
+
+/**
+ * Is the opt-out success message currently visible?
+ *
+ * @return {boolean}
+ */
+function _fazIsOptoutSuccessVisible() {
+    const el = _fazGetElementByTag( "optout-success" );
+    return !!( el && !el.classList.contains( "faz-hide" ) );
+}
+
+/**
+ * Tear down the banner once the opt-out countdown completes (or is skipped).
+ *
+ * @return {void}
+ */
+function _fazDismissOptoutSuccessCountdown() {
+    _fazRemoveBanner();
+    _fazHidePreferenceCenter();
+    _fazAfterConsent();
+}
+
+/**
+ * Show the opt-out success UI after a confirmed opt-out: hide the action
+ * buttons, reveal the success message, disable the opt-out controls, run a
+ * countdown in the subtext, then auto-dismiss the banner. The message is
+ * announced via aria-live="polite" and focused so assistive tech reports that
+ * the opt-out was recorded (WCAG 2.2 SC 4.1.3).
+ *
+ * @return {void}
+ */
+function _fazShowOptoutSuccessMessage() {
+    _fazClearOptoutSuccessTimers();
+
+    const buttonWrapper = _fazGetElementByTag( "optout-buttons" );
+    const successMessage = _fazGetElementByTag( "optout-success" );
+    const countdownElement = _fazGetElementByTag( "optout-success-subtext" );
+    const ccpaCheckbox = document.getElementById( "fazCCPAOptOut" );
+
+    // Banners saved before this feature shipped have no success element — fall
+    // back to the immediate dismiss so the opt-out still completes cleanly.
+    if ( ! buttonWrapper || ! successMessage ) {
+        _fazDismissOptoutSuccessCountdown();
+        return;
+    }
+
+    buttonWrapper.style.display = "none";
+    // Declare the live region BEFORE revealing the message so assistive tech
+    // treats the headline as a fresh polite announcement (the element ships
+    // role="status"; this reinforces it for combos that key off aria-live).
+    // The countdown subtext is aria-hidden in the template so its per-second
+    // updates don't flood the screen-reader queue.
+    successMessage.setAttribute( "aria-live", "polite" );
+    successMessage.classList.remove( "faz-hide" );
+    successMessage.focus();
+    if ( ccpaCheckbox ) ccpaCheckbox.disabled = true;
+    _fazClassAdd( "=optout-option", "faz-disabled", false );
+
+    const countdownTimerEl =
+        ( countdownElement && countdownElement.querySelector( "#fazCountdownTimer" ) ) ||
+        document.getElementById( "fazCountdownTimer" );
+
+    let timeRemaining = _FAZ_OPTOUT_SUCCESS_SECONDS;
+    // When the subtext has no countdown <span> (e.g. kses stripped the id),
+    // memo its text once so we can swap the digit in place each tick.
+    if ( countdownElement && ! countdownTimerEl && ! _fazStore._optoutSuccessSubtextTemplate ) {
+        _fazStore._optoutSuccessSubtextTemplate =
+            countdownElement.textContent ||
+            ( "Banner closes automatically in " + _FAZ_OPTOUT_SUCCESS_SECONDS + " s..." );
+    }
+    const template = _fazStore._optoutSuccessSubtextTemplate;
+    const hasDigit = template && /\d+/.test( template );
+    const updateSubtext = function () {
+        if ( ! countdownElement ) return;
+        if ( countdownTimerEl ) {
+            countdownTimerEl.textContent = String( timeRemaining );
+            return;
+        }
+        countdownElement.textContent = hasDigit
+            ? template.replace( /\d+/, String( timeRemaining ) )
+            : ( "Banner closes automatically in " + timeRemaining + " s..." );
+    };
+    updateSubtext();
+
+    _fazStore._optoutSuccessCountdownInterval = setInterval( function () {
+        timeRemaining -= 1;
+        if ( timeRemaining >= 0 ) updateSubtext();
+    }, 1000 );
+
+    _fazStore._optoutSuccessAutoCloseTimer = setTimeout(
+        _fazDismissOptoutSuccessCountdown,
+        _FAZ_OPTOUT_SUCCESS_DISMISS_MS
+    );
+}
+
+/**
+ * Reset the opt-out success UI (timers, visibility, checkbox, subtext) so a
+ * re-opened popup starts clean. Called from _fazHidePreferenceCenter().
+ *
+ * @return {void}
+ */
+function _fazResetOptoutSuccessMessage() {
+    _fazClearOptoutSuccessTimers();
+
+    const buttonWrapper = _fazGetElementByTag( "optout-buttons" );
+    const successMessage = _fazGetElementByTag( "optout-success" );
+    const countdownElement = _fazGetElementByTag( "optout-success-subtext" );
+    const ccpaCheckbox = document.getElementById( "fazCCPAOptOut" );
+
+    if ( buttonWrapper ) buttonWrapper.style.display = "";
+    if ( successMessage ) successMessage.classList.add( "faz-hide" );
+    if ( ccpaCheckbox ) ccpaCheckbox.disabled = false;
+    _fazClassRemove( "=optout-option", "faz-disabled", false );
+
+    const resetTimerEl =
+        ( countdownElement && countdownElement.querySelector( "#fazCountdownTimer" ) ) ||
+        document.getElementById( "fazCountdownTimer" );
+    if ( resetTimerEl ) {
+        resetTimerEl.textContent = "";
+    } else if ( countdownElement && _fazStore._optoutSuccessSubtextTemplate ) {
+        countdownElement.textContent = _fazStore._optoutSuccessSubtextTemplate;
+    }
+    // Drop the memoised template after restoring it, so a later show (e.g. after
+    // a frontend language switch re-renders the banner with new copy) re-reads
+    // the current subtext instead of replaying the previous language's string.
+    _fazStore._optoutSuccessSubtextTemplate = "";
+}
+
+/**
+ * Click handler factory for the opt-out "confirm" button.
+ *
+ * For a CCPA banner where the visitor has opted out, persist consent WITHOUT
+ * closing the popup (so the success message can show), then run the success +
+ * countdown UI. Every other case falls through to the normal save/close path.
+ *
+ * Persists with choice "custom" — the same value the pre-feature wiring used
+ * (`_fazAcceptReject()` defaults `option` to "custom"). The default "all" would
+ * grant every IAB TCF vendor consent on an opt-out and fire the
+ * fazcookie_consent_update event with action:"all" instead of "custom".
+ *
+ * `_fazAcceptCookies()` returns false when the age gate intercepts (it shows
+ * the age modal and defers recording consent). In that case we must NOT show
+ * the success message — it would claim "your opt-out has been honored" while no
+ * consent was actually recorded yet.
+ *
+ * @return {Function}
+ */
+function _fazHandleOptoutConfirm() {
+    return function () {
+        if ( _fazGetLaw() !== "ccpa" || ! _fazFindCheckBoxValue() ) {
+            _fazAcceptReject()();
+            return;
+        }
+        if ( _fazAcceptCookies( "custom" ) === false ) {
+            return;
+        }
+        _fazShowOptoutSuccessMessage();
+    };
+}
+
+/**
+ * Close handler for the opt-out popup: if the success message is showing, treat
+ * the close as "dismiss the countdown now" (consent already saved); otherwise
+ * hide the popup normally.
+ *
+ * @return {void}
+ */
+function _fazHandleOptoutPopupClose() {
+    if ( _fazIsOptoutSuccessVisible() ) {
+        ref._fazSetInStore( "action", "yes" );
+        _fazDismissOptoutSuccessCountdown();
+        return;
+    }
+    _fazHidePreferenceCenter();
 }
 
 function _fazSetCCPAOptions() {
@@ -4318,6 +4926,74 @@ function _fazSaveVendorConsent(choice) {
 }
 
 /**
+ * Accept one detected service without granting its entire category.
+ */
+window._fazAcceptService = function (serviceId, categorySlug) {
+    if (!categorySlug) {
+        categorySlug = _fazKnownServiceCategory(serviceId);
+    }
+    // Is this a real per-service entry? If not (per-service off, or service not
+    // detected) fall back to accepting the category so the placeholder unblocks.
+    if (!_fazIsKnownService(serviceId, categorySlug)) {
+        if (categorySlug && typeof window._fazAcceptCategory === "function") {
+            window._fazAcceptCategory(categorySlug);
+        }
+        return;
+    }
+
+    var serviceToggle = document.querySelector(
+        '.faz-service-toggle[data-service="' + serviceId + '"][data-category="' + categorySlug + '"]'
+    );
+    var syntheticToggle = null;
+    if (!serviceToggle) {
+        // The preference center has not rendered this service's toggle (the embed
+        // was accepted from its placeholder before opening the panel). Drive the
+        // same svc.<id>:yes flow via a detached toggle so we grant the SERVICE,
+        // not the whole category.
+        syntheticToggle = document.createElement('input');
+        syntheticToggle.type = 'checkbox';
+        syntheticToggle.className = 'faz-service-toggle';
+        syntheticToggle.setAttribute('data-service', serviceId);
+        syntheticToggle.setAttribute('data-category', categorySlug);
+        syntheticToggle.style.display = 'none';
+        document.body.appendChild(syntheticToggle);
+        serviceToggle = syntheticToggle;
+    }
+    var _fazCleanupSyntheticToggle = function () {
+        if (syntheticToggle && syntheticToggle.parentNode) {
+            syntheticToggle.parentNode.removeChild(syntheticToggle);
+        }
+    };
+
+    _fazCategoriesBeforeConsent = [];
+    var categories = _fazStore._categories || [];
+    for (var ci = 0; ci < categories.length; ci++) {
+        if (categories[ci].slug !== 'necessary' && !_fazIsCategoryToBeBlocked(categories[ci].slug)) {
+            _fazCategoriesBeforeConsent.push(categories[ci].slug);
+        }
+    }
+    _fazServicesBeforeConsent = _fazGetServiceConsentSnapshot();
+
+    var previousChecked = serviceToggle.checked;
+    serviceToggle.checked = true;
+    serviceToggle.dispatchEvent(new Event('change', { bubbles: true }));
+
+    if (_fazAcceptCookies("custom") === false) {
+        serviceToggle.checked = previousChecked;
+        serviceToggle.dispatchEvent(new Event('change', { bubbles: true }));
+        _fazCleanupSyntheticToggle();
+        _fazCategoriesBeforeConsent = null;
+        _fazServicesBeforeConsent = null;
+        return;
+    }
+
+    _fazCleanupSyntheticToggle();
+    _fazRemoveBanner();
+    _fazHidePreferenceCenter();
+    _fazAfterConsent();
+};
+
+/**
  * Accept a single consent category programmatically (used by iframe placeholders).
  */
 window._fazAcceptCategory = function (categorySlug) {
@@ -4326,6 +5002,7 @@ window._fazAcceptCategory = function (categorySlug) {
     // _fazAcceptCookies can detect which categories are truly newly accepted.
     // _fazAcceptCookies skips its own snapshot when this is already populated.
     _fazCategoriesBeforeConsent = [];
+    _fazServicesBeforeConsent = _fazGetServiceConsentSnapshot();
     var _preCats = _fazStore._categories || [];
     for (var _pi = 0; _pi < _preCats.length; _pi++) {
         if (_preCats[_pi].slug !== 'necessary' && !_fazIsCategoryToBeBlocked(_preCats[_pi].slug)) {
@@ -4353,6 +5030,7 @@ window._fazAcceptCategory = function (categorySlug) {
     }
     if (!matched) {
         _fazCategoriesBeforeConsent = null;
+        _fazServicesBeforeConsent = null;
         return;
     }
     if (_fazAcceptCookies("custom") === false) {
@@ -4367,6 +5045,7 @@ window._fazAcceptCategory = function (categorySlug) {
                 .forEach(function(svcToggle) { svcToggle.checked = previousCategoryValue === "yes"; });
         }
         _fazCategoriesBeforeConsent = null;
+        _fazServicesBeforeConsent = null;
         return;
     }
     _fazRemoveBanner();
@@ -4374,6 +5053,7 @@ window._fazAcceptCategory = function (categorySlug) {
     _fazAfterConsent();
     // Reset so the next direct call to _fazAcceptCookies takes a fresh snapshot.
     _fazCategoriesBeforeConsent = null;
+    _fazServicesBeforeConsent = null;
 };
 
 window.getFazConsent = function () {
@@ -4432,7 +5112,10 @@ window.addEventListener('message', function(event) {
         // surface: the overall payload is still bounded (length cap above)
         // and written verbatim as a cookie value, not interpreted as HTML.
         var consent = event.data.consent;
-        if (typeof consent !== 'string' || consent.length > 2048) return;
+        // Bound the forwarded value to the same ceiling the consent cookie uses
+        // (FAZ_COOKIE_VALUE_BUDGET = 3500 encoded bytes); the old 2048 cap
+        // silently dropped valid choices carrying many svc.* / ck.* overrides.
+        if (typeof consent !== 'string' || encodeURIComponent(consent).length > 3500) return;
         if (!/^[A-Za-z0-9._:+/=\-]+(,[A-Za-z0-9._:+/=\-]+)*$/.test(consent)) return;
 
         // Require that the source user actually took a consent action (action:yes

@@ -243,8 +243,42 @@ class Controller {
 		$banner_slug = isset( $data['banner_slug'] ) ? sanitize_title( $data['banner_slug'] ) : '';
 		$policy_revision = isset( $data['policy_revision'] ) ? max( 1, absint( $data['policy_revision'] ) ) : 1;
 
+		// Sanitize the category/service decision map before persisting. The
+		// REST `categories` param has no per-key sanitize_callback and the
+		// frontend now folds svc.*/ck.* keys read from the (client-writable)
+		// consent cookie into it, so a crafted cookie could otherwise push
+		// arbitrary keys/values into the consent-log row. Cap the entry count,
+		// length-bound every key, and constrain values so the stored audit map
+		// stays well-formed regardless of what the client sends.
 		if ( is_array( $categories ) || is_object( $categories ) ) {
-			$categories = wp_json_encode( $categories );
+			$clean = array();
+			$count = 0;
+			foreach ( (array) $categories as $key => $value ) {
+				if ( $count >= 250 ) {
+					break;
+				}
+				$key = substr( sanitize_text_field( (string) $key ), 0, 190 );
+				// Only yes/no scalars are valid. Skip nested arrays/objects before
+				// the string cast so a crafted payload can't trigger an
+				// array-to-string warning (or an object __toString fatal).
+				if ( ! is_scalar( $value ) ) {
+					continue;
+				}
+				$value = sanitize_text_field( (string) $value );
+				if ( '' === $key || ! in_array( $value, array( 'yes', 'no' ), true ) ) {
+					continue;
+				}
+				$clean[ $key ] = $value;
+				++$count;
+			}
+			$categories = wp_json_encode( $clean );
+		} else {
+			// A scalar value (e.g. a DNSMPI opt-out passes '' and the audit /
+			// export contract expects '' for that column — NOT the '[]' that
+			// wp_json_encode( array() ) would produce). Keep it as a sanitized
+			// string, length-bounded so a crafted REST payload (the param has no
+			// validate_callback) cannot write an unbounded blob into the log.
+			$categories = substr( sanitize_text_field( (string) $categories ), 0, 1000 );
 		}
 
 		// L2-SP1-S003 fix (1.15.0): populate the 7 geo-routing v2

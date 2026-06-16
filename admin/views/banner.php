@@ -157,6 +157,9 @@ defined( 'ABSPATH' ) || exit;
 						<option value="banner"><?php esc_html_e( 'Full-width Banner', 'faz-cookie-manager' ); ?></option>
 						<option value="classic"><?php esc_html_e( 'Classic', 'faz-cookie-manager' ); ?></option>
 					</select>
+					<div class="faz-help" id="faz-b-type-ccpa-hint" style="display:none;color:#92400e;" role="status" aria-live="polite" aria-atomic="true">
+						<?php esc_html_e( 'Classic and Full-width with a Pushdown preference center have no opt-out popup, so they are not available for a CCPA / US State Laws banner — the "Do Not Sell" link needs a working opt-out to be compliant. Use Box, or Full-width with Popup/Sidebar.', 'faz-cookie-manager' ); ?>
+					</div>
 				</div>
 
 				<div class="faz-form-group">
@@ -200,6 +203,9 @@ defined( 'ABSPATH' ) || exit;
 					</select>
 					<div class="faz-help">
 						<?php echo wp_kses_post( __( '<strong>GDPR</strong>: Shows consent category toggles. Visitors must opt-in.<br><strong>CCPA / US State Laws</strong>: Shows "Do Not Sell or Share My Personal Data" opt-out link.<br><strong>Both</strong>: Shows both category toggles and opt-out link.', 'faz-cookie-manager' ) ); ?>
+					</div>
+					<div class="faz-help" id="faz-b-law-content-hint" style="display:none;color:#92400e;" role="status" aria-live="polite" aria-atomic="true">
+						<?php esc_html_e( 'Your banner text still mentions the "Do Not Sell" link, but the selected law no longer shows it. Update the description on the Content tab so it matches.', 'faz-cookie-manager' ); ?>
 					</div>
 				</div>
 			</div>
@@ -748,8 +754,18 @@ defined( 'ABSPATH' ) || exit;
 		// countries, instead of letting them discover later that the feature
 		// they thought they enabled is a no-op.
 		$faz_geo_settings = get_option( 'faz_settings', array() );
-		$faz_has_maxmind  = ! empty( $faz_geo_settings['geolocation']['maxmind_key'] )
-			|| ( defined( 'FAZ_MAXMIND_DB_PATH' ) && FAZ_MAXMIND_DB_PATH && file_exists( FAZ_MAXMIND_DB_PATH ) );
+		// Mirror what the resolver actually uses: Geolocation::has_database()
+		// wraps get_database_path(), which honours FAZ_MAXMIND_DB_PATH and any
+		// .mmdb the plugin downloaded into wp-content/uploads/faz-cookie-manager/.
+		// Previously this notice only checked an inline option/constant test, so a
+		// site whose database had been downloaded through the plugin still saw
+		// "Geo source not configured" even though geo-detection worked — a false
+		// negative. A saved license key also counts as configured (the plugin
+		// downloads + auto-updates the DB). The option key is maxmind_license_key
+		// — the value written by Settings → Geolocation (class-settings.php) — not
+		// maxmind_key, which the prior code checked and which is never set.
+		$faz_has_maxmind  = ! empty( $faz_geo_settings['geolocation']['maxmind_license_key'] )
+			|| \FazCookie\Includes\Geolocation::has_database();
 		$faz_has_cf       = (bool) apply_filters( 'faz_trust_cf_ipcountry_header', false );
 		if ( ! $faz_has_maxmind && ! $faz_has_cf ) :
 			?>
@@ -761,10 +777,11 @@ defined( 'ABSPATH' ) || exit;
 					<?php
 					echo wp_kses(
 						sprintf(
-							/* translators: %1$s: Settings -> Geolocation link, %2$s: faz_trust_cf_ipcountry_header docs link. */
-							__( 'No country signal is available on this install. Multi-banner geo-routing will resolve every visitor to "unknown" and fall back to your match-all / default banner. Configure %1$s with a MaxMind GeoLite2 key, or enable the %2$s if your site sits behind Cloudflare. Without one of these, the targets you set below have no effect.', 'faz-cookie-manager' ),
+							/* translators: %1$s: Settings -> Geolocation link, %2$s: the faz_trust_cf_ipcountry_header filter name, %3$s: the add_filter() code snippet. */
+							__( 'No country signal is available on this install. Multi-banner geo-routing will resolve every visitor to "unknown" and fall back to your match-all / default banner. The usual fix is to configure %1$s with a free MaxMind GeoLite2 license key. If your site sits behind Cloudflare instead, the %2$s filter is available — note this is a developer code filter, NOT a setting in this screen: a developer adds %3$s in your theme or a code-snippets plugin. Without one of these, the targets you set below have no effect.', 'faz-cookie-manager' ),
 							'<a href="' . esc_url( admin_url( 'admin.php?page=faz-cookie-manager-settings#tab-geolocation' ) ) . '">' . esc_html__( 'Settings &raquo; Geolocation', 'faz-cookie-manager' ) . '</a>',
-							'<code>faz_trust_cf_ipcountry_header</code>'
+							'<code>faz_trust_cf_ipcountry_header</code>',
+							"<code>add_filter( 'faz_trust_cf_ipcountry_header', '__return_true' );</code>"
 						),
 						array(
 							'a'    => array( 'href' => array() ),
