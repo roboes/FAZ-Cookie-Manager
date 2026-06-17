@@ -1311,21 +1311,30 @@ class Activator {
 	 * re-activate the nested per-cookie toggles on upgrade. Reset the stale flag
 	 * to false so per-cookie consent starts OFF for everyone and must be
 	 * re-enabled explicitly. Fresh installs already default to false, and no
-	 * deliberate current `true` can exist (the write-gate prevented it), so this
-	 * only ever clears a legacy value — it never clobbers an intentional choice.
+	 * deliberate current `true` can exist at 1.20.0 (the write-gate prevented
+	 * it), so this only ever clears a legacy value on that one upgrade.
+	 *
+	 * A one-time marker (`faz_reset_stale_per_cookie_consent_done`) makes the
+	 * reset fire exactly once: install() calls this on every version upgrade,
+	 * so without the marker a later release would re-clear a per_cookie_consent
+	 * an admin intentionally re-enabled after 1.20.0.
 	 *
 	 * @return void
 	 */
 	public static function reset_stale_per_cookie_consent() {
+		if ( get_option( 'faz_reset_stale_per_cookie_consent_done' ) ) {
+			return; // Already neutralised once — never clobber a later intentional choice.
+		}
 		$settings = get_option( 'faz_settings' );
 		if ( ! is_array( $settings ) || empty( $settings['banner_control'] ) || ! is_array( $settings['banner_control'] ) ) {
+			update_option( 'faz_reset_stale_per_cookie_consent_done', 1, false );
 			return;
 		}
-		if ( empty( $settings['banner_control']['per_cookie_consent'] ) ) {
-			return; // Already off or absent — nothing to do.
+		if ( ! empty( $settings['banner_control']['per_cookie_consent'] ) ) {
+			$settings['banner_control']['per_cookie_consent'] = false;
+			update_option( 'faz_settings', $settings );
 		}
-		$settings['banner_control']['per_cookie_consent'] = false;
-		update_option( 'faz_settings', $settings );
+		update_option( 'faz_reset_stale_per_cookie_consent_done', 1, false );
 	}
 
 	/**
