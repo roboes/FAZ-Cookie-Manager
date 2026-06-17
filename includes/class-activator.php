@@ -110,7 +110,7 @@ class Activator {
 	/**
 	 * Bump this only when adding/changing a migration in the sequence below.
 	 */
-	const MIGRATIONS_VERSION = '2026.06.14.1';
+	const MIGRATIONS_VERSION = '2026.06.17.1';
 
 	/**
 	 * Run all pending one-time data migrations in a single admin_init callback.
@@ -137,6 +137,7 @@ class Activator {
 			self::enable_gpc_on_ccpa_banners();
 			self::ensure_share_personal_data_column();
 			self::clear_necessary_optout_flags();
+			self::reset_stale_per_cookie_consent();
 		} catch ( \Throwable $e ) {
 			// Do not mark migrations complete — retry on next admin load.
 			return;
@@ -1290,6 +1291,34 @@ class Activator {
 		if ( $result > 0 ) {
 			Category_Controller::get_instance()->delete_cache();
 		}
+	}
+
+	/**
+	 * Make the per-cookie consent ungating (1.20.0) a surprise-free upgrade.
+	 *
+	 * Per-cookie consent was settable before 1.18.2, then hard-gated: 1.18.2
+	 * through 1.19.x forced banner_control.per_cookie_consent to false on every
+	 * write, so any stored `true` is necessarily a stale pre-gate value the
+	 * runtime was masking. 1.20.0 removes that mask and drives the feature from
+	 * the saved setting, so without this reset such installs would silently
+	 * re-activate the nested per-cookie toggles on upgrade. Reset the stale flag
+	 * to false so per-cookie consent starts OFF for everyone and must be
+	 * re-enabled explicitly. Fresh installs already default to false, and no
+	 * deliberate current `true` can exist (the write-gate prevented it), so this
+	 * only ever clears a legacy value — it never clobbers an intentional choice.
+	 *
+	 * @return void
+	 */
+	public static function reset_stale_per_cookie_consent() {
+		$settings = get_option( 'faz_settings' );
+		if ( ! is_array( $settings ) || empty( $settings['banner_control'] ) || ! is_array( $settings['banner_control'] ) ) {
+			return;
+		}
+		if ( empty( $settings['banner_control']['per_cookie_consent'] ) ) {
+			return; // Already off or absent — nothing to do.
+		}
+		$settings['banner_control']['per_cookie_consent'] = false;
+		update_option( 'faz_settings', $settings );
 	}
 
 	/**
