@@ -49,20 +49,34 @@ function setConsentInitStates(consentData) {
     gtag("consent", "default", consentData);
 }
 
+// Non-personalized-ads fallback signal for LEGACY (non-Consent-Mode) ad tags,
+// which don't read ad_storage. When the publisher enabled the fallback, mirror
+// the ad_storage decision into `npa`: 1 (non-personalized) while ad_storage is
+// denied, 0 once granted. Two-sided + called from every path (first-visit
+// default, region rows, and the post-action update) so the signal is consistent
+// and self-clears within the session — Consent Mode v2 tags already read
+// ad_storage directly.
+function setNpaIfDenied(adStorage) {
+    if (!data || !data.non_personalized_ads_fallback) return;
+    gtag("set", { npa: adStorage === "denied" ? 1 : 0 });
+}
+
 gtag("set", "ads_data_redaction", !!data.ads_data_redaction);
 gtag("set", "url_passthrough", !!data.url_passthrough);
 
 // IMPORTANT: we must parse the consent cookie BEFORE emitting any consent
-// defaults. If the visitor already consented in a previous session, we emit
-// `consent default` directly with their granted states instead of the classic
-// `default denied -> update granted` pair. This removes a race window where
-// ad tags (AdSense, GTM) can fire the first request while consent is still
-// "denied" because the update has not been processed yet.
+// states. We follow the standard Consent Mode pattern (matching CookieYes
+// upstream): a single baseline `consent default` (region-specific / denied,
+// carrying wait_for_update), then — for a returning visitor with a stored
+// cookie — a `consent update` carrying their granted states. wait_for_update
+// holds ad tags (AdSense, GTM) until the update lands, so there is no
+// denied-ad race. Emitting a SECOND `consent default` with granted values
+// instead is flagged by Consent Mode tooling as resetting consent (issue #149).
 //
 // Order matters:
 //   1. parseConsentCookie() -> read cookie synchronously
-//   2a. if cookie present -> emit consent default with granted states (once)
-//   2b. if cookie absent  -> emit region-specific denied defaults (legacy path)
+//   2.  always emit the region-specific / denied baseline `consent default`
+//   3.  if cookie present -> emit `consent update` with the stored grants
 //
 // FAZ_META_KEYS must be declared BEFORE this call: parseConsentCookie() reads
 // it, and although the function is hoisted, the `var` only hoists the
@@ -77,14 +91,15 @@ var FAZ_META_KEYS = { rev: 1, action: 1, consentid: 1, gpc: 1 };
 
 var initialCookieObj = parseConsentCookie();
 
-if (initialCookieObj) {
-    // Returning visitor with saved consent: skip region defaults and emit the
-    // final state directly. buildConsentState() handles the non-personalized
-    // ads fallback when applicable.
-    setConsentInitStates(buildConsentState(initialCookieObj));
-} else {
-    // First-time visitor (or cookie expired/cleared): emit region-specific
-    // defaults as configured by the admin.
+// Baseline consent DEFAULT (region-specific / denied) is ALWAYS emitted first —
+// for first-time AND returning visitors. Consent Mode expects exactly one
+// well-formed `consent default` before any update; emitting a SECOND
+// `consent default` with granted values to restore a returning visitor (issue
+// #149) is flagged by Consent Mode tooling as resetting consent. The returning
+// visitor's stored grants are restored via `consent update` below instead — the
+// brief denied window is covered by wait_for_update on this baseline default.
+{
+    // Region-specific defaults as configured by the admin.
     //
     // ad_storage stays at the admin-configured (typically "denied") region
     // value before the visitor interacts. The "non-personalized ads fallback"
@@ -92,9 +107,15 @@ if (initialCookieObj) {
     // unlawful under ePrivacy/Consent Mode v2 in EEA/UK/CH). Under Consent Mode
     // v2 a denied ad_storage already lets Google serve non-personalized,
     // cookieless ads; for legacy (non-Consent-Mode) ad tags we additionally
-    // signal `npa: 1` (emitted inline in buildConsentState() below). This keeps
-    // the behaviour compliant in every region with no geofencing required.
-    var npFallback = !!data.non_personalized_ads_fallback;
+    // signal `npa`. Unlike the Consent Mode `ad_storage` states above, `npa` is
+    // a GLOBAL gtag('set') value — it CANNOT be region-scoped — so emitting it
+    // per region row would let the last-iterated row win for everyone. Instead
+    // we track the most-restrictive ad stance across all applicable defaults and
+    // emit `npa` ONCE after the loop: npa:1 if ANY default denies ads. This
+    // protects denied regions from personalized legacy ads pre-consent without
+    // geofencing. buildConsentState() (update path) re-evaluates `npa` two-sided
+    // from the returning visitor's real choice.
+    var anyAdDenied = false;
     for (var index = 0; index < regionSettings.length; index++) {
         var regionSetting = regionSettings[index];
         if (!regionSetting || typeof regionSetting !== "object") continue;
@@ -123,6 +144,7 @@ if (initialCookieObj) {
             consentRegionData.region = regionsToSetFor;
         else setDefaultSetting = false;
         setConsentInitStates(consentRegionData);
+        if (consentRegionData.ad_storage === "denied") anyAdDenied = true;
     }
 
     if (setDefaultSetting) {
@@ -135,7 +157,20 @@ if (initialCookieObj) {
           ad_user_data: "denied",
           ad_personalization: "denied"
         });
+        anyAdDenied = true;
     }
+
+    // Single global npa for the pre-consent default stage (see comment above):
+    // most-restrictive wins, since gtag('set', { npa }) is not region-scoped.
+    setNpaIfDenied(anyAdDenied ? "denied" : "granted");
+}
+
+// Returning visitor with saved consent: restore it via `consent update` (the
+// GCM-correct restoration signal), NOT a second `consent default`.
+// buildConsentState() also emits the non-personalized-ads npa signal (two-sided)
+// so it self-clears here when marketing was granted.
+if (initialCookieObj) {
+    updateConsentState(buildConsentState(initialCookieObj));
 }
 
 function parseConsentCookieParts() {
@@ -209,10 +244,9 @@ function buildConsentState(cookieObj) {
     // do NOT grant ad_storage (that would set ad cookies without consent —
     // unlawful in EEA/UK/CH). ad_storage stays "denied"; Consent Mode v2 serves
     // non-personalized, cookieless ads in that state. For legacy ad tags that
-    // don't read Consent Mode we additionally signal `npa: 1`.
-    if (data.non_personalized_ads_fallback && marketing === "denied") {
-        gtag("set", { npa: 1 });
-    }
+    // don't read Consent Mode we signal `npa` (two-sided: set to 0 when
+    // marketing is later granted so it self-clears within the session).
+    setNpaIfDenied(marketing);
     return {
         ad_storage: marketing,
         analytics_storage: analytics,
@@ -228,9 +262,9 @@ function updateConsentState(consentState) {
     gtag("consent", "update", consentState);
 }
 
-// NOTE: consent default has already been emitted above with the correct
-// granted/denied states (from cookie when present, or region defaults
-// otherwise). We only need to handle live consent changes below.
+// NOTE: the baseline `consent default` (region / denied) has already been
+// emitted above, and a returning visitor's stored grants were restored via
+// `consent update`. We only need to handle live consent changes below.
 
 // Re-apply on consent changes (banner interaction).
 document.addEventListener("fazcookie_consent_update", function () {

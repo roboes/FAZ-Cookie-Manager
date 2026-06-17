@@ -392,10 +392,44 @@ test.describe('User-reported regressions (v1.11.0 publisher report)', () => {
 		}
 	});
 
+	test('R2b: non_personalized_ads_fallback emits npa:1 on the FIRST visit (no action yet)', async ({ page, context, loginAsAdmin }) => {
+		// Arrange — admin enables GCM + fallback.
+		await loginAsAdmin(page);
+		await page.goto(`${WP_BASE}/wp-admin/admin.php?page=faz-cookie-manager-gcm`, { waitUntil: 'domcontentloaded' });
+		const nonce = await getAdminNonce(page);
+		const before = await getGcmSettings(page, nonce);
+		await updateGcmSettings(page, nonce, { status: true, non_personalized_ads_fallback: true });
+
+		const visitor = await context.browser()?.newContext({ baseURL: WP_BASE });
+		if (!visitor) throw new Error('Could not create visitor context');
+		try {
+			const visitorPage = await visitor.newPage();
+			// Act — a FRESH first-time visitor: load the page, take NO consent action.
+			await visitorPage.goto(`${WP_BASE}/?nb=${Date.now()}`, { waitUntil: 'domcontentloaded' });
+			// The fallback must signal npa at the default-consent stage (legacy ad
+			// tags get non-personalized ads on the very first pageview), not only
+			// after a reject. Regression: the no-cookie path never called the npa
+			// emitter, so npFallback was computed but unused.
+			const npa = await visitorPage.waitForFunction(() => {
+				const dlName = (window as unknown as { fazSettings?: { dataLayerName?: string } }).fazSettings?.dataLayerName || 'dataLayer';
+				const dl = (window as unknown as Record<string, unknown[]>)[dlName] ?? [];
+				return (dl as Array<Record<number, unknown>>).some((e) => e && e[0] === 'set' && e[1] && (e[1] as Record<string, unknown>).npa === 1);
+			}, undefined, { timeout: 8_000 }).then(() => true).catch(() => false);
+
+			expect(npa, 'npa:1 must be emitted at first-visit default when fallback is on and marketing defaults denied').toBe(true);
+		} finally {
+			await updateGcmSettings(page, nonce, {
+				status: before.status ?? false,
+				non_personalized_ads_fallback: before.non_personalized_ads_fallback ?? false,
+			});
+			await visitor.close();
+		}
+	});
+
 	/* ─────────────────────────────────────────────────────────────────
 	 * Report 3 — "Upon revisiting, ads don't load unless you reaccept"
 	 * ───────────────────────────────────────────────────────────────── */
-	test('R3: returning visitor with saved consent sees GCM default granted (no denied→granted race)', async ({ page, context, loginAsAdmin }) => {
+	test('R3: returning visitor with saved consent is restored via consent UPDATE, not a second default (issue #149)', async ({ page, context, loginAsAdmin }) => {
 		// Arrange — enable GCM.
 		await loginAsAdmin(page);
 		await page.goto(`${WP_BASE}/wp-admin/admin.php?page=faz-cookie-manager-gcm`, { waitUntil: 'domcontentloaded' });
@@ -455,35 +489,38 @@ test.describe('User-reported regressions (v1.11.0 publisher report)', () => {
 			// that GCM's *first* `consent default` call must already carry
 			// granted states for returning visitors.
 			await visitorPage.goto(`${WP_BASE}/`, { waitUntil: 'domcontentloaded' });
-			// Give gcm.js a tick to run its init.
+			// Give gcm.js a tick to run its init. Resolve the configured dataLayer
+			// name (same as the evaluate below) so a custom dataLayerName doesn't
+			// make the sentinel watch a different array than the one gcm.js writes.
 			await visitorPage.waitForFunction(() => {
-				const dl = (window as unknown as { dataLayer?: unknown[] }).dataLayer ?? [];
+				const dlName = (window as unknown as { fazSettings?: { dataLayerName?: string } }).fazSettings?.dataLayerName || 'dataLayer';
+				const dl = (window as unknown as Record<string, unknown[]>)[dlName] ?? [];
 				return (dl as Array<Record<number, unknown>>).some((e) => e && typeof e === 'object' && e[0] === 'consent');
 			}, undefined, { timeout: 5_000 });
 
-			const firstConsentCall = await visitorPage.evaluate(() => {
+			const consentCalls = await visitorPage.evaluate(() => {
 				const dlName = (window as unknown as { fazSettings?: { dataLayerName?: string } }).fazSettings?.dataLayerName || 'dataLayer';
 				const dl = (window as unknown as Record<string, unknown[]>)[dlName] ?? [];
-				// Find the FIRST consent call (not the last one) — that's what
-				// AdSense reads when it fires its first ad request.
+				const calls: Array<{ mode: string; payload: Record<string, string> }> = [];
 				for (const entry of dl as Array<Record<number, unknown>>) {
 					if (!entry || typeof entry !== 'object') continue;
 					if (entry[0] !== 'consent') continue;
-					return {
-						mode: entry[1] as string,
-						payload: entry[2] as Record<string, string>,
-					};
+					calls.push({ mode: entry[1] as string, payload: (entry[2] as Record<string, string>) || {} });
 				}
-				return null;
+				return calls;
 			});
 
-			expect(firstConsentCall, 'At least one gtag consent call must fire').toBeTruthy();
-			expect(firstConsentCall!.mode, 'First consent call must be the default (not update) for returning visitors').toBe('default');
-			expect(
-				firstConsentCall!.payload?.ad_storage,
-				'First consent default MUST be granted for returning visitors (otherwise AdSense races to denied)',
-			).toBe('granted');
-			expect(firstConsentCall!.payload?.analytics_storage).toBe('granted');
+			expect(consentCalls.length, 'at least one gtag consent call must fire').toBeGreaterThan(0);
+			// Issue #149 (matches CookieYes upstream 3.4.0/3.5.1): stored consent is
+			// restored via `consent update`, NEVER a second `consent default` carrying
+			// granted values — Consent Mode tooling flags a granted default as a reset.
+			const grantedDefault = consentCalls.find((c) => c.mode === 'default' && c.payload?.ad_storage === 'granted');
+			expect(grantedDefault, 'must NOT emit a consent default with granted ad_storage (restore via update instead)').toBeUndefined();
+			const grantedUpdate = consentCalls.find((c) => c.mode === 'update' && c.payload?.ad_storage === 'granted');
+			expect(grantedUpdate, 'returning visitor stored consent must be restored via a granted consent UPDATE').toBeTruthy();
+			expect(grantedUpdate!.payload?.analytics_storage, 'analytics restored via update too').toBe('granted');
+			// The first consent call FAZ relies on is still a (denied) baseline default.
+			expect(consentCalls[0]?.mode, 'the first consent call is the baseline default').toBe('default');
 		} finally {
 			await updateGcmSettings(page, nonce, {
 				status: before.status ?? false,

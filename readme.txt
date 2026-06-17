@@ -4,7 +4,7 @@ Donate link: https://buymeacoffee.com/fabiodalez
 Tags: cookie, gdpr, ccpa, consent, privacy
 Requires at least: 5.0
 Tested up to: 7.0
-Stable tag: 1.19.0
+Stable tag: 1.19.2
 Requires PHP: 7.4
 License: GPL-3.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -325,6 +325,15 @@ https://github.com/fabiodalez-dev/FAZ-Cookie-Manager/blob/main/CHANGELOG.md
 and on the GitHub Releases page:
 https://github.com/fabiodalez-dev/FAZ-Cookie-Manager/releases
 
+= 1.19.2 =
+* Fix: the consent-log user-agent migration no longer errors on SQLite-backed WordPress (e.g. WordPress Playground). It previously used MySQL's SHA2()/REGEXP, which do not exist on SQLite, so the migration failed and emitted a database error on every request; it now runs in PHP with the identical hash.
+* Fix: the Google Consent Mode non-personalized-ads `npa` signal is now most-restrictive across regions. Because `npa` is a global signal that cannot be region-scoped, the pre-consent default emits a single value (non-personalized whenever any configured region denies ads) instead of letting the last-evaluated region win; the region-scoped Consent Mode v2 states are unaffected.
+
+= 1.19.1 =
+* Fix: legacy "Both" (GDPR + US) banners no longer silently lose their Do-Not-Sell opt-out. Very old banners stored it only in a legacy key that the settings sanitiser drops; the runtime now back-fills the opt-out from the raw stored settings so the US control still renders.
+* Fix: the Google Consent Mode non-personalized-ads fallback now signals `npa` on the FIRST visit too (legacy non-Consent-Mode ad tags previously only got it after a reject), and the signal is two-sided — it clears within the session once marketing is granted.
+* Hardening: the consent-log `status` column is constrained to the known set (unknown values fold to `partial`) so a crafted REST payload can't pollute the dashboard statistics; the client-side cookie cleanup gained a longer-tail pass to catch trackers that write a cookie well after page load; and an admin's explicit custom block rule is no longer silently exempted when it is a substring of an always-allowed payment-gateway pattern.
+
 = 1.19.0 =
 * Feature: per-service consent is reintroduced and now actually enforced. Granular per-service sub-toggles return under each category in the preference center (opt-in, sourced from the cookies actually detected on the site). A denied service is enforced server-side (pre-consent script block + cookie shredder) and client-side, an explicit allow overrides a denied category, and the choice persists across reloads and is written to the consent log. Enable it in Settings > Per-service consent. Extension filters: `faz_per_service_services`, `faz_store_data`.
 * Feature: Czech (cs_CZ) cookie-policy templates for the GDPR, CCPA and LGPD generators, with correct legal terminology and date grammar.
@@ -411,126 +420,5 @@ https://github.com/fabiodalez-dev/FAZ-Cookie-Manager/releases
 * Migration: `wp_faz_consent_logs` schema gains 7 NULL-default columns (`country_at_consent`, `region_at_consent`, `ruleset_id_at_consent`, `signal_gpc_received`, `signal_dnt_received`, `tc_string`, `gpp_string`). Online DDL on MySQL 5.7.6+ / MariaDB 10.3+.
 * External Services: new `ipinfo.io` entry documents the opt-in VPN detection lookup.
 
-= 1.14.3 =
-* Filter: new `faz_country_detection_consensus` filter, introduced with **2 arguments** (`$require_consensus`, `$votes`). When the filter resolves to `true` AND at least two detection sources disagree on the visitor country, `Geolocation::detect_country()` returns an empty string (fail-open — banner is shown to everyone). Off by default to preserve the CF-first priority order. Plugins that legitimately need the visitor IP for their own logic should hook `faz_visitor_country` instead, which exposes it for trusted overrides and test fixtures.
-* Fix (F101–F112, adamsreview review#2): transactional delete with InnoDB row-lock-promoted fallback default; multisite-aware uninstall sweep that honours per-site opt-in and the `FAZ_REMOVE_ALL_DATA` constant; banner_id pollution fixed by removing the post-save `$wpdb->insert_id` re-read; LSCache `Vary: CF-IPCountry` emitted only when the `faz_trust_cf_ipcountry_header` filter opts in; AMP geo-resolution no longer buckets GB into the `eu` regional set.
-* Fix (F301–F308 + CodeRabbit#1#2, adamsreview review#3): cache-poisoning race in `promote_fallback_default` closed by moving `delete_cache()` to callers (post-COMMIT); both fallback SELECTs now use `FOR UPDATE` and prefer non-default active peers; `faz_cookies` + `faz_cookie_categories` enforced to InnoDB on install AND migrated on upgrade so settings-import START TRANSACTION calls are no longer silent no-ops on legacy MyISAM hosts; uninstall network sweep now also fires under bare `FAZ_REMOVE_ALL_DATA` when `get_sites()` is empty; cache epoch generation switched to `sprintf('%.6F', microtime(true))` for true microsecond resolution; create_item slug-probe now attempts a focused UPDATE retry before falling back to the cache-invalidate tail.
-* Fix (R4-S001–S004, adamsreview review#4): `update_item()` now wraps its UPDATE + invariant section in a `START TRANSACTION` so the `FOR UPDATE` lock in `promote_fallback_default` actually serializes (was a no-op under autocommit, leaving the update path with the same race F302 closed for delete); create_item slug-probe runs the invariant tail unconditionally on slug mismatch so a successful focused-UPDATE retry no longer bypasses the at-most-one-default invariant; `clear_default_on_others()` no longer self-flushes the cache (caller's responsibility, mirrors F301); F303 ALTER ENGINE loop now records partial-migration failures in `faz_innodb_migration_pending` instead of silently bumping `db_version` past 1.14.3.
-* Fix: missing-banner notice in admin when `?banner_id=…` does not resolve (deleted row, stale bookmark, phantom redirect) — the editor body is hidden and a recovery CTA points at the install's default banner.
-* Fix: prefcenter renders every visible category even when its cookie list is empty (regression introduced by the audit-list refactor that early-returned on empty cookies).
-* Fix: empty-state preference-center category wrapper now matches the populated-state DOM shape (`<div class="faz-table-wrapper">`) so CSS targeting the table wrapper applies uniformly across empty and populated categories.
-
-= 1.14.0 =
-* Feature: Multi-banner geo-routing (refs #103). New schema columns `target_countries` and `priority` on `wp_faz_banners` let admins serve different banners per visitor country — e.g. a Reject-mandatory GDPR banner to EU/EEA/UK and a CCPA-style banner with the close (X) button to US visitors, picked automatically by `Controller::get_active_banner_for_country()` from the Cloudflare CF-IPCountry header (opt-in) or MaxMind/ip-api.com fallback.
-* Feature: Per-banner override of the EDPB/Garante close-button dark-pattern auto-hide (`settings.allowCloseButtonWithReject`). Default false preserves the compliance behaviour; opting in is documented as an EU/EEA/UK violation but unblocks non-EU jurisdictions where Accept + Reject + X is legal.
-* Feature: Cache busting for country-dependent output via `DONOTCACHEPAGE`/`DONOTCACHEOBJECT`/`DONOTCACHEDB` constants + `Cache-Control: no-store` + `Vary: CF-IPCountry` (with the trust filter on) so CDNs and full-page caches do not serve the wrong banner to the wrong country.
-* Feature: AMP `<amp-consent>` resolver is now country-aware via `Geolocation::get_visitor_country()` with the same geo guards as the classic JS flow.
-* Feature: Scope-change consent invalidation. Consent cookies now carry `__scope.banner` and `__scope.law` so a visitor that crosses a jurisdiction (CCPA → GDPR) re-prompts instead of inheriting consent from a different legal regime.
-* Fix: `banner_default` mutual-exclusion finally enforced server-side — saving a banner with the default flag clears it on every peer row (matches the admin help text). Without this, more than one banner could simultaneously hold the flag and the fallback picker was non-deterministic.
-* Fix: `Controller::get_active_banner()` preserves its pre-1.14.0 contract for third-party callers. An install with a single status=1, country-targeted, non-default banner now still receives that banner back when the call passes no country.
-* Fix: `has_country_dependent_banners()` and `Frontend::is_geo_blocked()` iterate the entire `ruleSet`, not just the first entry. A ruleSet like `[{code:ALL}, {code:US}]` is now consistently classified between the cache-vary headers and the runtime show/block decision.
-* Fix: `Frontend::send_geo_cache_headers()` gates on `faz_is_front_end_request()` so REST API / heartbeat / sitemap / robots requests no longer trigger the country-dependent DB chain on every poll.
-* Fix: `is_country_dependent_output()` also marks IAB-TCF output as country-dependent (TCF `gdprApplies` is derived from visitor country at render time and must not be served from a shared page cache).
-* Fix: `update_db_350` clears `faz_banners_table_version` before re-running `install_tables()`, so dbDelta actually adds the new `target_countries` + `priority` columns on upgrade.
-* Fix: Geolocation rejects the Cloudflare 'XX' (anonymous proxy / unknown) sentinel both on the CF-IPCountry branch and after the `faz_visitor_country` filter — a third-party filter implementer reintroducing 'XX' no longer leaks it into geo-routing.
-* Fix: `_fazConsentScopeChanged()` no longer invalidates valid pre-1.14.0 consent on the first page load after upgrade. Absent scope keys are treated as "upgrade case, no scope info known" and the existing consent stands.
-* Compatibility: New `Banner::set_target_countries()` / `set_priority()` / `get_target_countries()` / `get_priority()` accessors with normalisation (upper-case, dedup, `^[A-Z]{2}$` validation, non-negative integer clamping). REST schema exposes both fields on `/faz/v1/banners/{id}` with `[A-Z]{2}` pattern validation.
-
-= 1.13.18 =
-* Fix: `wp_localize_script` and `wp_set_script_translations` payloads (inline `<script id="*-js-extra">` and `<script id="*-js-translations">`) are no longer false-positively blocked when their body contains a substring that matches a provider pattern. These ID shapes carry only data/i18n strings, never executable tracker code — the prior content-substring matcher would crash third-party plugins whose config keys happened to mention a provider (e.g. trx_addons emits the key `animate_to_mc4wp_form_submitted`, which matched MailChimp's `mc4wp` and broke the page with `ReferenceError: TRX_ADDONS_STORAGE is not defined`). `-js-before` and `-js-after` payloads stay on the regular blocking path.
-
-= 1.13.17 =
-* Fix: `dataLayer is not defined` when third-party trackers emit a bare `dataLayer.push()` before GTM bootstraps. Pre-init via `wp_add_inline_script('before')`. Closes wp.org thread "bug-report-datalayer-is-not-defined".
-* Fix: cookie category counts stay stale after scan + auto-categorise — every cookie create/update/delete now invalidates Category controller cache, banner template, IAB unmatched-vendors transient, and 10 page-cache adapters. Closes wp.org thread "bug-report-cookie-categories-not-populated".
-* Fix: REST `bulk_update` was silently dropping `opt_in_script` / `opt_out_script`. Now iterates schema editable fields through the same `sanitize_script_field` capability gate as single-cookie updates.
-* Fix: `_cookieScripts` no longer truncates at 500 cookies (paged query, JSON-key-anchored LIKE, 10000-row ceiling).
-* Fix: `sanitize_meta_for_current_user` intercepts every write path into `wp_faz_cookies.meta`. Closes a stored-XSS surface for multisite Site Administrators without `unfiltered_html`.
-* Fix: own `wp_localize_script` payloads (`{handle}-js-extra`) can no longer be classified as analytics by the output-buffer blocker. Closes #99 and #101 (reported independently by @Myblueroom).
-* Fix: WP Rocket "Load JavaScript deferred" no longer wraps our `_fazConfig` bootstrap payload in a `DOMContentLoaded` callback (which would scope `var _fazConfig` to the callback and break `script.js` with `Cannot set properties of undefined`). New `rocket_defer_inline_exclusions` filter excludes `_fazConfig`, `_fazCfg`, `_fazGcm`, `_fazTcfConfig` from DeferJS wrapping. Closes #95 (thanks @dominikkucharski for the diagnosis and reference patch).
-* Fix: `<noscript>`-wrapped iframes injected by page builders (Bricks/Elementor/Divi) no longer become 0x0 phantom placeholders.
-* Fix: Escape key no longer dismisses the consent banner without a recorded decision (EDPB dark-pattern). Preference center close-on-Escape preserved.
-* Feature: `Necessary` selectable in Custom Blocking Rules dropdown. Closes wp.org thread "feature-request-add-necessary-category-to-script-blocker".
-* Feature: Banner-status toggle now also appears at the top of the Cookie Banner admin page (mirrors Settings -> Banner Control).
-* Compliance: CCPA 1798.135(c) - `[faz_do_not_sell]` renders a Withdraw opt-out button + `dns_rescinded` log entry.
-* A11y: DSAR validation announces errors via `role=alert`, `aria-invalid` per field, focus on first invalid. `.faz-dsar-btn` / `.faz-dnsmpi-btn` carry a contrasting focus indicator (WCAG 1.4.11). DNSMPI error notice switches to `role=alert` on failure.
-* Release: scripted 3-way ZIP builder (`scripts/build-release.sh`) for wp.org / GitHub / ClassicPress Directory. Refs #20.
-
-= 1.13.16 =
-* Fix: Plugins like Rank Math include tracker domain names inside inline JavaScript config. Tracker-domain patterns now match only against a script's `src` URL, not its inline content.
-* Fix: `faz-skip` CSS class was matched as a plain substring (`faz-skipper` also exempted). Fixed to exact whitespace-delimited token match.
-* Fix: Global variables in `uninstall.php` renamed to carry the `faz_` prefix.
-
-= 1.13.15 =
-* Fix: TinyMCE editors restored for Notice / Preference Description in banner admin.
-* Fix: REST DELETE category was a silent no-op when the row was not loaded first; REST PUT wiped unspecified fields when starting from a blank object.
-* Fix: Dynamic video placeholder (`_fazAddPlaceholder`) did not call `_fazSetPlaceHolder()` for non-YouTube providers.
-* Fix: `faz_get_cookie_domain()` returned malformed IP suffix for IP-addressed sites; now returns `''` (host-only cookie) per RFC 6265.
-
-= 1.13.14 =
-* Fix: Fatal error on WordPress Playground - `maybe_create_table()` was called synchronously from a controller constructor during plugin loading. Deferred to `plugins_loaded` and guarded `wp_salt()` with `function_exists()`.
-
-= 1.13.13 =
-* Fix: Fatal error on fresh install - `wp_salt()` called without `\` prefix inside a namespaced class resolved as a non-existent namespaced function.
-* Added: WordPress Playground Live Preview on the plugin directory page.
-
-== Upgrade Notice ==
-
-= 1.19.0 =
-Per-service consent returns, now properly enforced (server-side block + cookie shredder, persisted across reloads, written to the consent log). Adds Czech cookie-policy templates, an accessible Do-Not-Sell opt-out confirmation, Quebec/Law 25 and more US-state geo rulesets, and several compliance fixes. The default category-level consent flow is unchanged; per-cookie consent stays gated.
-
-= 1.18.2 =
-Recommended for anyone who enabled the 1.18.0 opt-in features. The per-service / per-cookie consent toggles and the runtime geo-routing filter are temporarily disabled pending a correctness rework — they did not deliver the granular guarantees their UI implied. Default category-level consent is unchanged.
-
-= 1.13.11 =
-wp.org round-2 compliance pass. Custom CSS field removed from the Banner editor (use Customizer → Additional CSS instead); $_SERVER sanitization, FS_CHMOD globals, WP-CLI export path, and ob_start callback all hardened.
-
-= 1.13.10 =
-Final wp.org submission build. Plugin Check `library_core_files` ERROR on the ClassicPress polyfill resolved (file moved to GitHub-full ZIP only). `.distignore` realigned to release flow.
-
-= 1.13.9 =
-Plugin Check ERROR resolved (ClassicPress wp.apiFetch polyfill ships as static JS file) plus automatic page-cache invalidation on upgrade for 11 cache plugins (LiteSpeed, WP Rocket, W3 Total Cache, etc.). Recommended for everyone.
-
-= 1.13.8 =
-Bricks Builder support — Video element placeholder collapse fixed, Bricks Container Video Lightbox click intercepted before YouTube/Vimeo opens without consent, banner suppressed in Bricks visual editor. Recommended for any site on Bricks.
-
-= 1.11.2 =
-Fixes invisible preference center on dark presets, TypeError crash on ChromeOS/PMP-exempt members, and High Contrast preset button colors. Recommended for all 1.11.x installations.
-
-= 1.11.3 =
-WP 5.7+ inline script filter, Plugin Check compliance for wp.org submission, and returning-visitor unblock retry. Recommended before wp.org submission.
-
-= 1.11.1 =
-Critical fix release — addresses two production-impacting bugs in 1.11.0 (banner reappearing on every page load, PMP `exempt_levels` setting not persisting) plus nine smaller fixes and a new Czech translation. Strongly recommended for all 1.11.0 installations.
-
-= 1.11.0 =
-Consent versioning, non-personalized ads fallback for Google Consent Mode, and an optional Paid Memberships Pro integration. Review Settings → Force re-consent and GCM → Advanced after upgrade; existing cookies remain valid until you click "Invalidate all consents".
-
-= 1.9.2 =
-Fixes the "English always comes back" language bug. Clear caches after upgrading.
-
-= 1.9.1 =
-Fixes default language fallback and theme color bleed on banner buttons. Clear caches after upgrading.
-
-= 1.9.0 =
-WCAG 2.2 accessibility, CSS custom properties for CSP compatibility, Dutch language, admin UI refresh with live preview, security hardening, and 155+ E2E tests. Clear caches after upgrading.
-
-= 1.5.0 =
-New link text colour picker for banner links. 21 new E2E tests. TinyMCE, accessibility, and output buffer fixes. Clear caches after upgrading.
-
-= 1.4.1 =
-Fixes ClassicPress polyfill loading. Clear caches after upgrading.
-
-= 1.4.0 =
-Major update: 5-layer script blocking with Known Providers database (147+ services), video/social embed placeholders, cookie shredding on revocation, ClassicPress compatibility. Clear caches after upgrading.
-
-= 1.2.1 =
-Fixes CSV export formatting, consent log accuracy (rejected now tracked), and CodeQL security alerts. Adds Composer/Packagist support. Clear caches after upgrading.
-
-= 1.2.0 =
-Security hardening (proxy trust filter, dual-throttle consent logging, TTL normalization). Improved necessary toggle UX. Clear caches after upgrading.
-
-= 1.1.0 =
-Major update: IAB TCF v2.3 with full Global Vendor List integration. New GVL admin page for vendor management. 175 automated compliance tests. Clear caches after upgrading.
-
-= 1.0.5 =
-Admin page URLs have changed. Update any bookmarks. Clear caches after upgrading.
+= Older versions =
+Older releases (1.14.x and earlier) are listed in the full changelog on GitHub, linked at the top of this section.
