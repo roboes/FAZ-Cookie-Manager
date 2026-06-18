@@ -484,6 +484,19 @@ if (!_fazConsentInvalidated && _fazStore._perServiceConsent && _fazStore._servic
             });
         }
     });
+    // Also restore svc.<id> tokens for providers NOT in the scanner-detected
+    // _services list. The server enforces the broad enforceable set (every
+    // Known_Provider in an active category), so on a block-first site a visitor
+    // can hold an explicit svc.<id> for a provider whose cookie was never
+    // detected. Without this the token is dropped from the in-memory store on
+    // reload and a dynamically-injected embed of that provider is re-blocked
+    // despite consent. The cookie only holds svc.* tokens the visitor actually
+    // chose, so this is bounded. #134/#146.
+    Object.keys(fazcookieConsentMap).forEach(function (k) {
+        if (k.indexOf('svc.') === 0 && !ref._fazConsentStore.has(k)) {
+            ref._fazConsentStore.set(k, fazcookieConsentMap[k]);
+        }
+    });
 }
 
 
@@ -1210,7 +1223,21 @@ async function _fazInit() {
         try {
             var _fazBannerEl = _fazGetBanner();
             if (_fazBannerEl && !_fazBannerEl.classList.contains('faz-hide')) {
-                if (await _fazMaybeSwapLanguage()) {
+                var _fazSwapped = await _fazMaybeSwapLanguage();
+                // Re-validate AFTER the await: the banner is fully interactive
+                // while the swap fetch is in flight, so the visitor may have
+                // clicked Accept/Reject during that window. _fazAcceptCookies()
+                // records the action and hides the banner; re-rendering now would
+                // re-show the dismissed banner and reset the in-memory consent
+                // store to defaults. Only re-localize when no choice was made and
+                // the banner is still on screen.
+                var _fazBannerNow = _fazGetBanner();
+                if (
+                    _fazSwapped &&
+                    !ref._fazGetFromStore('action') &&
+                    _fazBannerNow &&
+                    !_fazBannerNow.classList.contains('faz-hide')
+                ) {
                     _fazReRenderVisibleBanner();
                 }
             }
@@ -2499,10 +2526,25 @@ function _fazIsKnownService(serviceId, categorySlug) {
 
 function _fazGetServiceConsentSnapshot() {
     var snapshot = {};
-    if (!_fazStore._perServiceConsent || !Array.isArray(_fazStore._services)) return snapshot;
-    _fazStore._services.forEach(function(service) {
-        if (!service || !service.id || !service.category) return;
-        snapshot[service.id] = _fazServiceEffectiveConsent(service.id, service.category);
+    if (!_fazStore._perServiceConsent) return snapshot;
+    if (Array.isArray(_fazStore._services)) {
+        _fazStore._services.forEach(function(service) {
+            if (!service || !service.id || !service.category) return;
+            snapshot[service.id] = _fazServiceEffectiveConsent(service.id, service.category);
+        });
+    }
+    // Also snapshot any explicit svc.<id> token held for a provider NOT in the
+    // scanner-detected list (block-first enforceable providers). Without this a
+    // same-session accept-then-reject of such a provider is invisible to the
+    // revocation check, so no reload fires and its already-running embed keeps
+    // executing (faz-skip is never removed). #134/#146.
+    ref._fazConsentStore.forEach(function (val, key) {
+        if (typeof key === 'string' && key.indexOf('svc.') === 0) {
+            var sid = key.slice(4);
+            if (sid && !(sid in snapshot)) {
+                snapshot[sid] = (val === 'yes' ? 'yes' : 'no');
+            }
+        }
     });
     return snapshot;
 }
@@ -3735,13 +3777,21 @@ function _fazAfterConsent() {
     // created a cookie yet (cookie cleanup alone cannot detect that case).
     var serviceRevoked = false;
     if (_fazServicesBeforeConsent) {
-        var activeServices = _fazStore._services || [];
-        for (var sri = 0; sri < activeServices.length; sri++) {
-            var activeService = activeServices[sri];
-            if (
-                _fazServicesBeforeConsent[activeService.id] === "yes" &&
-                _fazServiceEffectiveConsent(activeService.id, activeService.category) === "no"
-            ) {
+        // Compare every service captured in the pre-consent snapshot — detected
+        // services AND any explicit svc.<id> for an enforceable-but-undetected
+        // provider — so a same-session accept-then-reject of any of them forces
+        // the reload that unloads its already-running embed. #134/#146.
+        var _fazDetectedById = {};
+        (_fazStore._services || []).forEach(function (s) { if (s && s.id) _fazDetectedById[s.id] = s; });
+        var _fazPrevIds = Object.keys(_fazServicesBeforeConsent);
+        for (var sri = 0; sri < _fazPrevIds.length; sri++) {
+            var _sid = _fazPrevIds[sri];
+            if (_fazServicesBeforeConsent[_sid] !== "yes") continue;
+            var _det = _fazDetectedById[_sid];
+            var _nowEffective = _det
+                ? _fazServiceEffectiveConsent(_sid, _det.category)
+                : (ref._fazGetFromStore("svc." + _sid) || "no");
+            if (_nowEffective === "no") {
                 serviceRevoked = true;
                 break;
             }

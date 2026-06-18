@@ -4924,7 +4924,12 @@ class Frontend {
 		$service_consent       = $this->get_service_consent();
 		$svc_cookie_decisions = array(); // pattern => array( 'yes'|'no' ).
 		if ( ! empty( $service_consent ) ) {
-			foreach ( $this->get_per_service_services() as $service ) {
+			// Use the broad enforceable set (same source as get_service_consent()
+			// and get_pattern_service_map()), not the narrow scanner-detected
+			// list. Otherwise a svc.<id>:no for an enforceable-but-undetected
+			// provider is honoured for script-blocking but its already-set cookie
+			// is never shredded — the three layers must agree. (#134/#146)
+			foreach ( $this->get_enforceable_services() as $service ) {
 				$svc_id = isset( $service['id'] ) ? sanitize_key( $service['id'] ) : '';
 				if ( '' === $svc_id || ! isset( $service_consent[ $svc_id ] ) || empty( $service['cookies'] ) ) {
 					continue;
