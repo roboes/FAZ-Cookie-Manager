@@ -1934,23 +1934,34 @@ function _fazRenderBanner() {
     }
     document.body.insertBefore(fragment, document.body.firstChild);
     if (_fazGetPtype() === 'pushdown' && _fazGetType() !== 'box') _fazToggleAriaExpandStatus("=settings-button", "false");
-    _fazSetPreferenceCheckBoxStates();
-    _fazRenderVendorSection();
-    _fazRenderServiceToggles();
-    _fazAttachCategoryListeners();
-    _fazRegisterListeners();
-    _fazSetCCPAOptions();
-    _fazSetPlaceHolder();
-    _fazAttachReadMore();
-    _fazAttachShowMoreLessStyles();
-    _fazAttachAlwaysActiveStyles();
-    _fazAttachManualLinksStyles();
-    _fazRemoveStyles();
-    _fazAddPositionClass();
-    _fazAddRtlClass();
-    _fazSetPoweredBy();
-    _fazLoopFocus();
-    _fazAddPreferenceCenterClass();
+    // Run each decoration helper in isolation: the banner template is already
+    // in the DOM at this point, so a single helper throwing (e.g. a fragile
+    // selector on a localized category name, or a render edge case) must NOT
+    // abort the remaining helpers. Before this guard, one early throw left the
+    // server-rendered "always active" strip on every category and skipped the
+    // listeners — the categories looked permanently locked. Each failure is
+    // logged but never cascades.
+    [
+        _fazSetPreferenceCheckBoxStates,
+        _fazRenderVendorSection,
+        _fazRenderServiceToggles,
+        _fazAttachCategoryListeners,
+        _fazRegisterListeners,
+        _fazSetCCPAOptions,
+        _fazSetPlaceHolder,
+        _fazAttachReadMore,
+        _fazAttachShowMoreLessStyles,
+        _fazAttachAlwaysActiveStyles,
+        _fazAttachManualLinksStyles,
+        _fazRemoveStyles,
+        _fazAddPositionClass,
+        _fazAddRtlClass,
+        _fazSetPoweredBy,
+        _fazLoopFocus,
+        _fazAddPreferenceCenterClass
+    ].forEach(function (fn) {
+        try { fn(); } catch (e) { console.error('[FAZ] banner render step failed:', e); }
+    });
 }
 
 /**
@@ -2941,13 +2952,20 @@ function _fazBuildRestoredScript(script, extraSkipAttributes) {
 function _fazBuildRestoredIframe(iframe, placeholder) {
     var clone = document.createElement('iframe');
     var iframeSrc = iframe.getAttribute('src') || iframe.src;
-    var skip = { 'src': 1, 'data-faz-category': 1, 'data-faz-service': 1, 'data-fazcookie': 1, 'data-faz-original-type': 1 };
+    // Keep data-faz-service on the restored clone so the live MutationObserver
+    // can resolve its explicit per-service consent (svc.<id>:yes) instead of
+    // falling back to the still-denied category and re-blocking it. #134/#146.
+    var skip = { 'src': 1, 'data-faz-category': 1, 'data-fazcookie': 1, 'data-faz-original-type': 1 };
 
     for (var i = 0; i < iframe.attributes.length; i++) {
         var attr = iframe.attributes[i];
         if (skip[attr.name]) continue;
         clone.setAttribute(attr.name, attr.value);
     }
+    // This iframe is being restored *because* consent now allows it — mark it
+    // faz-skip so the observer never re-wraps it in the banner video-placeholder
+    // ("Please accept cookies to access this content") within the same session.
+    clone.classList.add('faz-skip');
 
     if (iframeSrc) {
         clone.src = iframeSrc;
@@ -3051,12 +3069,22 @@ function _fazUnblockServerSide() {
             // blocked iframe/oEmbed HTML), not user-supplied input.
             var fragment = tpl.content.cloneNode(true);
             // Restore blocked iframes inside the template content.
+            var phService = placeholder.getAttribute("data-faz-service") || "";
             fragment.querySelectorAll('iframe[data-faz-src]').forEach(function (iframe) {
                 var fazSrc = iframe.getAttribute("data-faz-src");
                 if (!_fazIsAllowedScheme(fazSrc)) return;
                 iframe.src = fazSrc;
                 iframe.removeAttribute("data-faz-src");
                 iframe.classList.remove('faz-hidden');
+                // Carry the placeholder's verified provider id onto the restored
+                // iframe and mark it faz-skip, so the live MutationObserver (and
+                // the banner video-placeholder feature) leave this just-consented
+                // embed alone instead of re-blocking it under the still-denied
+                // category. #134/#146.
+                if (phService && !iframe.getAttribute("data-faz-service")) {
+                    iframe.setAttribute("data-faz-service", phService);
+                }
+                iframe.classList.add('faz-skip');
             });
             // Restore blocked scripts inside the template content.
             fragment.querySelectorAll('script[type="text/plain"][data-faz-category]').forEach(function (script) {
@@ -3083,6 +3111,9 @@ function _fazUnblockServerSide() {
             el.src = fazSrc;
             el.removeAttribute("data-faz-src");
             el.classList.remove('faz-hidden');
+            // Just-consented embed: mark faz-skip so the observer / video
+            // placeholder feature don't re-block it this session. #134/#146.
+            el.classList.add('faz-skip');
             // Remove legacy placeholder wrapper if present.
             var placeholder = el.closest('.faz-iframe-placeholder');
             if (placeholder) {
@@ -3317,7 +3348,13 @@ function _fazGetServiceConsentForTarget(formattedRE) {
 
 function _fazShouldBlockResource(category, target, serviceId) {
     if (_fazStore._perServiceConsent) {
-        if (serviceId && _fazIsKnownService(serviceId, category)) {
+        if (serviceId) {
+            // Honour an explicit per-service choice even when the service is not
+            // in the scanner-detected _services list — a blocked element carries
+            // a server-verified data-faz-service id, so its svc.<id>:yes|no must
+            // win over the category fallback on block-first sites where the
+            // provider's cookie was never observed. Mirrors the server-side
+            // get_enforceable_services() resolution. #134/#146.
             var explicit = ref._fazGetFromStore("svc." + serviceId);
             if (explicit === "no") return true;
             if (explicit === "yes") return false;
