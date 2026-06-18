@@ -3418,14 +3418,20 @@ function _fazMatchingProviders(formattedRE) {
 }
 
 function _fazGetServiceConsentForTarget(formattedRE) {
-    if (!_fazStore._perServiceConsent || !_fazStore._services) return "";
+    if (!_fazStore._perServiceConsent) return "";
     var providers = _fazMatchingProviders(formattedRE);
     if (!providers.length) return "";
 
     var psMap = _fazGetPatternServiceMap();
     var hasExplicitYes = false;
     for (var pi = 0; pi < providers.length; pi++) {
-        var serviceIds = psMap[providers[pi].re] || [];
+        // Prefer the service id carried on the matched _providersToBlock entry
+        // (present when per-service consent is on) so an embed of an
+        // enforceable-but-undetected provider — e.g. a clean server-allowed
+        // YouTube iframe after a reload, or a dynamically-injected one — resolves
+        // to its svc.<id> instead of being re-blocked under the denied category.
+        // Fall back to the scanner-detected pattern map otherwise. #134/#146.
+        var serviceIds = providers[pi].service ? [providers[pi].service] : (psMap[providers[pi].re] || []);
         for (var si = 0; si < serviceIds.length; si++) {
             var svcConsent = ref._fazGetFromStore("svc." + serviceIds[si]);
             if (svcConsent === "no") return "no";

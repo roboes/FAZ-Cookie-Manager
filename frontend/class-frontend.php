@@ -1471,7 +1471,8 @@ class Frontend {
 		// Merge DB-based providers with Known_Providers for client-side blocking.
 		$valid_categories = $this->get_valid_category_slugs();
 		$known            = Known_Providers::get_all();
-		foreach ( $known as $service ) {
+		$provider_services = array(); // pattern => service id (per-service embed resolution).
+		foreach ( $known as $known_id => $service ) {
 			if ( 'necessary' === $service['category'] ) {
 				continue;
 			}
@@ -1481,6 +1482,9 @@ class Frontend {
 			foreach ( $service['patterns'] as $pattern ) {
 				if ( ! isset( $this->providers[ $pattern ] ) ) {
 					$this->providers[ $pattern ] = array( $service['category'] );
+				}
+				if ( ! isset( $provider_services[ $pattern ] ) ) {
+					$provider_services[ $pattern ] = sanitize_key( $known_id );
 				}
 			}
 		}
@@ -1525,11 +1529,21 @@ class Frontend {
 			$this->providers = array();
 		}
 
+		$expose_provider_service = ! empty( $settings['banner_control']['per_service_consent'] );
 		foreach ( $this->providers as $key => $value ) {
-			$providers[] = array(
+			$entry = array(
 				're'         => $key,
 				'categories' => $value,
 			);
+			// Carry the provider's service id ONLY when per-service consent is on,
+			// so the client can resolve a matched embed (even a dynamically
+			// injected one, or a clean server-allowed iframe after a reload) to
+			// its svc.<id> decision instead of re-blocking it under the still-
+			// denied category. No extra payload on non-per-service sites. #134/#146.
+			if ( $expose_provider_service && ! empty( $provider_services[ $key ] ) ) {
+				$entry['service'] = $provider_services[ $key ];
+			}
+			$providers[] = $entry;
 		}
 		$store['_providersToBlock'] = $providers;
 
