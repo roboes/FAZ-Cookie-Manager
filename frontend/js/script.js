@@ -2523,6 +2523,24 @@ function _fazKnownServiceCategory(serviceId) {
     return "";
 }
 
+/**
+ * Category slug for an enforceable-but-undetected provider, resolved from the
+ * _providersToBlock entry whose .service matches (its first category). Returns
+ * "" when no entry matches or the entry carries no category — callers must then
+ * fall back to the privacy-safe "no" default. Companion to
+ * _fazKnownServiceCategory for providers absent from the scanner-detected list.
+ */
+function _fazUndetectedProviderCategory(serviceId) {
+    if (!serviceId || !Array.isArray(_fazStore._providersToBlock)) return "";
+    for (var i = 0; i < _fazStore._providersToBlock.length; i++) {
+        var p = _fazStore._providersToBlock[i];
+        if (p && p.service === serviceId && Array.isArray(p.categories) && p.categories.length) {
+            return p.categories[0];
+        }
+    }
+    return "";
+}
+
 function _fazIsKnownService(serviceId, categorySlug) {
     var serviceCategory = _fazKnownServiceCategory(serviceId);
     if (!serviceCategory) return false;
@@ -3556,7 +3574,13 @@ function _fazShouldChangeType(element, src) {
     if (!serviceCategory && serviceId) {
         serviceCategory = _fazKnownServiceCategory(serviceId);
     }
-    if (_fazStore._perServiceConsent && serviceId && _fazIsKnownService(serviceId, serviceCategory)) {
+    // Gate the explicit per-service override on _fazIsRecognizedService (the
+    // recognized-service allowlist), mirroring _fazShouldBlockResource — so an
+    // svc.<id>:yes|no for a server-recognized-but-undetected service is honoured
+    // first on the createElement path too, while a forged/unknown
+    // data-faz-service id is still rejected by the allowlist. serviceCategory is
+    // only consulted by the category fallback return below.
+    if (_fazStore._perServiceConsent && serviceId && _fazIsRecognizedService(serviceId)) {
         var explicit = ref._fazGetFromStore("svc." + serviceId);
         if (explicit === "no") return true;
         if (explicit === "yes") return false;
@@ -3828,9 +3852,23 @@ function _fazAfterConsent() {
             var _sid = _fazPrevIds[sri];
             if (_fazServicesBeforeConsent[_sid] !== "yes") continue;
             var _det = _fazDetectedById[_sid];
-            var _nowEffective = _det
-                ? _fazServiceEffectiveConsent(_sid, _det.category)
-                : (ref._fazGetFromStore("svc." + _sid) || "no");
+            var _nowEffective;
+            if (_det) {
+                _nowEffective = _fazServiceEffectiveConsent(_sid, _det.category);
+            } else {
+                // Undetected provider: resolve its category from _providersToBlock
+                // and reuse _fazServiceEffectiveConsent's two-step svc-then-category
+                // logic, so an Accept-All (which clears every svc.* token) inherits
+                // the now-granted category instead of collapsing to "no" and firing
+                // a spurious reload. A genuine Reject-All still yields "no" because
+                // the category is denied. Fall back to the privacy-safe "no" when
+                // no category is resolvable (forged/unknown id, or entry without a
+                // category). #134/#146.
+                var _undetCat = _fazUndetectedProviderCategory(_sid);
+                _nowEffective = _undetCat
+                    ? _fazServiceEffectiveConsent(_sid, _undetCat)
+                    : (ref._fazGetFromStore("svc." + _sid) || "no");
+            }
             if (_nowEffective === "no") {
                 serviceRevoked = true;
                 break;
@@ -5113,13 +5151,13 @@ window._fazAcceptService = function (serviceId, categorySlug, trustService) {
     // service OR a configured blockable provider (_providersToBlock carries the
     // id when per-service is on, so a real-but-undetected provider like YouTube
     // on a block-first site is accepted). A forged/unknown data-faz-accept-service
-    // must NOT mint an arbitrary svc.<id>:yes, so it falls back to category
-    // accept. (`trustService` is retained for call-site compatibility but the
+    // must NOT mint an arbitrary svc.<id>:yes — and it must NOT silently grant the
+    // whole category either (a visitor who clicked "Accept <service>" would get
+    // category-wide consent they never asked for). Do nothing but a diagnosable
+    // no-op. (`trustService` is retained for call-site compatibility but the
     // recognition allowlist is now authoritative.) #134/#146.
     if (!_fazIsRecognizedService(serviceId)) {
-        if (categorySlug && typeof window._fazAcceptCategory === "function") {
-            window._fazAcceptCategory(categorySlug);
-        }
+        console.warn('FAZ: ignoring accept for unrecognized service id "' + serviceId + '" — not granting category to avoid silent over-consent.');
         return;
     }
 
