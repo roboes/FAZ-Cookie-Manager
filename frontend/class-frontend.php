@@ -1483,9 +1483,27 @@ class Frontend {
 				if ( ! isset( $this->providers[ $pattern ] ) ) {
 					$this->providers[ $pattern ] = array( $service['category'] );
 				}
-				if ( ! isset( $provider_services[ $pattern ] ) ) {
-					$provider_services[ $pattern ] = sanitize_key( $known_id );
+			}
+		}
+
+		// Resolve pattern → service id from the SAME enforceable set the server
+		// uses for svc.* decisions, the pattern→service map and the cookie
+		// shredder (get_enforceable_services()), so the faz_enforceable_services
+		// filter can never make the client resolve an embed to a different
+		// service than the server enforces. The category-blocking map above
+		// stays on the raw Known_Providers set on purpose — per-category
+		// blocking must not depend on the per-service toggle/filter. #134/#146.
+		foreach ( $this->get_enforceable_services( $valid_categories ) as $service ) {
+			$service_id = isset( $service['id'] ) ? sanitize_key( $service['id'] ) : '';
+			if ( '' === $service_id || empty( $service['patterns'] ) ) {
+				continue;
+			}
+			foreach ( (array) $service['patterns'] as $pattern ) {
+				$pattern = sanitize_text_field( (string) $pattern );
+				if ( '' === $pattern || isset( $provider_services[ $pattern ] ) ) {
+					continue;
 				}
+				$provider_services[ $pattern ] = $service_id;
 			}
 		}
 

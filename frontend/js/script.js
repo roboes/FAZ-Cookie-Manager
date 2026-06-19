@@ -1213,6 +1213,11 @@ async function _fazInit() {
         // after a /faz/v1/banner/{lang} fetch settled — "appears late / not at
         // all".)
         _fazInitOperations();
+        // Second pass, intentionally not redundant with the pre-paint one at the
+        // top: _fazInitOperations() restores server-allowed services (svc.*:yes)
+        // and can unblock iframes that immediately set cookies, so re-run the
+        // (idempotent, removal-only) cleanup to shred anything written for a
+        // still-denied category/service before the scheduled sweep would.
         _fazRunDeadCookieCleanup();
         _fazWatchBannerElement();
         _fazScheduleDeadCookieCleanup();
