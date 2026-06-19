@@ -4480,8 +4480,19 @@ function _fazWatchBannerElement() {
 }
 
 function _fazRemoveAllDeadCookies() {
+    // When per-service (svc.*) or per-cookie (ck.*) consent is on, a cookie can
+    // be denied INSIDE a category the visitor otherwise accepted. The
+    // category-only gate below would skip those accepted categories and leave
+    // the individually-revoked cookie in place (it survived "save" client-side
+    // even though the server shredder removes it on the next request). Run the
+    // sweep over EVERY category in granular mode: _fazRemoveDeadCookies already
+    // keeps only cookies whose effective decision is "yes"
+    // (_fazGetServiceCookieDecision honours ck.* > svc.* > category), so an
+    // accepted category with no override is a no-op while an explicit
+    // svc.<id>:no / ck.<svc>.<cookie>:no inside it gets shredded. #135 / #134/#146.
+    var _fazGranularConsent = _fazStore._perCookieConsent || _fazStore._perServiceConsent;
     for (const category of _fazStore._categories) {
-        if (ref._fazGetFromStore(category.slug) !== "yes")
+        if (_fazGranularConsent || ref._fazGetFromStore(category.slug) !== "yes")
             _fazRemoveDeadCookies(category);
     }
 }
