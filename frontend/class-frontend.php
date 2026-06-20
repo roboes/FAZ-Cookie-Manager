@@ -1361,6 +1361,38 @@ class Frontend {
 	}
 
 	/**
+	 * Presentation catalogue of per-service providers, keyed by service id.
+	 *
+	 * Shipped to the client so it can REVEAL a per-service toggle for a provider
+	 * it actually blocks at runtime — a server-rendered placeholder
+	 * (data-faz-service) or a JS-injected embed the MutationObserver catches —
+	 * even when the scanner never saw the provider's cookie (block-first sites)
+	 * or never saw the embed at all (JS-injected). Built from the SAME enforceable
+	 * set used for blocking + shredding, so a revealed toggle is always a service
+	 * the server already enforces, and scoped to active categories so it never
+	 * dumps the whole ~160-entry catalogue. Presentation-only — enforcement reads
+	 * get_enforceable_services() directly. #134/#146.
+	 *
+	 * @param string[]|null $valid_categories Active category slugs.
+	 * @return array<string,array<string,mixed>> id => {id,label,category,cookies}.
+	 */
+	private function get_service_catalogue( $valid_categories = null ) {
+		$catalogue = array();
+		foreach ( $this->get_enforceable_services( $valid_categories ) as $svc ) {
+			if ( empty( $svc['id'] ) ) {
+				continue;
+			}
+			$catalogue[ $svc['id'] ] = array(
+				'id'       => $svc['id'],
+				'label'    => isset( $svc['label'] ) ? $svc['label'] : $svc['id'],
+				'category' => isset( $svc['category'] ) ? $svc['category'] : '',
+				'cookies'  => isset( $svc['cookies'] ) ? array_values( (array) $svc['cookies'] ) : array(),
+			);
+		}
+		return $catalogue;
+	}
+
+	/**
 	 * Get store data
 	 *
 	 * @return array
@@ -1687,6 +1719,21 @@ class Frontend {
 			$services                    = $this->get_per_service_services( $valid_categories );
 			$store['_perServiceConsent'] = true;
 			$store['_services']         = $services;
+			// Presentation catalogue for runtime-revealed toggles. The visible
+			// list above (`_services`) is scanner-detected only, so on a block-first
+			// site — where a provider's cookie is never set, and a JS-injected embed
+			// (e.g. a YouTube iframe_api player) never appears in the server HTML the
+			// scanner fetches — it stays empty and no toggle ever shows. This map
+			// lets the client REVEAL a per-service toggle for a provider it actually
+			// blocks at runtime (the MutationObserver resolves the embed to its
+			// svc.<id> via `_providersToBlock`), looking up the label/cookies here.
+			// Keyed by service id; scoped to the SAME enforceable set used for
+			// blocking + shredding, so a revealed toggle is always a service the
+			// server already enforces. Presentation-only: the consent cookie still
+			// gains svc.* tokens solely for services the visitor toggles, so this
+			// adds no P1-4 bloat, and only present (blocked) providers are revealed,
+			// so it never dumps the whole catalogue. #134/#146.
+			$store['_serviceCatalogue'] = $this->get_service_catalogue( $valid_categories );
 			// Per-cookie consent: nested per-cookie toggles inside each accepted
 			// service. Enabled only when its admin toggle is on (and per-service
 			// is on, which it is in this branch). Enforcement is by cookie
