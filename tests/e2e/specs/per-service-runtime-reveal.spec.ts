@@ -30,7 +30,10 @@ import { clickFirstVisible } from '../utils/ui';
 
 const WP_PATH = process.env.WP_PATH || '';
 const YT = 'https://www.youtube.com/embed/dQw4w9WgXcQ';
-const VIMEO_SRC = 'https://player.vimeo.com/video/76979871';
+// Inject/lazy target: Dailymotion is in the catalogue (marketing, iframe) but is
+// NOT loaded by any plugin on the dev stack, so it's a clean "absent" provider —
+// unlike Vimeo/YouTube, whose scripts the demo tracking plugins block globally.
+const DAILY_SRC = 'https://www.dailymotion.com/embed/video/x7tgad0';
 
 function wp(args: string[]): string {
   return execFileSync('wp', [`--path=${WP_PATH}`, ...args], { encoding: 'utf8' }).trim();
@@ -72,6 +75,8 @@ test.describe('Per-service runtime reveal on block-first sites (#134/#146)', () 
   let nonce = '';
   let staticUrl = '';
   let staticPostId = '';
+  let lazyUrl = '';
+  let lazyPostId = '';
 
   test.beforeAll(async ({ browser, loginAsAdmin }) => {
     const page = await browser.newPage();
@@ -95,10 +100,22 @@ test.describe('Per-service runtime reveal on block-first sites (#134/#146)', () 
       '--porcelain',
     ]).replace(/\D/g, '');
     staticUrl = wp(['post', 'get', staticPostId, '--field=url']);
+
+    // A page whose Vimeo embed is LAZY: the URL lives in data-src (never a live
+    // <iframe src>), so the server doesn't placeholder it and the MutationObserver
+    // never fires — only the DOM-scan pre-reveal can surface it.
+    lazyPostId = wp([
+      'post', 'create', '--post_type=page', '--post_status=publish',
+      '--post_title=FAZ E2E reveal lazy',
+      `--post_content=<iframe data-src="${DAILY_SRC}" width="640" height="360" loading="lazy"></iframe>`,
+      '--porcelain',
+    ]).replace(/\D/g, '');
+    lazyUrl = wp(['post', 'get', lazyPostId, '--field=url']);
   });
 
   test.afterAll(async ({ browser, loginAsAdmin }) => {
     if (staticPostId) wp(['post', 'delete', staticPostId, '--force']);
+    if (lazyPostId) wp(['post', 'delete', lazyPostId, '--force']);
     if (!original?.banner_control) return;
     const page = await browser.newPage();
     await loginAsAdmin(page);
@@ -147,14 +164,14 @@ test.describe('Per-service runtime reveal on block-first sites (#134/#146)', () 
     await page.goto(staticUrl, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => document.documentElement.classList.contains('faz-ready'), { timeout: 8000 });
 
-    // Vimeo is NOT embedded on this page → no toggle yet (no over-disclosure).
+    // Dailymotion is NOT embedded on this page → no toggle yet (no over-disclosure).
     await openPreferenceCenter(page);
     expect(
-      await page.evaluate(() => (window as unknown as { _fazConfig?: { _services?: Array<{ id?: string }> } })._fazConfig?._services?.some((s) => s && s.id === 'vimeo') ?? false),
+      await page.evaluate(() => (window as unknown as { _fazConfig?: { _services?: Array<{ id?: string }> } })._fazConfig?._services?.some((s) => s && s.id === 'dailymotion') ?? false),
     ).toBe(false);
-    expect(await page.locator('.faz-service-toggle[data-service="vimeo"]').count()).toBe(0);
+    expect(await page.locator('.faz-service-toggle[data-service="dailymotion"]').count()).toBe(0);
 
-    // Inject a Vimeo iframe AFTER load — the MutationObserver path that a
+    // Inject a Dailymotion iframe AFTER load — the MutationObserver path that a
     // server-side scanner can never see.
     await page.evaluate((src) => {
       const f = document.createElement('iframe');
@@ -162,7 +179,7 @@ test.describe('Per-service runtime reveal on block-first sites (#134/#146)', () 
       f.height = '360';
       f.src = src;
       document.body.appendChild(f);
-    }, VIMEO_SRC);
+    }, DAILY_SRC);
 
     // The block decision folds the service into the visible list…
     await expect
@@ -170,25 +187,25 @@ test.describe('Per-service runtime reveal on block-first sites (#134/#146)', () 
         () =>
           page.evaluate(() => {
             const s = (window as unknown as { _fazConfig?: { _services?: Array<{ id?: string }> } })._fazConfig?._services;
-            return Array.isArray(s) ? s.some((x) => x && x.id === 'vimeo') : false;
+            return Array.isArray(s) ? s.some((x) => x && x.id === 'dailymotion') : false;
           }),
         { timeout: 8000 },
       )
       .toBe(true);
 
     // …and injects its toggle live into the Marketing accordion.
-    const toggle = page.locator('.faz-service-toggle[data-service="vimeo"]');
+    const toggle = page.locator('.faz-service-toggle[data-service="dailymotion"]');
     await expect(toggle).toHaveCount(1);
     expect(await toggle.getAttribute('data-category')).toBe('marketing');
 
     // The blocked iframe is neutralised (enforcement still works).
-    expect(await page.locator('iframe[src*="player.vimeo.com"]').count()).toBe(0);
+    expect(await page.locator('iframe[src*="dailymotion.com"]').count()).toBe(0);
 
-    // Toggling it writes an explicit svc.vimeo decision (the enforcement seam).
+    // Toggling it writes an explicit svc.dailymotion decision (the enforcement seam).
     const decided = await page.evaluate(() => {
       const fz = (window as unknown as { fazcookie?: { _fazSetInStore?: (k: string, v: string) => void; _fazGetFromStore?: (k: string) => string } }).fazcookie;
-      if (fz && typeof fz._fazSetInStore === 'function') fz._fazSetInStore('svc.vimeo', 'no');
-      return fz && typeof fz._fazGetFromStore === 'function' ? fz._fazGetFromStore('svc.vimeo') : '';
+      if (fz && typeof fz._fazSetInStore === 'function') fz._fazSetInStore('svc.dailymotion', 'no');
+      return fz && typeof fz._fazGetFromStore === 'function' ? fz._fazGetFromStore('svc.dailymotion') : '';
     });
     expect(decided).toBe('no');
 
@@ -220,12 +237,12 @@ test.describe('Per-service runtime reveal on block-first sites (#134/#146)', () 
 
     await openPreferenceCenter(page);
 
-    // Dailymotion IS in the catalogue (marketing) but is embedded nowhere here.
+    // SoundCloud IS in the catalogue but is embedded/loaded nowhere here.
     const inCatalogue = await page.evaluate(
-      () => !!(window as unknown as { _fazConfig?: { _serviceCatalogue?: Record<string, unknown> } })._fazConfig?._serviceCatalogue?.dailymotion,
+      () => !!(window as unknown as { _fazConfig?: { _serviceCatalogue?: Record<string, unknown> } })._fazConfig?._serviceCatalogue?.soundcloud,
     );
-    expect(inCatalogue, 'dailymotion is a catalogue provider').toBe(true);
-    expect(await page.locator('.faz-service-toggle[data-service="dailymotion"]').count()).toBe(0);
+    expect(inCatalogue, 'soundcloud is a catalogue provider').toBe(true);
+    expect(await page.locator('.faz-service-toggle[data-service="soundcloud"]').count()).toBe(0);
 
     // We DO show toggles for providers actually present (proves the list isn't
     // simply empty) and the category-level fallback is intact.
@@ -233,6 +250,27 @@ test.describe('Per-service runtime reveal on block-first sites (#134/#146)', () 
     expect(
       await page.locator('input[id^="fazSwitch"], input[id^="fazCategoryDirect"]').count(),
     ).toBeGreaterThan(0);
+
+    await ctx.close();
+  });
+
+  test('lazy/below-fold embed (data-src) reveals its toggle without scrolling', async ({ browser }) => {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    await page.goto(lazyUrl, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => document.documentElement.classList.contains('faz-ready'), { timeout: 8000 });
+
+    // The embed is purely lazy: its URL is in data-src, it has no live src, and
+    // we never scroll — so neither the server nor the MutationObserver touched it.
+    expect(await page.locator('iframe[data-src*="dailymotion.com"]').count()).toBe(1);
+    expect(await page.locator('iframe[src*="dailymotion.com"]').count()).toBe(0);
+
+    // Opening the preference center runs the DOM-scan pre-reveal, which resolves
+    // the lazy URL to its provider and surfaces the toggle up-front.
+    await openPreferenceCenter(page);
+    const toggle = page.locator('.faz-service-toggle[data-service="dailymotion"]');
+    await expect(toggle).toHaveCount(1);
+    expect(await toggle.getAttribute('data-category')).toBe('marketing');
 
     await ctx.close();
   });

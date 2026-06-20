@@ -34,6 +34,40 @@ window.fazcookie = window.fazcookie || {};
 const ref = window.fazcookie;
 ref._fazConsentStore = new Map();
 
+// Build marker — bump when shipping behavioural changes to this file. Lets
+// `fazcookie._diag().build` reveal at a glance whether a cache (CDN / optimizer)
+// is serving a stale bundle after a plugin update. #auto-show-hardening
+const _FAZ_BUILD = '1.20.0+per-service-reveal';
+
+/**
+ * One-call frontend self-diagnosis for support: paste
+ * `copy(fazcookie._diag())` (or just `fazcookie._diag()`) from the console.
+ * Read-only — touches no consent state. Answers the two field questions:
+ * "why isn't the banner showing?" (ready/bannerHidden/action/hasConsentCookie/
+ * build) and "why don't my service toggles appear?" (perServiceConsent /
+ * services / catalogue counts). #auto-show-hardening
+ */
+ref._diag = function () {
+    var notice = null;
+    try { notice = _fazGetBanner(); } catch (e) { /* not ready */ }
+    var hasConsentCookie = false;
+    try { hasConsentCookie = /(?:^|;\s*)fazcookie-consent=/.test(document.cookie); } catch (e) { /* noop */ }
+    var store = (typeof _fazStore === 'object' && _fazStore) ? _fazStore : {};
+    return {
+        build: _FAZ_BUILD,
+        ready: document.documentElement.classList.contains('faz-ready'),
+        bannerFound: !!notice,
+        bannerHidden: notice ? notice.classList.contains('faz-hide') : null,
+        action: ref._fazGetFromStore('action') || '',
+        hasConsentCookie: hasConsentCookie,
+        swapResolved: !!store._swapResolved,
+        perServiceConsent: !!store._perServiceConsent,
+        perCookieConsent: !!store._perCookieConsent,
+        services: Array.isArray(store._services) ? store._services.map(function (s) { return s && s.id; }) : null,
+        catalogueCount: (store._serviceCatalogue && typeof store._serviceCatalogue === 'object') ? Object.keys(store._serviceCatalogue).length : 0
+    };
+};
+
 ref._fazGetCookieMap = function () {
     const cookieMap = {};
     try {
@@ -1221,6 +1255,7 @@ async function _fazInit() {
         _fazRunDeadCookieCleanup();
         _fazWatchBannerElement();
         _fazScheduleDeadCookieCleanup();
+        _fazScheduleBannerWatchdog();
         // Language swap is now a progressive enhancement applied AFTER paint, and
         // only when the first-visit banner is actually on screen. Returning / GPC
         // visitors have no visible banner to re-localize, so they skip the fetch
@@ -1261,6 +1296,38 @@ async function _fazInit() {
 function _fazRunDeadCookieCleanup() {
     _fazRemoveAllDeadCookies();
     _fazCleanupRevokedCookies();
+}
+
+/**
+ * Fail-open watchdog: a banner that never appears is a missing consent prompt
+ * (a GDPR violation), strictly worse than one shown a beat late. After init has
+ * had time to settle (incl. the language-swap await), force the anti-FOUC gate
+ * open and, if the visitor has made NO choice yet and the banner is still
+ * hidden, reveal it. Defends against a partial init, an exception in a
+ * downstream decorator, or a CSS optimizer (LiteSpeed/WP Rocket/Autoptimize)
+ * that hoisted/stripped the inline reveal rule. Never suppresses a banner that
+ * should stay hidden (it only ever reveals), and never re-shows one the visitor
+ * already dismissed (gated on the recorded `action`). The watchdog itself never
+ * throws. #auto-show-hardening
+ */
+function _fazScheduleBannerWatchdog() {
+    window.setTimeout(function () {
+        try {
+            // Always lift the anti-FOUC gate — purely reveals, never hides.
+            if (!document.documentElement.classList.contains('faz-ready')) {
+                document.documentElement.classList.add('faz-ready');
+            }
+            // No consent choice recorded → the first-visit banner must be visible.
+            if (!ref._fazGetFromStore('action')) {
+                var notice = _fazGetBanner();
+                if (notice && notice.classList.contains('faz-hide')) {
+                    _fazShowBanner();
+                }
+            }
+        } catch (e) {
+            /* a watchdog must never break the page */
+        }
+    }, 2500);
 }
 
 function _fazScheduleDeadCookieCleanup() {
@@ -5011,8 +5078,7 @@ function _fazSyncPresentServicesData() {
     if (!Array.isArray(_fazStore._services)) _fazStore._services = [];
 
     var seen = {};
-    document.querySelectorAll('[data-faz-service]').forEach(function(el) {
-        var id = el.getAttribute('data-faz-service');
+    function addService(id) {
         if (!id || seen[id]) return;
         seen[id] = true;
         if (_fazStore._services.some(function(s) { return s && s.id === id; })) return;
@@ -5024,6 +5090,29 @@ function _fazSyncPresentServicesData() {
             category: entry.category,
             cookies: Array.isArray(entry.cookies) ? entry.cookies.slice() : []
         });
+    }
+
+    // 1) Server-rendered placeholders + already-blocked nodes carry the resolved id.
+    document.querySelectorAll('[data-faz-service]').forEach(function(el) {
+        addService(el.getAttribute('data-faz-service'));
+    });
+
+    // 2) Lazy/deferred embeds: a lazy-loader keeps the real URL in a data-*
+    // attribute until the element scrolls into view, so it's not yet a live
+    // <iframe src> and the MutationObserver hasn't fired. Resolve those URLs to
+    // their provider now, so a below-the-fold YouTube/Vimeo is controllable from
+    // the preference center BEFORE the visitor scrolls. Matched against the same
+    // _providersToBlock set used for enforcement, so no false toggles. #134/#146.
+    var lazyAttrs = ['data-src', 'data-lazy-src', 'data-lazy', 'data-litespeed-src', 'data-ll-src', 'data-orig-src'];
+    document.querySelectorAll('iframe[data-src],iframe[data-lazy-src],iframe[data-lazy],iframe[data-litespeed-src],iframe[data-ll-src],iframe[data-orig-src]').forEach(function(el) {
+        for (var a = 0; a < lazyAttrs.length; a++) {
+            var url = el.getAttribute(lazyAttrs[a]);
+            if (!url) continue;
+            var matches = _fazMatchingProviders(url);
+            for (var i = 0; i < matches.length; i++) {
+                if (matches[i] && matches[i].service) addService(matches[i].service);
+            }
+        }
     });
 }
 
