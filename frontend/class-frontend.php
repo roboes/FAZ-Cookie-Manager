@@ -1270,6 +1270,7 @@ class Frontend {
 		}
 
 		$services       = array();
+		$seen           = array();
 		$detected_names = $this->get_detected_cookie_names();
 		foreach ( Known_Providers::get_all() as $id => $service ) {
 			if ( 'necessary' === $service['category'] || ! in_array( $service['category'], $valid_categories, true ) ) {
@@ -1281,13 +1282,64 @@ class Frontend {
 				continue;
 			}
 
-			$services[] = array(
-				'id'       => sanitize_key( $id ),
+			$service_id          = sanitize_key( $id );
+			$services[]          = array(
+				'id'       => $service_id,
 				'label'    => sanitize_text_field( $service['label'] ),
 				'category' => sanitize_key( $service['category'] ),
 				'patterns' => array_values( array_filter( array_map( 'sanitize_text_field', $service['patterns'] ) ) ),
 				'cookies'  => $service_cookies,
 			);
+			$seen[ $service_id ] = true;
+		}
+
+		// Also surface any enforceable service the visitor has ALREADY made an
+		// explicit per-service choice for (svc.<id>:yes|no in the consent cookie),
+		// even when the scanner never recorded one of its cookies. A block-first
+		// embed such as YouTube only sets its cookies once the real iframe loads,
+		// so detection never sees it; the toggle therefore only ever came from the
+		// page-level reveal of its blocked placeholder (the client-side reveal in
+		// script.js) — which disappears the moment the embed is accepted and the
+		// iframe runs unblocked. Without this branch the granted (or denied)
+		// service has no toggle in the preference center on a page without the
+		// placeholder, so the choice can never be reviewed or WITHDRAWN (GDPR
+		// Art. 7(3): withdrawal must be as easy as consent). Keying off the
+		// persisted svc.* decision makes the toggle stick site-wide, independent
+		// of any placeholder being present — confirmed against criptasemantica.it,
+		// where accepting YouTube emptied `_services` and the toggle vanished.
+		//
+		// Page-cache safety: get_service_consent() returns an empty map whenever
+		// there is no consent cookie (and when per-service consent is off), so for
+		// the cacheable first-visit/anonymous request this whole branch is a no-op
+		// and `_services` is byte-identical to the detection-only list. The
+		// augmentation only fires for a request that already carries a consent
+		// cookie — output that is visitor-dependent under the plugin's existing
+		// per-service/per-cookie server enforcement regardless of this method.
+		$decided = $this->get_service_consent(); // id => yes|no, already enforceable-gated.
+		if ( ! empty( $decided ) ) {
+			$enforceable_by_id = array();
+			foreach ( $this->get_enforceable_services( $valid_categories ) as $enforceable ) {
+				if ( ! empty( $enforceable['id'] ) ) {
+					$enforceable_by_id[ $enforceable['id'] ] = $enforceable;
+				}
+			}
+			foreach ( array_keys( $decided ) as $decided_id ) {
+				if ( isset( $seen[ $decided_id ] ) || ! isset( $enforceable_by_id[ $decided_id ] ) ) {
+					continue;
+				}
+				$service_entry = $enforceable_by_id[ $decided_id ];
+				// Only surface a decided service whose category is still active. The
+				// enforceable cache may have been computed earlier in the request for
+				// a broader category set (it ignores the $valid_categories argument
+				// once memoised), so re-check here rather than trust the lookup. A
+				// site that renamed/removed the provider's category, or disabled it,
+				// then never shows a stale toggle.
+				if ( empty( $service_entry['category'] ) || ! in_array( $service_entry['category'], $valid_categories, true ) ) {
+					continue;
+				}
+				$services[]          = $service_entry;
+				$seen[ $decided_id ] = true;
+			}
 		}
 
 		/**

@@ -341,4 +341,53 @@ test.describe('Per-service runtime reveal on block-first sites (#134/#146)', () 
 
     await ctx.close();
   });
+
+  test('a decided service stays visible for withdrawal on a page WITHOUT its embed', async ({ browser }) => {
+    // The criptasemantica regression: after accepting a block-first service the
+    // embed loads unblocked → no placeholder → the client-side reveal is gone →
+    // `_services` empties and the toggle vanishes, so the grant can't be
+    // withdrawn (GDPR Art.7(3)). The server-side svc.* augmentation keeps any
+    // EXPLICITLY-decided service in the visible list site-wide, independent of a
+    // placeholder. Dailymotion is not embedded on staticUrl (only YouTube is),
+    // so a toggle here can ONLY come from the persisted svc.dailymotion decision.
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    // First load to read the live policy revision — the server discards a
+    // consent cookie whose rev is stale, so it must carry the current one.
+    await page.goto(staticUrl, { waitUntil: 'domcontentloaded' });
+    const rev = await page.evaluate(
+      () => String((window as unknown as { _fazConsentLog?: { policyRevision?: string } })._fazConsentLog?.policyRevision ?? '1'),
+    );
+    await ctx.addCookies([
+      {
+        name: 'fazcookie-consent',
+        value: `action:yes,necessary:yes,marketing:yes,rev:${rev},svc.dailymotion:no`,
+        url: staticUrl,
+        sameSite: 'Lax',
+      },
+    ]);
+    await page.goto(staticUrl, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => document.documentElement.classList.contains('faz-ready'), { timeout: 8000 });
+
+    // Server-side: the decided service is in the store even with no embed here.
+    const dbg = await page.evaluate(() => ({
+      cookie: document.cookie,
+      ids: ((window as unknown as { _fazConfig?: { _services?: Array<{ id?: string }> } })._fazConfig?._services ?? []).map((s) => s && s.id),
+    }));
+    expect(dbg.ids, `rev=${rev} state=${JSON.stringify(dbg)}`).toContain('dailymotion');
+
+    // The visitor has already consented (action:yes → banner hidden), so the
+    // preference center is reopened via the revisit entry point, not the
+    // first-layer settings button. The decided service's toggle must be there so
+    // the choice can be reviewed and WITHDRAWN (re-enabled).
+    await page.evaluate(() => {
+      const w = window as unknown as { revisitFazConsent?: () => void };
+      if (typeof w.revisitFazConsent === 'function') w.revisitFazConsent();
+    });
+    const toggle = page.locator('.faz-service-toggle[data-service="dailymotion"]');
+    await expect(toggle).toHaveCount(1);
+    expect(await toggle.isChecked()).toBe(false); // svc.dailymotion:no → unchecked, but PRESENT
+
+    await ctx.close();
+  });
 });
