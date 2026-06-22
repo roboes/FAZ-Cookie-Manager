@@ -2,6 +2,7 @@ import { test, expect } from '../fixtures/wp-fixture';
 import type { Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { clickFirstVisible } from '../utils/ui';
+import { WP_PATH } from '../utils/wp-env';
 
 /**
  * Per-service toggle reveal on block-first sites (#134/#146).
@@ -28,7 +29,6 @@ import { clickFirstVisible } from '../utils/ui';
  *    over-disclose a catalogue provider that isn't present.
  */
 
-const WP_PATH = process.env.WP_PATH || '';
 const YT = 'https://www.youtube.com/embed/dQw4w9WgXcQ';
 // Inject/lazy target: Dailymotion is in the catalogue (marketing, iframe) but is
 // NOT loaded by any plugin on the dev stack, so it's a clean "absent" provider —
@@ -37,6 +37,18 @@ const DAILY_SRC = 'https://www.dailymotion.com/embed/video/x7tgad0';
 
 function wp(args: string[]): string {
   return execFileSync('wp', [`--path=${WP_PATH}`, ...args], { encoding: 'utf8' }).trim();
+}
+
+// `wp post create --porcelain` is meant to print only the new ID, but a stray
+// PHP notice/warning on the WP install would prepend digits. Stripping non-digits
+// (.replace(/\D/g,'')) would silently splice those into a bogus ID; assert the
+// output is a pure integer instead, so a noisy environment fails loudly.
+function wpCreatePostId(args: string[]): string {
+  const rawId = wp(args);
+  if (!/^\d+$/.test(rawId)) {
+    throw new Error(`Expected a numeric post ID from "wp post create", got: ${JSON.stringify(rawId)}`);
+  }
+  return rawId;
 }
 
 type FazSettings = Record<string, unknown>;
@@ -95,34 +107,34 @@ test.describe('Per-service runtime reveal on block-first sites (#134/#146)', () 
 
     // A page whose server HTML carries a static YouTube iframe — the plugin
     // blocks it server-side into a placeholder carrying data-faz-service.
-    staticPostId = wp([
+    staticPostId = wpCreatePostId([
       'post', 'create', '--post_type=page', '--post_status=publish',
       '--post_title=FAZ E2E reveal static',
       `--post_content=<iframe width="560" height="315" src="${YT}" title="YouTube"></iframe>`,
       '--porcelain',
-    ]).replace(/\D/g, '');
+    ]);
     staticUrl = wp(['post', 'get', staticPostId, '--field=url']);
 
     // A page whose Vimeo embed is LAZY: the URL lives in data-src (never a live
     // <iframe src>), so the server doesn't placeholder it and the MutationObserver
     // never fires — only the DOM-scan pre-reveal can surface it.
-    lazyPostId = wp([
+    lazyPostId = wpCreatePostId([
       'post', 'create', '--post_type=page', '--post_status=publish',
       '--post_title=FAZ E2E reveal lazy',
       `--post_content=<iframe data-src="${DAILY_SRC}" width="640" height="360" loading="lazy"></iframe>`,
       '--porcelain',
-    ]).replace(/\D/g, '');
+    ]);
     lazyUrl = wp(['post', 'get', lazyPostId, '--field=url']);
 
     // A page-builder LIGHTBOX link: the URL is a WATCH-style href (not an embed
     // iframe), opened in a modal on click. The provider must still reveal its
     // toggle. Divi's .et_pb_lightbox_video reads the href as the video URL.
-    lightboxPostId = wp([
+    lightboxPostId = wpCreatePostId([
       'post', 'create', '--post_type=page', '--post_status=publish',
       '--post_title=FAZ E2E reveal lightbox',
       '--post_content=<a class="et_pb_lightbox_video" href="https://www.dailymotion.com/video/x7tgad0">Play video</a>',
       '--porcelain',
-    ]).replace(/\D/g, '');
+    ]);
     lightboxUrl = wp(['post', 'get', lightboxPostId, '--field=url']);
   });
 
@@ -236,7 +248,13 @@ test.describe('Per-service runtime reveal on block-first sites (#134/#146)', () 
     // The blocked iframe is neutralised (enforcement still works).
     expect(await page.locator('iframe[src*="dailymotion.com"]').count()).toBe(0);
 
-    // Toggling it writes an explicit svc.dailymotion decision (the enforcement seam).
+    // Deliberately WHITE-BOX: we drive _fazSetInStore/_fazGetFromStore directly
+    // rather than through the toggle UI. The runtime-revealed Dailymotion toggle
+    // lives inside the (closed) preference center on this page, and the store is
+    // the actual enforcement seam — the single source of truth the shredder and
+    // GCM/TCF layers read. Asserting against it proves the mechanism that matters
+    // here; the UI-driven path is already covered by the lazy/lightbox tests
+    // above. Coupled to these internals on purpose; update if the seam is renamed.
     const decided = await page.evaluate(() => {
       const fz = (window as unknown as { fazcookie?: { _fazSetInStore?: (k: string, v: string) => void; _fazGetFromStore?: (k: string) => string } }).fazcookie;
       if (fz && typeof fz._fazSetInStore === 'function') fz._fazSetInStore('svc.dailymotion', 'no');

@@ -1238,6 +1238,12 @@ async function _fazMaybeSwapLanguage() {
  */
 async function _fazInit() {
     try {
+        // Arm the fail-open watchdog FIRST: if any init step below throws, the
+        // catch aborts the rest of init, so a watchdog scheduled at the end would
+        // never run and a banner that failed to paint would stay hidden (a
+        // missing consent prompt). Scheduling it up-front guarantees the
+        // timer exists even for a partially-failed init. #134/#146.
+        _fazScheduleBannerWatchdog();
         _fazRunDeadCookieCleanup();
         // Render and show the banner FIRST, from the server-rendered default-
         // language template — first paint must never wait on a network round-
@@ -1255,7 +1261,6 @@ async function _fazInit() {
         _fazRunDeadCookieCleanup();
         _fazWatchBannerElement();
         _fazScheduleDeadCookieCleanup();
-        _fazScheduleBannerWatchdog();
         // Language swap is now a progressive enhancement applied AFTER paint, and
         // only when the first-visit banner is actually on screen. Returning / GPC
         // visitors have no visible banner to re-localize, so they skip the fetch
@@ -4835,6 +4840,16 @@ function _fazRenderServiceToggles() {
     // folds both into `_services` so a toggle appears for every provider the
     // page actually blocks — without dumping the whole catalogue. #134/#146.
     _fazSyncPresentServicesData();
+    // Register the category->service sync listeners BEFORE the no-services
+    // early return below. On a block-first site the first render has zero
+    // services, but _fazInjectServiceToggle() can add one later (a runtime-
+    // blocked embed). If the listeners were gated on this render having
+    // services, a category rejection would never deselect that late-injected
+    // svc.<id> toggle, letting service consent override the category revocation
+    // (#134/#146). _fazBindServiceCategorySync is idempotent.
+    if (Array.isArray(_fazStore._categories)) {
+        _fazStore._categories.forEach(_fazBindServiceCategorySync);
+    }
     if (!Array.isArray(_fazStore._services) || !_fazStore._services.length) return;
 
     if (_fazStore._perCookieConsent) _fazInjectCookieToggleStyles();
@@ -4873,27 +4888,38 @@ function _fazRenderServiceToggles() {
 
         accordionBody.appendChild(serviceList);
     });
+}
 
-    // Sync: when a category toggle changes, update all its service toggles.
-    _fazStore._categories.forEach(function(category) {
-        if (category.isNecessary || category.slug === 'necessary') return;
+/**
+ * Register the "when a category toggle changes, mirror it onto all that
+ * category's service (and per-cookie) toggles" listener. Extracted from
+ * _fazRenderServiceToggles so it can also run for categories that had no
+ * services at first render but receive one later via _fazInjectServiceToggle
+ * (runtime-blocked embeds on block-first sites). Idempotent: the
+ * data-faz-service-sync-bound marker prevents binding the same toggle twice
+ * when called from both the full render and an incremental injection. #134/#146.
+ *
+ * @param {Object} category {slug,isNecessary}.
+ */
+function _fazBindServiceCategorySync(category) {
+    if (!category || category.isNecessary || category.slug === 'necessary') return;
 
-        ['fazSwitch', 'fazCategoryDirect'].forEach(function(prefix) {
-            var catToggle = document.getElementById(prefix + category.slug);
-            if (!catToggle) return;
-            catToggle.addEventListener('change', function() {
-                var isChecked = catToggle.checked;
-                document.querySelectorAll('.faz-service-toggle[data-category="' + category.slug + '"]')
-                    .forEach(function(svcToggle) {
-                        svcToggle.checked = isChecked;
+    ['fazSwitch', 'fazCategoryDirect'].forEach(function(prefix) {
+        var catToggle = document.getElementById(prefix + category.slug);
+        if (!catToggle || catToggle.getAttribute('data-faz-service-sync-bound') === '1') return;
+        catToggle.setAttribute('data-faz-service-sync-bound', '1');
+        catToggle.addEventListener('change', function() {
+            var isChecked = catToggle.checked;
+            document.querySelectorAll('.faz-service-toggle[data-category="' + category.slug + '"]')
+                .forEach(function(svcToggle) {
+                    svcToggle.checked = isChecked;
+                });
+            if (_fazStore._perCookieConsent) {
+                document.querySelectorAll('.faz-cookie-toggle[data-category="' + category.slug + '"]')
+                    .forEach(function(ckToggle) {
+                        ckToggle.checked = isChecked;
                     });
-                if (_fazStore._perCookieConsent) {
-                    document.querySelectorAll('.faz-cookie-toggle[data-category="' + category.slug + '"]')
-                        .forEach(function(ckToggle) {
-                            ckToggle.checked = isChecked;
-                        });
-                }
-            });
+            }
         });
     });
 }
@@ -5104,6 +5130,12 @@ function _fazInjectServiceToggle(service) {
         accordionBody.appendChild(serviceList);
     }
     _fazBuildServiceRow(service, serviceList);
+
+    // Bind the category->service sync for this category in case the full render
+    // bailed early (no services at first paint) and never registered it — else
+    // rejecting the category would not deselect this just-injected toggle.
+    // Idempotent via data-faz-service-sync-bound. #134/#146.
+    _fazBindServiceCategorySync({ slug: service.category });
 
     // Re-arm the focus trap. _fazLoopFocus() captured the panel's first/last
     // focusable elements at open time; appending a toggle to an already-open

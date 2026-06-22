@@ -98,7 +98,10 @@ test.describe('Per-service consent (1.18.3)', () => {
     // the providers actually blocked on the page (server placeholders +
     // JS-injected embeds the MutationObserver catches — #134/#146). Either way it
     // must never become the whole catalogue.
-    await page.waitForFunction(() => document.documentElement.classList.contains('faz-ready'), { timeout: 8000 }).catch(() => undefined);
+    // No .catch(): the fail-open watchdog forces faz-ready within 2500ms, so an
+    // 8s timeout here means the frontend genuinely failed to initialise — that
+    // must fail the test, not be silently swallowed.
+    await page.waitForFunction(() => document.documentElement.classList.contains('faz-ready'), { timeout: 8000 });
 
     const services = await page.evaluate(
       () => (window as unknown as { _fazConfig?: { _services?: Array<Record<string, unknown>> } })._fazConfig?._services ?? [],

@@ -693,11 +693,16 @@
 		// global), those handlers never bind and the page looks dead. The form's
 		// onsubmit="return false" already prevents a blank-page native submit, so
 		// surface a recoverable message instead of failing silently.
+		// Read the localized string off the raw i18n object rather than via t():
+		// the nested catch exists precisely because setStatus()/t() may throw, so
+		// the extreme fallback must not call them again. FAZ_I18N.initFailed is a
+		// plain property access with an English fallback baked in.
+		var initFailedMsg = FAZ_I18N.initFailed || 'The generator could not start on this page. Please reload; if it persists, a plugin or theme conflict is likely.';
 		try {
-			setStatus(t( 'initFailed', 'The generator could not start on this page. Please reload; if it persists, a plugin or theme conflict is likely.' ), 'error');
+			setStatus( initFailedMsg, 'error' );
 		} catch (_ignored) {
 			var statusEl = document.getElementById('cp-save-status');
-			if (statusEl) { statusEl.textContent = 'The generator could not start. Please reload the page.'; }
+			if (statusEl) { statusEl.textContent = initFailedMsg; }
 		}
 		if (window.console && console.error) { console.error('[faz-cookie-policy] init failed:', initErr); }
 	  }

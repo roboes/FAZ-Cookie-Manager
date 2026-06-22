@@ -28,6 +28,11 @@ test.describe('Banner auto-show hardening', () => {
     // .faz-ready after init, so only the watchdog can restore it.
     await page.evaluate(() => {
       document.documentElement.classList.remove('faz-ready');
+      // Also hide the banner: this is what makes the test prove the watchdog
+      // SHOWS the banner, not merely that it restores the .faz-ready gate. The
+      // watchdog only calls _fazShowBanner() (which removes faz-hide) when the
+      // container currently has it, so re-adding faz-hide here exercises that path.
+      document.querySelector('.faz-consent-container')?.classList.add('faz-hide');
       try {
         const fz = (window as unknown as { fazcookie?: { _fazConsentStore?: Map<string, string> } }).fazcookie;
         fz?._fazConsentStore?.delete('action');
@@ -39,6 +44,16 @@ test.describe('Banner auto-show hardening', () => {
     // The watchdog fires ~2.5s after init and must put the gate back.
     await expect
       .poll(() => page.evaluate(() => document.documentElement.classList.contains('faz-ready')), {
+        timeout: 7000,
+      })
+      .toBe(true);
+
+    // And it must actually reveal the banner (faz-hide removed), not just the gate.
+    await expect
+      .poll(() => page.evaluate(() => {
+        const banner = document.querySelector('.faz-consent-container');
+        return !!banner && !banner.classList.contains('faz-hide');
+      }), {
         timeout: 7000,
       })
       .toBe(true);
