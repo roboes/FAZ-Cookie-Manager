@@ -254,10 +254,17 @@ FULL_ZIP="${OUTPUT_DIR}/${PLUGIN_SLUG}-${VERSION}-full.zip"
 CP_ZIP="${OUTPUT_DIR}/${PLUGIN_SLUG}-v${VERSION}.zip"
 
 cyan "Building wp.org ZIP"
-zip_from_project_root "${WPORG_ZIP}" "${WPORG_ONLY_EXCLUDES[@]}"
+# Stage via rsync (copy_plugin) then zip the filtered tree. rsync anchors the
+# root-level catch-all excludes (e.g. /*.png) so legitimate sub-directory images
+# like frontend/images/cookie.png survive. Zipping the source directly with
+# `zip -x "faz-cookie-manager/*.png"` does NOT work: Info-ZIP's `*` crosses `/`,
+# so it silently strips frontend/images/cookie.png (the default banner logo).
+copy_plugin "${WPORG_STAGE}" "${WPORG_ONLY_EXCLUDES[@]}"
+zip_stage "${WPORG_STAGE}" "${WPORG_ZIP}"
 
 cyan "Building GitHub full ZIP"
-zip_from_project_root "${FULL_ZIP}"
+copy_plugin "${FULL_STAGE}"
+zip_stage "${FULL_STAGE}" "${FULL_ZIP}"
 
 cyan "Building ClassicPress ZIP"
 copy_plugin "${CP_STAGE}"
@@ -268,6 +275,12 @@ zip_stage "${CP_STAGE}" "${CP_ZIP}"
 cyan "Sanity checks"
 assert_not_contains "${WPORG_ZIP}" 'run-scan\.php'
 assert_not_contains "${WPORG_ZIP}" 'cp-api-fetch-polyfill\.js'
+# The default banner logo is a referenced raster asset (admin/class-admin.php
+# defaultLogo). It must ship in every variant — a build that drops it leaves
+# users with a broken default logo. Guards the zip-glob-crosses-slash bug.
+assert_contains "${WPORG_ZIP}" 'frontend/images/cookie\.png'
+assert_contains "${FULL_ZIP}" 'frontend/images/cookie\.png'
+assert_contains "${CP_ZIP}" 'frontend/images/cookie\.png'
 assert_contains "${FULL_ZIP}" 'run-scan\.php'
 assert_contains "${FULL_ZIP}" 'cp-api-fetch-polyfill\.js'
 assert_contains "${CP_ZIP}" 'run-scan\.php'
