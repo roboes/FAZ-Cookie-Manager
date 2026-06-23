@@ -4,7 +4,7 @@ Donate link: https://buymeacoffee.com/fabiodalez
 Tags: cookie, gdpr, ccpa, consent, privacy
 Requires at least: 5.0
 Tested up to: 7.0
-Stable tag: 1.20.0
+Stable tag: 1.21.0
 Requires PHP: 7.4
 License: GPL-3.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
@@ -324,6 +324,10 @@ The full changelog (every release back to 1.0.0) lives at:
 https://github.com/fabiodalez-dev/FAZ-Cookie-Manager/blob/main/CHANGELOG.md
 and on the GitHub Releases page:
 https://github.com/fabiodalez-dev/FAZ-Cookie-Manager/releases
+
+= 1.21.0 =
+* Feature: Cache Compatibility Mode (#158). A new Banner Control toggle keeps the page fully cacheable by LiteSpeed, QUIC.cloud, Varnish, Nginx FastCGI and WP Rocket. When enabled, the plugin stops emitting the no-cache/no-store/X-LiteSpeed-Cache-Control headers and the DONOTCACHEPAGE constant for anonymous visitors and renders a single visitor-invariant page — the default banner, with every non-necessary script blocked server-side and no per-country or per-consent variance — so the static HTML can be cached and the banner runs entirely client-side from the consent cookie. Off by default; keep it off when the banner output varies by country (IAB TCF, geo-targeting, country-targeted banners or runtime geo-routing), where a cached page would otherwise reach the wrong jurisdiction. Applied across the initial render, the AMP consent path and the REST banner endpoint.
+* Fix: the bundled "Always Active", "Show more" and "Show less" default labels are now translatable while preserving any admin-customised text.
 
 = 1.20.0 =
 * Feature: per-cookie consent (#135). With per-service consent enabled, a new "Enable per-cookie consent" setting adds a nested row for each cookie a service declares. Cookies the site can write on its own domain are enforced on both sides — the client-side cleanup and the server-side shredder both read the same ck.<service>.<cookie> tokens (per-cookie > per-service > category), so a denied first-party cookie is removed on every request. Cookies set by embedded third-party services on their own domains (for example YouTube, Vimeo, Maps and social embeds) cannot be deleted individually by a first-party banner; those rows are shown disabled with an explanation, and the enforceable control is allowing or blocking the whole embed. Payment-gateway and admin-whitelisted cookies stay exempt. Opt-in, off by default.

@@ -2,6 +2,14 @@
 
 All notable changes to FAZ Cookie Manager are documented in this file.
 
+## [1.21.0] — 2026-06-24
+
+### Added
+- **Cache Compatibility Mode (#158)** — a Settings → Banner Control toggle that keeps the page fully cacheable by LiteSpeed, QUIC.cloud, Varnish, Nginx FastCGI and WP Rocket. When enabled, the plugin stops emitting the `no-cache`/`no-store`/`X-LiteSpeed-Cache-Control: no-cache` headers and the `DONOTCACHEPAGE` constant for anonymous visitors, and renders a single visitor-invariant HTML — the default banner, with every non-necessary script blocked server-side and no per-country or per-consent variance — so the static HTML can be cached and the banner runs entirely client-side from the consent cookie. Off by default; documented to stay off when the banner output varies by country (IAB TCF, geo-targeting, country-targeted banners, runtime geo-routing), where a cached page would otherwise reach the wrong jurisdiction. The country-dependence short-circuit is still routed through the `faz_country_dependent_banner_output` filter for per-request control, and the invariance is applied consistently across the initial render, the AMP consent path and the REST banner endpoint.
+
+### Fixed
+- The bundled English default labels "Always Active", "Show more" and "Show less" are now translatable while any admin-customised text is preserved.
+
 ## [1.20.0] — 2026-06-17
 
 ### Added
