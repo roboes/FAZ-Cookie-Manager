@@ -1,5 +1,6 @@
 import { test, expect } from '../fixtures/wp-fixture';
 import type { Page } from '@playwright/test';
+import { upsertPage } from '../utils/wp-env';
 
 /**
  * Cache Compatibility Mode (issue #158) — end-to-end header behaviour.
@@ -18,6 +19,7 @@ import type { Page } from '@playwright/test';
  */
 
 const BASE = process.env.WP_BASE_URL ?? 'http://127.0.0.1:9998';
+const CACHE_FIXTURE_SLUG = 'faz-cache-compat-provider';
 
 type FazSettings = Record<string, unknown>;
 
@@ -48,6 +50,31 @@ async function anonHeaders(browser: import('@playwright/test').Browser): Promise
   }
 }
 
+async function anonHtml(
+  browser: import('@playwright/test').Browser,
+  path: string,
+  consentCookie?: string
+): Promise<string> {
+  const ctx = await browser.newContext();
+  try {
+    if (consentCookie) {
+      await ctx.addCookies([
+        {
+          name: 'fazcookie-consent',
+          value: encodeURIComponent(consentCookie),
+          url: BASE,
+          expires: Math.floor(Date.now() / 1000) + 3600,
+        },
+      ]);
+    }
+    const res = await ctx.request.get(BASE + path, { headers: { 'User-Agent': 'Mozilla/5.0 (cache-compat-html-e2e)' } });
+    expect(res.status()).toBeLessThan(400);
+    return await res.text();
+  } finally {
+    await ctx.close();
+  }
+}
+
 test.describe('Cache Compatibility Mode (issue #158)', () => {
   test.describe.configure({ mode: 'serial' });
 
@@ -64,6 +91,12 @@ test.describe('Cache Compatibility Mode (issue #158)', () => {
   }
 
   test.beforeAll(async ({ browser, loginAsAdmin }) => {
+    upsertPage(
+      CACHE_FIXTURE_SLUG,
+      'FAZ Cache Compatibility Provider',
+      '<p>FAZ cache compatibility provider fixture.</p><script src="https://www.googletagmanager.com/gtag/js?id=G-FAZCACHE"></script>'
+    );
+
     admin = await browser.newPage();
     await loginAsAdmin(admin);
     await admin.goto('/wp-admin/admin.php?page=faz-cookie-manager-settings', { waitUntil: 'domcontentloaded' });
@@ -130,5 +163,33 @@ test.describe('Cache Compatibility Mode (issue #158)', () => {
     await applyState({ cacheCompat: false, iab: true });
     const h = await anonHeaders(browser);
     expect(h['x-litespeed-cache-control']).toBe('no-cache');
+  });
+
+  test('7. cache-compat ON keeps third-party HTML blocked even for a consenting visitor', async ({ browser }) => {
+    await applyState({ cacheCompat: true, iab: true });
+    const fixturePath = `/${CACHE_FIXTURE_SLUG}/`;
+    const consentedCookie = [
+      'consent:yes',
+      'action:yes',
+      'necessary:yes',
+      'analytics:yes',
+      'marketing:yes',
+      'functional:yes',
+      '__scope.banner:cache-compat',
+      '__scope.law:gdpr',
+    ].join(',');
+
+    const noConsentHtml = await anonHtml(browser, fixturePath);
+    const consentedHtml = await anonHtml(browser, fixturePath, consentedCookie);
+    const gtagTags = (html: string) => Array.from(html.matchAll(/<script\b[^>]*googletagmanager\.com\/gtag\/js[^>]*>/gi), (match) => match[0]);
+    const isBlockedAnalyticsTag = (tag: string) =>
+      /type=["']text\/plain["']/i.test(tag) && /data-faz-category=["']analytics["']/i.test(tag);
+
+    const noConsentTags = gtagTags(noConsentHtml);
+    const consentedTags = gtagTags(consentedHtml);
+    expect(noConsentTags.length).toBeGreaterThan(0);
+    expect(consentedTags.length).toBeGreaterThan(0);
+    expect(noConsentTags.every(isBlockedAnalyticsTag)).toBe(true);
+    expect(consentedTags.every(isBlockedAnalyticsTag)).toBe(true);
   });
 });

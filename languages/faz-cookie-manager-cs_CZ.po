@@ -5105,6 +5105,18 @@ msgstr "Nebyl nalezen žádný aktivní banner."
 msgid "Failed to log consent."
 msgstr "Nepodařilo se zaznamenat souhlas."
 
+#: frontend/modules/shortcodes/class-shortcodes.php:240
+msgid "Always Active"
+msgstr "Vždy aktivní"
+
+#: frontend/modules/shortcodes/class-shortcodes.php:242
+msgid "Show more"
+msgstr "Zobrazit více"
+
+#: frontend/modules/shortcodes/class-shortcodes.php:244
+msgid "Show less"
+msgstr "Zobrazit méně"
+
 #: frontend/views/banner-preview-frame.php:32
 msgid "Banner Preview"
 msgstr "Náhled banneru"

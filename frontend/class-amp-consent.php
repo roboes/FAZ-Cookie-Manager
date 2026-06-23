@@ -72,7 +72,7 @@ class AMP_Consent {
 		// nocache stack here as well. Idempotent with Frontend's
 		// listener — duplicate headers are harmless; both refer to the
 		// same nocache directive.
-		if ( Controller::get_instance()->has_country_dependent_banners() ) {
+		if ( $this->is_country_dependent_output() ) {
 			if ( ! headers_sent() ) {
 				header( 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0' );
 				header( 'Pragma: no-cache' );
@@ -95,6 +95,22 @@ class AMP_Consent {
 		// AMP consent component in footer.
 		add_action( 'amp_post_template_footer', array( $this, 'output_amp_consent' ) );
 		add_action( 'wp_footer', array( $this, 'output_amp_consent' ) );
+	}
+
+	/**
+	 * Whether AMP output should bypass page caches for visitor-specific banners.
+	 *
+	 * @return bool
+	 */
+	private function is_country_dependent_output() {
+		$settings = get_option( 'faz_settings', array() );
+		if ( ! is_array( $settings ) ) {
+			$settings = array();
+		}
+		if ( ! empty( $settings['banner_control']['cache_compatibility'] ) ) {
+			return (bool) apply_filters( 'faz_country_dependent_banner_output', false, $settings );
+		}
+		return Controller::get_instance()->has_country_dependent_banners();
 	}
 
 	/**

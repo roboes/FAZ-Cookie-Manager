@@ -71,6 +71,31 @@ namespace FazCookie\Admin\Modules\Banners\Includes {
 	}
 }
 
+namespace FazCookie\Admin\Modules\Cookies\Includes {
+	class Category_Controller {
+		public static $items = array();
+		private static $instance = null;
+		public static function get_instance() {
+			if ( null === self::$instance ) {
+				self::$instance = new self();
+			}
+			return self::$instance;
+		}
+		public function get_items() {
+			return self::$items;
+		}
+	}
+	class Cookie_Categories {
+		private $data;
+		public function __construct( $data ) {
+			$this->data = (array) $data;
+		}
+		public function get_slug() {
+			return isset( $this->data['slug'] ) ? $this->data['slug'] : '';
+		}
+	}
+}
+
 namespace {
 
 	if ( ! defined( 'ABSPATH' ) ) {
@@ -106,6 +131,16 @@ namespace {
 			return $value;
 		}
 	}
+	if ( ! function_exists( 'add_action' ) ) {
+		function add_action() {
+			return true;
+		}
+	}
+	if ( ! function_exists( 'get_option' ) ) {
+		function get_option( $name, $default = false ) {
+			return isset( $GLOBALS['faz_test_options'][ $name ] ) ? $GLOBALS['faz_test_options'][ $name ] : $default;
+		}
+	}
 
 	if ( ! class_exists( 'FazTest_WPDB' ) ) {
 		class FazTest_WPDB {
@@ -119,9 +154,14 @@ namespace {
 
 	require_once dirname( __DIR__, 2 ) . '/admin/modules/settings/includes/class-settings.php';
 	require_once dirname( __DIR__, 2 ) . '/frontend/class-frontend.php';
+	require_once dirname( __DIR__, 2 ) . '/frontend/class-amp-consent.php';
+	require_once dirname( __DIR__, 2 ) . '/frontend/modules/banner-rest/class-banner-rest.php';
 
 	use FazCookie\Admin\Modules\Settings\Includes\Settings;
+	use FazCookie\Admin\Modules\Banners\Includes\Controller;
+	use FazCookie\Frontend\AMP_Consent;
 	use FazCookie\Frontend\Frontend;
+	use FazCookie\Frontend\Modules\Banner_Rest\Banner_Rest;
 
 	$tests_run = $tests_passed = $tests_failed = 0;
 	function assert_eq( $actual, $expected, $label ) {
@@ -138,16 +178,26 @@ namespace {
 		}
 	}
 
-	/** is_country_dependent_output() with a reflection-seeded settings cache. */
-	function faz_is_dependent( array $settings ) {
+	/** Frontend instance with a reflection-seeded settings cache. */
+	function faz_frontend_with_settings( array $settings ) {
 		$rc = new ReflectionClass( Frontend::class );
 		$fe = $rc->newInstanceWithoutConstructor();
 		$p  = new ReflectionProperty( Frontend::class, 'settings_option_cache' );
 		$p->setAccessible( true );
 		$p->setValue( $fe, $settings );
-		$m = new ReflectionMethod( Frontend::class, 'is_country_dependent_output' );
+		return $fe;
+	}
+
+	/** Invoke a private Frontend method. */
+	function faz_call_frontend_private( $fe, $method ) {
+		$m = new ReflectionMethod( Frontend::class, $method );
 		$m->setAccessible( true );
-		return (bool) $m->invoke( $fe );
+		return $m->invoke( $fe );
+	}
+
+	/** is_country_dependent_output() with a reflection-seeded settings cache. */
+	function faz_is_dependent( array $settings ) {
+		return (bool) faz_call_frontend_private( faz_frontend_with_settings( $settings ), 'is_country_dependent_output' );
 	}
 
 	echo "\n\033[1mCache Compatibility Mode (issue #158)\033[0m\n\n";
@@ -199,6 +249,77 @@ namespace {
 		faz_is_dependent( array( 'banner_control' => array( 'cache_compatibility' => '1' ) ) ),
 		false,
 		"truthy '1' value is honoured by the !empty() short-circuit"
+	);
+
+	// ON → the server-rendered HTML must be visitor-invariant. Consent cookies
+	// and per-service grants are ignored by PHP so shared caches only ever see
+	// the conservative blocked baseline; script.js can then unblock in-browser.
+	\FazCookie\Admin\Modules\Cookies\Includes\Category_Controller::$items = array(
+		array( 'slug' => 'necessary' ),
+		array( 'slug' => 'analytics' ),
+		array( 'slug' => 'marketing' ),
+	);
+	$cache_safe_frontend = faz_frontend_with_settings(
+		array(
+			'banner_control' => array(
+				'cache_compatibility' => true,
+				'per_service_consent' => true,
+			),
+		)
+	);
+	$blocked_method = new ReflectionMethod( Frontend::class, 'get_blocked_categories' );
+	$blocked_method->setAccessible( true );
+	assert_eq(
+		$blocked_method->invoke( $cache_safe_frontend ),
+		array( 'analytics', 'marketing' ),
+		'cache_compatibility ON → PHP blocks every non-necessary category as the cache-safe baseline'
+	);
+	$service_method = new ReflectionMethod( Frontend::class, 'get_service_consent' );
+	$service_method->setAccessible( true );
+	assert_eq(
+		$service_method->invoke( $cache_safe_frontend ),
+		array(),
+		'cache_compatibility ON → PHP ignores per-service consent cookie grants'
+	);
+	$ruleset_method = new ReflectionMethod( Frontend::class, 'get_runtime_ruleset' );
+	$ruleset_method->setAccessible( true );
+	assert_eq(
+		$ruleset_method->invoke( $cache_safe_frontend ),
+		null,
+		'cache_compatibility ON → PHP does not resolve visitor-country runtime rulesets'
+	);
+
+	$GLOBALS['faz_test_options']['faz_settings'] = array( 'banner_control' => array( 'cache_compatibility' => true ) );
+	Controller::$countryDependent = true;
+
+	$amp = ( new ReflectionClass( AMP_Consent::class ) )->newInstanceWithoutConstructor();
+	$amp_method = new ReflectionMethod( AMP_Consent::class, 'is_country_dependent_output' );
+	$amp_method->setAccessible( true );
+	assert_eq(
+		$amp_method->invoke( $amp ),
+		false,
+		'cache_compatibility ON → AMP path does not force no-cache for country-dependent banners'
+	);
+
+	$rest = ( new ReflectionClass( Banner_Rest::class ) )->newInstanceWithoutConstructor();
+	$rest_method = new ReflectionMethod( Banner_Rest::class, 'is_country_dependent_output' );
+	$rest_method->setAccessible( true );
+	assert_eq(
+		$rest_method->invoke( $rest, Controller::get_instance() ),
+		false,
+		'cache_compatibility ON → REST banner endpoint uses cacheable headers for deterministic payloads'
+	);
+
+	$GLOBALS['faz_test_options']['faz_settings'] = array( 'banner_control' => array( 'cache_compatibility' => false ) );
+	assert_eq(
+		$amp_method->invoke( $amp ),
+		true,
+		'cache_compatibility OFF → AMP country-dependent cache-bust is unchanged'
+	);
+	assert_eq(
+		$rest_method->invoke( $rest, Controller::get_instance() ),
+		true,
+		'cache_compatibility OFF → REST country-dependent cache-bust is unchanged'
 	);
 
 	// OFF (or absent) → unchanged behaviour: country-dependent only when a
