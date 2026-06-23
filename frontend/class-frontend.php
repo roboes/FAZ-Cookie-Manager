@@ -3363,9 +3363,11 @@ class Frontend {
 				continue;
 			}
 			$is_url_pattern = false !== strpos( $pattern, '.' ) || false !== strpos( $pattern, '/' );
-			$matched        = ( '' !== $url && false !== stripos( $url, $pattern ) );
+			$matched        = ( '' !== $url && $this->provider_url_pattern_matches( $url, $pattern ) );
 			if ( ! $matched && ( ! $is_url_pattern || $is_data_uri_payload ) ) {
-				$matched = false !== stripos( $inline, $pattern );
+				$matched = $is_url_pattern
+					? $this->provider_url_pattern_matches( $inline, $pattern )
+					: false !== stripos( $inline, $pattern );
 			}
 			if ( $matched ) {
 				foreach ( $service_ids as $service_id ) {
@@ -3429,6 +3431,64 @@ class Frontend {
 			'haystack'            => trim( $url . ' ' . $normalized_content ),
 			'is_data_uri_payload' => $is_data_uri_payload,
 		);
+	}
+
+	/**
+	 * Match a provider URL fragment with the same loose boundary checks used by JS.
+	 *
+	 * This is not a full URL parser: provider patterns can be host fragments,
+	 * paths, plugin slugs, or decoded data-URI script payloads. The boundary check
+	 * prevents accidental matches inside unrelated words/hosts such as
+	 * notyoutube.com/embed while keeping normal host/path matches.
+	 *
+	 * @param string $target  URL-like haystack.
+	 * @param string $pattern Provider URL fragment.
+	 * @return bool
+	 */
+	private function provider_url_pattern_matches( $target, $pattern ) {
+		$target  = (string) $target;
+		$pattern = (string) $pattern;
+		if ( '' === $target || '' === $pattern ) {
+			return false;
+		}
+
+		$offset = 0;
+		$length = strlen( $pattern );
+		while ( false !== ( $index = stripos( $target, $pattern, $offset ) ) ) {
+			if ( $this->has_provider_boundary( $target, $index, $length ) ) {
+				return true;
+			}
+			$offset = $index + 1;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Mirror frontend/js/script.js::_fazHasProviderBoundary().
+	 *
+	 * @param string $target URL-like haystack.
+	 * @param int    $index  Match start offset.
+	 * @param int    $length Matched pattern length.
+	 * @return bool
+	 */
+	private function has_provider_boundary( $target, $index, $length ) {
+		if ( $index > 0 ) {
+			$before = substr( $target, $index - 1, 1 );
+			if ( ! preg_match( '/[\/.:\s"\'`=;,(<{\[]/', $before ) ) {
+				return false;
+			}
+		}
+
+		$after_pos = $index + $length;
+		if ( $after_pos < strlen( $target ) ) {
+			$after = substr( $target, $after_pos, 1 );
+			if ( ! preg_match( '/[\/.:\?#\s"\'=;,&)<}\]]/', $after ) ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	/**
@@ -3633,14 +3693,17 @@ class Frontend {
 			// reference a tracker domain in their data (e.g. Rank Math's rankMath.links
 			// object contains youtu.be, facebook.com, etc.) would be incorrectly blocked.
 			$is_url_pattern = false !== strpos( $pattern, '.' ) || false !== strpos( $pattern, '/' );
-			if ( '' !== $url && false !== stripos( $url, $pattern ) ) {
+			if ( '' !== $url && $this->provider_url_pattern_matches( $url, $pattern ) ) {
 				return $category;
 			}
 			if ( ! $is_url_pattern || $is_data_uri_payload ) {
 				// Code-signature patterns (fbq(, gtag, _ga …) match inline content.
 				// URL-fragment patterns may also match decoded data: script payloads
 				// because that payload is the executable source, not page data.
-				if ( false !== stripos( $inline, $pattern ) ) {
+				$matched_inline = $is_url_pattern
+					? $this->provider_url_pattern_matches( $inline, $pattern )
+					: false !== stripos( $inline, $pattern );
+				if ( $matched_inline ) {
 					return $category;
 				}
 			}

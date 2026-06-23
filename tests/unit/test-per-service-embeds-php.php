@@ -293,6 +293,11 @@ namespace {
 	$fe = faz_arrange( 'necessary:yes,svc.youtube:no' );
 	assert_eq( faz_call( $fe, 'check_per_service_blocking', array( ' src="https://example.com/app.js" ', '' ) ), null, 'C4 non-provider embed → null (no per-service decision)' );
 
+	// C4b — provider fragments must not match inside unrelated hosts.
+	$fe = faz_arrange( 'necessary:yes,marketing:no,svc.youtube:yes' );
+	assert_eq( faz_call( $fe, 'check_per_service_blocking', array( ' src="https://notyoutube.com/embed/x" ', '' ) ), null, 'C4b notyoutube.com is not treated as youtube.com/embed for svc.* override' );
+	assert_eq( faz_call( $fe, 'match_script_to_provider', array( ' src="https://notyoutube.com/embed/x" ', '', array( 'youtube.com/embed' => 'marketing' ) ) ), false, 'C4c notyoutube.com is not treated as a YouTube provider match' );
+
 	// C5 — per-service OFF → null even with svc tokens present in the cookie.
 	$fe = faz_arrange( 'necessary:yes,svc.youtube:no', false );
 	assert_eq( faz_call( $fe, 'check_per_service_blocking', array( ' src="https://www.youtube.com/embed/x" ', '' ) ), null, 'C5 per-service OFF → check returns null (category-level only)' );
