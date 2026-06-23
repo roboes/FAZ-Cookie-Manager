@@ -3370,6 +3370,29 @@ function _fazUnblockServerSide() {
             }
         });
 
+    // 2c. Page-builder lightbox <a> links intercepted at click time. The link
+    // itself works once consent is granted (the click interceptor re-checks
+    // consent per click and stops preventing the default open), so there is
+    // nothing to "restore" on the link — but the consent placeholder injected
+    // at first block is a sibling div that persists and, when clicked, re-opens
+    // the preference center instead of playing the now-allowed video. On
+    // consent, remove that orphan placeholder and strip the now-dead markers so
+    // the link reverts to its native page-builder lightbox behaviour. #134/#146.
+    document.querySelectorAll('a[data-faz-src][data-faz-lightbox-intercepted]')
+        .forEach(function (link) {
+            var cat = link.getAttribute('data-faz-category') || 'marketing';
+            var svc = link.getAttribute('data-faz-service') || '';
+            if (_fazShouldBlockResource(cat, link.getAttribute('data-faz-src') || '', svc)) return;
+            var phId = link.dataset.fazLightboxPlaceholder;
+            if (phId) {
+                var ph = document.getElementById(phId);
+                if (ph) ph.remove();
+            }
+            link.removeAttribute('data-faz-src');
+            delete link.dataset.fazLightboxIntercepted;
+            delete link.dataset.fazLightboxPlaceholder;
+        });
+
     // 3. Images (tracking pixels inside noscript tags that JS can see).
     document.querySelectorAll('img[data-faz-src][data-faz-category]')
         .forEach(function (el) {
@@ -4874,6 +4897,9 @@ function _fazRenderServiceToggles() {
         serviceList.className = 'faz-service-list';
         serviceList.setAttribute('data-faz-category', category.slug);
         serviceList.setAttribute('aria-live', 'polite');
+        // aria-atomic so a runtime-revealed row is announced in full (label +
+        // state), not just the changed text node. #134/#146 (F021).
+        serviceList.setAttribute('aria-atomic', 'true');
 
         var serviceTitle = document.createElement('div');
         serviceTitle.classList.add('faz-service-list-title');
@@ -5124,6 +5150,9 @@ function _fazInjectServiceToggle(service) {
         // first full render happens with the modal closed, so polite does not
         // spam an opening visitor.
         serviceList.setAttribute('aria-live', 'polite');
+        // aria-atomic so a runtime-revealed row is announced in full (label +
+        // state), not just the changed text node. #134/#146 (F021).
+        serviceList.setAttribute('aria-atomic', 'true');
         var serviceTitle = document.createElement('div');
         serviceTitle.classList.add('faz-service-list-title');
         serviceTitle.textContent = _fazTranslate('services', 'Services');
@@ -5244,8 +5273,8 @@ function _fazInjectCookieToggleStyles() {
     style.id = 'faz-cookie-toggle-styles';
     style.textContent =
         '.faz-cookie-list{margin:2px 0 8px 14px;padding-left:10px;border-left:1px solid rgba(0,0,0,.08);}' +
-        '.faz-cookie-list-note{margin:2px 0 6px;font-size:11px;line-height:1.4;color:#595959;font-style:italic;}' +
-        '.faz-cookie-row--locked{opacity:.6;}' +
+        '.faz-cookie-list-note{margin:2px 0 6px;font-size:11px;line-height:1.4;color:inherit;opacity:.75;font-style:italic;}' +
+        '.faz-cookie-row--locked{opacity:.6;cursor:not-allowed;}' +
         '.faz-cookie-row{display:flex;align-items:center;justify-content:space-between;padding:2px 0;}' +
         '.faz-cookie-row-label{font-size:12px;color:#666;word-break:break-all;padding-right:8px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}' +
         '.faz-cookie-row .faz-switch{flex-shrink:0;transform:scale(.82);transform-origin:right center;}';
@@ -5899,6 +5928,11 @@ document.addEventListener('click', function (event) {
         try {
             var uniqueID = 'faz-lightbox-' + Math.random().toString(36).slice(2, 10);
             _fazAddPlaceholder(match.el, uniqueID);
+            // Remember the injected placeholder's id on the link so that, once
+            // consent is granted, _fazUnblockServerSide can remove this orphan
+            // CTA (it otherwise persists and re-opens the preference center
+            // instead of letting the now-allowed video play). #134/#146 (F025).
+            match.el.dataset.fazLightboxPlaceholder = uniqueID;
         } catch (_pe) { /* placeholder injection is best-effort */ }
     }
 }, true /* capture phase — beats the page-builder listener */);
