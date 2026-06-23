@@ -5176,6 +5176,18 @@ msgstr "Kein aktives Banner gefunden."
 msgid "Failed to log consent."
 msgstr "Einwilligung konnte nicht protokolliert werden."
 
+#: frontend/modules/shortcodes/class-shortcodes.php:240
+msgid "Always Active"
+msgstr "Immer aktiv"
+
+#: frontend/modules/shortcodes/class-shortcodes.php:242
+msgid "Show more"
+msgstr "Mehr anzeigen"
+
+#: frontend/modules/shortcodes/class-shortcodes.php:244
+msgid "Show less"
+msgstr "Weniger anzeigen"
+
 #: frontend/views/banner-preview-frame.php:32
 msgid "Banner Preview"
 msgstr "Banner-Vorschau"

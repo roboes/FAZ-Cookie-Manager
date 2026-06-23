@@ -222,6 +222,31 @@ class Shortcodes {
 		return $out;
 	}
 
+	/**
+	 * Translate a bundled English default while preserving admin custom text.
+	 *
+	 * @param string $value   Current banner text.
+	 * @param string $default Bundled English default text.
+	 * @return string
+	 */
+	private function translate_default_text( $value, $default ) {
+		$value = (string) $value;
+		if ( $default !== $value ) {
+			return $value;
+		}
+
+		switch ( $default ) {
+			case 'Always Active':
+				return __( 'Always Active', 'faz-cookie-manager' );
+			case 'Show more':
+				return __( 'Show more', 'faz-cookie-manager' );
+			case 'Show less':
+				return __( 'Show less', 'faz-cookie-manager' );
+			default:
+				return $value;
+		}
+	}
+
 	private function merge_contents_deep( ...$layers ) {
 		$result = array();
 		foreach ( $layers as $layer ) {
@@ -373,7 +398,10 @@ class Shortcodes {
 	 * @return string
 	 */
 	public function faz_preference_always_enabled() {
-		return isset( $this->contents['preferenceCenter']['elements']['category']['elements']['alwaysEnabled'] ) ? $this->contents['preferenceCenter']['elements']['category']['elements']['alwaysEnabled'] : '';
+		$value = isset( $this->contents['preferenceCenter']['elements']['category']['elements']['alwaysEnabled'] )
+			? $this->contents['preferenceCenter']['elements']['category']['elements']['alwaysEnabled']
+			: '';
+		return $this->translate_default_text( $value, 'Always Active' );
 	}
 
 	/**
@@ -668,7 +696,8 @@ class Shortcodes {
 	 */
 	public function faz_showmore_text() {
 		$key = 'ccpa' === $this->law ? 'optoutPopup' : 'preferenceCenter';
-		return isset( $this->contents[ $key ]['elements']['showMore'] ) ? $this->contents[ $key ]['elements']['showMore'] : '';
+		$value = isset( $this->contents[ $key ]['elements']['showMore'] ) ? $this->contents[ $key ]['elements']['showMore'] : '';
+		return $this->translate_default_text( $value, 'Show more' );
 	}
 
 	/**
@@ -678,7 +707,8 @@ class Shortcodes {
 	 */
 	public function faz_showless_text() {
 		$key = 'ccpa' === $this->law ? 'optoutPopup' : 'preferenceCenter';
-		return isset( $this->contents[ $key ]['elements']['showLess'] ) ? $this->contents[ $key ]['elements']['showLess'] : '';
+		$value = isset( $this->contents[ $key ]['elements']['showLess'] ) ? $this->contents[ $key ]['elements']['showLess'] : '';
+		return $this->translate_default_text( $value, 'Show less' );
 	}
 
 	/**
@@ -918,4 +948,3 @@ class Shortcodes {
 	}
 
 }
-

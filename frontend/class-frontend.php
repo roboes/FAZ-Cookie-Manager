@@ -628,6 +628,16 @@ class Frontend {
 	}
 
 	/**
+	 * Whether Cache Compatibility Mode is active for the current request.
+	 *
+	 * @return bool
+	 */
+	private function is_cache_compatibility_enabled() {
+		$settings = $this->get_faz_settings();
+		return ! empty( $settings['banner_control']['cache_compatibility'] );
+	}
+
+	/**
 	 * Add inline styles to the head
 	 *
 	 * @return void
@@ -699,8 +709,10 @@ class Frontend {
 			return;
 		}
 		// Global geo-targeting (Settings → Geolocation): skip banner for
-		// visitors outside configured target regions.
-		if ( $this->is_geo_banner_disabled() ) {
+		// visitors outside configured target regions. Cache Compatibility Mode
+		// must keep the server-rendered HTML invariant across visitors, so it
+		// leaves this decision to the client-side runtime instead.
+		if ( ! $this->is_cache_compatibility_enabled() && $this->is_geo_banner_disabled() ) {
 			return;
 		}
 		// Multi-banner geo-routing (1.13.18+): pass the visitor's detected
@@ -711,7 +723,7 @@ class Frontend {
 		// the match-all row or the banner_default=1 row — preserving the
 		// pre-feature behaviour for installs that have not adopted multi-
 		// banner setups.
-		$visitor_country = $this->get_visitor_country();
+		$visitor_country = $this->is_cache_compatibility_enabled() ? '' : $this->get_visitor_country();
 		$this->banner    = Controller::get_instance()->get_active_banner_for_country( $visitor_country );
 
 		// Runtime geo-routing (flag-gated): the resolved ruleset's MODEL decides
@@ -753,7 +765,7 @@ class Frontend {
 		}
 
 		// Per-banner geo-targeting: skip banner if visitor's country doesn't match the ruleSet.
-		if ( $this->is_geo_blocked() ) {
+		if ( ! $this->is_cache_compatibility_enabled() && $this->is_geo_blocked() ) {
 			return;
 		}
 
@@ -866,7 +878,19 @@ class Frontend {
 	 * @return bool
 	 */
 	private function is_country_dependent_output() {
-		$settings  = $this->get_faz_settings();
+		$settings = $this->get_faz_settings();
+
+		// Cache Compatibility Mode (issue #158): the publisher has opted to keep
+		// the page fully cacheable by LiteSpeed/QUIC.cloud/Varnish/Nginx and to
+		// resolve any jurisdiction-specific logic on the client. Short-circuit to
+		// "not country-dependent" so send_geo_cache_headers() emits no no-cache /
+		// no-store headers and maybe_disable_country_page_cache() never defines
+		// DONOTCACHEPAGE. Still routed through the filter so a developer can force
+		// the cache-bust back on per request if a specific page truly varies.
+		if ( $this->is_cache_compatibility_enabled() ) {
+			return (bool) apply_filters( 'faz_country_dependent_banner_output', false, $settings );
+		}
+
 		$dependent = false;
 
 		// Country→language fallback (CodeRabbit review, 1.14.2): when the
@@ -1165,6 +1189,9 @@ class Frontend {
 	 * @return array|null
 	 */
 	private function get_runtime_ruleset() {
+		if ( $this->is_cache_compatibility_enabled() ) {
+			return null;
+		}
 		return Geo_Runtime::resolve_for_country( $this->get_visitor_country() );
 	}
 
@@ -3145,9 +3172,22 @@ class Frontend {
 		if ( null !== $this->blocked_categories_cache ) {
 			return $this->blocked_categories_cache;
 		}
-		$consent = function_exists( 'faz_get_valid_consent_cookie' ) ? faz_get_valid_consent_cookie() : '';
 		$categories = \FazCookie\Admin\Modules\Cookies\Includes\Category_Controller::get_instance()->get_items();
 		$blocked = array();
+
+		if ( $this->is_cache_compatibility_enabled() ) {
+			foreach ( $categories as $cat_data ) {
+				$category = new \FazCookie\Admin\Modules\Cookies\Includes\Cookie_Categories( $cat_data );
+				$slug     = $category->get_slug();
+				if ( 'necessary' !== $slug ) {
+					$blocked[] = $slug;
+				}
+			}
+			$this->blocked_categories_cache = $blocked;
+			return $blocked;
+		}
+
+		$consent = function_exists( 'faz_get_valid_consent_cookie' ) ? faz_get_valid_consent_cookie() : '';
 
 		// CCPA/CPRA is an OPT-OUT regime: personal data may be sold/shared — and
 		// the corresponding scripts may run — UNTIL the visitor exercises the
@@ -3274,6 +3314,9 @@ class Frontend {
 			return $this->service_consent_cache;
 		}
 		$this->service_consent_cache = array();
+		if ( $this->is_cache_compatibility_enabled() ) {
+			return $this->service_consent_cache;
+		}
 		// 1.18.3: per-service consent reintroduced — read the option again so the
 		// cookie-shredder honours svc.* opt-outs. When the option is off this
 		// returns an empty map and enforcement stays purely category-level.

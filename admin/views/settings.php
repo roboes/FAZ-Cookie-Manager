@@ -75,6 +75,14 @@ defined( 'ABSPATH' ) || exit;
 				</label>
 				<div class="faz-help"><?php esc_html_e( 'Scope the consent cookie to your registrable domain (e.g. .example.com) so it is shared across www, shop, app, etc. Recommended only when all subdomains belong to you and are covered by the same privacy policy. Public-suffix-aware for multi-level TLDs (.co.uk, .com.au).', 'faz-cookie-manager' ); ?></div>
 			</div>
+			<div class="faz-form-group">
+				<label class="faz-toggle">
+					<input type="checkbox" data-path="banner_control.cache_compatibility">
+					<span class="faz-toggle-track"></span>
+					<span class="faz-toggle-label"><?php esc_html_e( 'Cache compatibility mode', 'faz-cookie-manager' ); ?></span>
+				</label>
+				<div class="faz-help"><?php echo wp_kses_post( __( 'Keep the page fully cacheable by LiteSpeed, QUIC.cloud, Varnish, Nginx FastCGI or WP Rocket. The plugin stops emitting <code>no-cache</code>/<code>no-store</code> headers and the <code>DONOTCACHEPAGE</code> constant for anonymous visitors, so the static HTML is cached and the banner runs entirely client-side from the consent cookie. <strong>Only enable this if your banner output does NOT vary by visitor country.</strong> With IAB TCF, geo-targeting, country-targeted banners or runtime geo-routing active, the same cached HTML would be served to every region (e.g. an EU TCF <code>gdprApplies=true</code> page reaching a US visitor) — keep this OFF in that case, or vary the cache by country at the CDN.', 'faz-cookie-manager' ) ); ?></div>
+			</div>
 		</div>
 	</div>
 

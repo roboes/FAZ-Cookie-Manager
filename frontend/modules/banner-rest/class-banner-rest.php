@@ -136,14 +136,15 @@ class Banner_Rest {
 		}
 
 		$controller = Banner_Controller::get_instance();
-		$country    = Geolocation::get_visitor_country();
+		$cache_compatibility = $this->is_cache_compatibility_enabled();
+		$country    = $cache_compatibility ? '' : Geolocation::get_visitor_country();
 		$banner     = $controller->get_active_banner_for_country( $country );
 
 		// Runtime geo-routing parity with the initial render (load_banner):
 		// when the resolved ruleset's model maps to a different law than the
 		// country-selected banner, prefer the active banner carrying that law so
 		// the language-swapped banner enforces the same model as the first paint.
-		$runtime_ruleset = Geo_Runtime::resolve_for_country( $country );
+		$runtime_ruleset = $cache_compatibility ? null : Geo_Runtime::resolve_for_country( $country );
 		if ( null !== $runtime_ruleset ) {
 			$wanted_law  = Geo_Runtime::model_to_law( $runtime_ruleset );
 			$current_law = ( $banner ) ? $banner->get_law() : '';
@@ -253,7 +254,7 @@ class Banner_Rest {
 		// The runtime ruleset varies the payload (defaultConsent, activeLaw,
 		// banner) by the visitor's jurisdiction, so it must never be cached
 		// across visitors — force no-store while the flag is on.
-		if ( $controller->has_country_dependent_banners() || Geo_Runtime::is_enabled() ) {
+		if ( $this->is_country_dependent_output( $controller ) ) {
 			$response->header( 'Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0' );
 			$response->header( 'Pragma', 'no-cache' );
 			$response->header( 'X-LiteSpeed-Cache-Control', 'no-cache' );
@@ -282,6 +283,40 @@ class Banner_Rest {
 			}
 		}
 		return $response;
+	}
+
+	/**
+	 * Return the raw faz_settings option.
+	 *
+	 * @return array
+	 */
+	private function get_faz_settings() {
+		$settings = get_option( 'faz_settings', array() );
+		return is_array( $settings ) ? $settings : array();
+	}
+
+	/**
+	 * Whether Cache Compatibility Mode is enabled.
+	 *
+	 * @return bool
+	 */
+	private function is_cache_compatibility_enabled() {
+		$settings = $this->get_faz_settings();
+		return ! empty( $settings['banner_control']['cache_compatibility'] );
+	}
+
+	/**
+	 * Whether this REST payload must bypass shared caches.
+	 *
+	 * @param Banner_Controller $controller Banner controller instance.
+	 * @return bool
+	 */
+	private function is_country_dependent_output( $controller ) {
+		$settings = $this->get_faz_settings();
+		if ( ! empty( $settings['banner_control']['cache_compatibility'] ) ) {
+			return (bool) apply_filters( 'faz_country_dependent_banner_output', false, $settings );
+		}
+		return $controller->has_country_dependent_banners() || Geo_Runtime::is_enabled();
 	}
 
 	/**

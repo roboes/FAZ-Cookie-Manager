@@ -100,6 +100,7 @@ class Settings extends Store {
 				'alternative_asset_path' => false,
 				'per_service_consent'    => false,
 				'per_cookie_consent'     => false,
+				'cache_compatibility'    => false,
 			),
 			'microsoft'    => array(
 				'uet_consent_mode' => false,
@@ -292,6 +293,7 @@ class Settings extends Store {
 			case 'gtm_datalayer':
 			case 'alternative_asset_path':
 			case 'per_service_consent':
+			case 'cache_compatibility':
 				$value = faz_sanitize_bool( $value );
 				break;
 			case 'per_cookie_consent':
