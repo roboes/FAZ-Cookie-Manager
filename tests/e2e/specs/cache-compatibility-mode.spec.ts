@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/wp-fixture';
 import type { Page } from '@playwright/test';
-import { upsertPage, wp } from '../utils/wp-env';
+import { ensureFixturePlugin, listActivePluginFiles, restoreActivePluginFiles, upsertPage, wp } from '../utils/wp-env';
 
 /**
  * Cache Compatibility Mode (issue #158) — end-to-end header behaviour.
@@ -82,6 +82,7 @@ test.describe('Cache Compatibility Mode (issue #158)', () => {
   let nonce = '';
   let originalBannerControl: Record<string, unknown> = {};
   let originalIab: Record<string, unknown> = {};
+  let originalActivePluginFiles: string[] = [];
   let fixtureId = 0;
 
   async function applyState(opts: { cacheCompat: boolean; iab: boolean }): Promise<void> {
@@ -92,6 +93,8 @@ test.describe('Cache Compatibility Mode (issue #158)', () => {
   }
 
   test.beforeAll(async ({ browser, loginAsAdmin }) => {
+    originalActivePluginFiles = listActivePluginFiles();
+    ensureFixturePlugin('faz-e2e-audit-lab');
     fixtureId = upsertPage(
       CACHE_FIXTURE_SLUG,
       'FAZ Cache Compatibility Provider',
@@ -118,6 +121,9 @@ test.describe('Cache Compatibility Mode (issue #158)', () => {
       } catch {
         /* best-effort cleanup */
       }
+    }
+    if (originalActivePluginFiles.length) {
+      restoreActivePluginFiles(originalActivePluginFiles);
     }
     await admin.close();
   });
@@ -236,5 +242,25 @@ test.describe('Cache Compatibility Mode (issue #158)', () => {
       iab: { ...originalIab, enabled: false },
     });
     expect(hasFazScript(await fetchAsBot()), 'bot render WITH cache-compat must include FAZ').toBe(true);
+  });
+
+  test('9. cache-compat ON keeps TCF config country-invariant and conservative (#158)', async ({ browser }) => {
+    const readTcfConfig = async (country: string): Promise<Record<string, unknown>> => {
+      const html = await anonHtml(browser, `/?faz_e2e_trust_cf=1&faz_e2e_cf_country=${country}`);
+      const match = html.match(/window\._fazTcfConfig=(\{.*?\});/s);
+      expect(match, `TCF config should be emitted for ${country}`).not.toBeNull();
+      return JSON.parse(match?.[1] ?? '{}') as Record<string, unknown>;
+    };
+
+    await postSettings(admin, nonce, {
+      banner_control: { ...originalBannerControl, status: true, cache_compatibility: true },
+      iab: { ...originalIab, enabled: true, cmp_id: 2 },
+    });
+
+    const usConfig = await readTcfConfig('US');
+    const deConfig = await readTcfConfig('DE');
+
+    expect(usConfig).toEqual(deConfig);
+    expect(usConfig.gdprApplies).toBe(true);
   });
 });

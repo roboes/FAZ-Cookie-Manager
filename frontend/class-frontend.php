@@ -405,9 +405,16 @@ class Frontend {
 					$consent_lang = 'EN';
 				}
 
-				// gdprApplies: true when visitor is in EU/EEA or country unknown (safe default).
-				$visitor_country = $this->get_visitor_country();
-				$gdpr_applies    = empty( $visitor_country ) || in_array( $visitor_country, Geolocation::$eu_countries, true );
+				// gdprApplies: true when visitor is in EU/EEA or country unknown
+				// (safe default). Under Cache Compatibility Mode this payload
+				// must be identical for every anonymous visitor, so do not read
+				// the visitor country; use the conservative TCF default instead.
+				if ( $this->is_cache_compatibility_enabled() ) {
+					$gdpr_applies = true;
+				} else {
+					$visitor_country = $this->get_visitor_country();
+					$gdpr_applies    = empty( $visitor_country ) || in_array( $visitor_country, Geolocation::$eu_countries, true );
+				}
 
 				// Build TCF config with GVL data if available.
 				$tcf_config = array(

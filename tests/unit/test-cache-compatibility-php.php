@@ -30,6 +30,12 @@
 
 namespace FazCookie\Includes {
 	class Store {}
+	class Geolocation {
+		public static $visitorCountry = '';
+		public static function get_visitor_country() {
+			return self::$visitorCountry;
+		}
+	}
 	class Known_Providers {
 		public static function get_all() {
 			return array();
@@ -125,10 +131,32 @@ namespace {
 			return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( (string) $key ) );
 		}
 	}
+	if ( ! function_exists( 'faz_sanitize_text' ) ) {
+		function faz_sanitize_text( $value ) {
+			if ( is_array( $value ) ) {
+				return array_map( 'faz_sanitize_text', $value );
+			}
+			return sanitize_text_field( $value );
+		}
+	}
 	if ( ! function_exists( 'apply_filters' ) ) {
-		// Passthrough: returns the unfiltered value (no hooks in unit context).
 		function apply_filters( $tag, $value ) {
+			$args = array_slice( func_get_args(), 2 );
+			if ( ! empty( $GLOBALS['faz_test_filters'][ $tag ] ) ) {
+				foreach ( $GLOBALS['faz_test_filters'][ $tag ] as $callback ) {
+					$value = call_user_func_array( $callback, array_merge( array( $value ), $args ) );
+				}
+			}
 			return $value;
+		}
+	}
+	if ( ! function_exists( 'add_filter' ) ) {
+		function add_filter( $tag, $callback ) {
+			if ( ! isset( $GLOBALS['faz_test_filters'][ $tag ] ) ) {
+				$GLOBALS['faz_test_filters'][ $tag ] = array();
+			}
+			$GLOBALS['faz_test_filters'][ $tag ][] = $callback;
+			return true;
 		}
 	}
 	if ( ! function_exists( 'add_action' ) ) {
@@ -153,6 +181,7 @@ namespace {
 	$GLOBALS['wpdb'] = new FazTest_WPDB();
 
 	require_once dirname( __DIR__, 2 ) . '/admin/modules/settings/includes/class-settings.php';
+	require_once dirname( __DIR__, 2 ) . '/includes/class-i18n-helpers.php';
 	require_once dirname( __DIR__, 2 ) . '/frontend/class-frontend.php';
 	require_once dirname( __DIR__, 2 ) . '/frontend/class-amp-consent.php';
 	require_once dirname( __DIR__, 2 ) . '/frontend/modules/banner-rest/class-banner-rest.php';
@@ -288,6 +317,36 @@ namespace {
 		null,
 		'cache_compatibility ON → PHP does not resolve visitor-country runtime rulesets'
 	);
+
+	$GLOBALS['faz_test_filters'] = array(
+		'faz_use_country_language_fallback' => array(
+			function () {
+				return true;
+			},
+		),
+	);
+	$GLOBALS['faz_test_options']['faz_settings'] = array(
+		'languages'      => array(
+			'default'  => 'en',
+			'selected' => array( 'en', 'it' ),
+		),
+		'banner_control' => array( 'cache_compatibility' => false ),
+	);
+	\FazCookie\Includes\Geolocation::$visitorCountry = 'IT';
+	faz_current_language( true );
+	assert_eq(
+		faz_current_language(),
+		'it',
+		'cache_compatibility OFF → opt-in country language fallback can use visitor country'
+	);
+	$GLOBALS['faz_test_options']['faz_settings']['banner_control']['cache_compatibility'] = true;
+	faz_current_language( true );
+	assert_eq(
+		faz_current_language(),
+		'en',
+		'cache_compatibility ON → country language fallback is suppressed for invariant HTML'
+	);
+	$GLOBALS['faz_test_filters'] = array();
 
 	$GLOBALS['faz_test_options']['faz_settings'] = array( 'banner_control' => array( 'cache_compatibility' => true ) );
 	Controller::$countryDependent = true;

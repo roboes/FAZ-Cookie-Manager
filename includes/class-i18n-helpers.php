@@ -153,9 +153,12 @@ if ( ! function_exists( 'faz_current_language' ) ) {
 			// banner copy via multi-banner geo-routing — an Italian
 			// visitor on a site with selected langs ["en","it"] sees the
 			// `it` content even though the URL is /en/.
-			$current_language = faz_default_language();
+			$current_language    = faz_default_language();
+			$faz_settings        = get_option( 'faz_settings', array() );
+			$cache_compatibility = is_array( $faz_settings ) && ! empty( $faz_settings['banner_control']['cache_compatibility'] );
 			if (
-				class_exists( '\\FazCookie\\Includes\\Geolocation' )
+				! $cache_compatibility
+				&& class_exists( '\\FazCookie\\Includes\\Geolocation' )
 				&& apply_filters( 'faz_use_country_language_fallback', false )
 			) {
 				$country = \FazCookie\Includes\Geolocation::get_visitor_country();

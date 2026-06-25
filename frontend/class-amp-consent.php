@@ -103,14 +103,31 @@ class AMP_Consent {
 	 * @return bool
 	 */
 	private function is_country_dependent_output() {
-		$settings = get_option( 'faz_settings', array() );
-		if ( ! is_array( $settings ) ) {
-			$settings = array();
-		}
+		$settings = $this->get_faz_settings();
 		if ( ! empty( $settings['banner_control']['cache_compatibility'] ) ) {
 			return (bool) apply_filters( 'faz_country_dependent_banner_output', false, $settings );
 		}
 		return Controller::get_instance()->has_country_dependent_banners();
+	}
+
+	/**
+	 * Read FAZ settings as an array.
+	 *
+	 * @return array
+	 */
+	private function get_faz_settings() {
+		$settings = get_option( 'faz_settings', array() );
+		return is_array( $settings ) ? $settings : array();
+	}
+
+	/**
+	 * Whether Cache Compatibility Mode is active.
+	 *
+	 * @return bool
+	 */
+	private function is_cache_compatibility_enabled() {
+		$settings = $this->get_faz_settings();
+		return ! empty( $settings['banner_control']['cache_compatibility'] );
 	}
 
 	/**
@@ -389,13 +406,19 @@ class AMP_Consent {
 	 * (2) per-banner ruleSet (settings.ruleSet entries restricted to
 	 * EU/US/OTHER country sets).
 	 *
+	 * Under Cache Compatibility Mode, AMP must follow the classic frontend's
+	 * cache-safe baseline: no visitor-country lookup, no geo suppression, and
+	 * neutral banner selection. Otherwise an AMP cache can store a no-banner or
+	 * country-specific render and serve it to visitors from another region.
+	 *
 	 * @return \FazCookie\Admin\Modules\Banners\Includes\Banner|false
 	 */
 	private function get_active_banner() {
-		$country = Geolocation::get_visitor_country();
+		$cache_compatibility = $this->is_cache_compatibility_enabled();
+		$country             = $cache_compatibility ? '' : Geolocation::get_visitor_country();
 
 		// Guard 1 — global geo-targeting from Settings → Geolocation.
-		if ( $this->is_geo_banner_disabled( $country ) ) {
+		if ( ! $cache_compatibility && $this->is_geo_banner_disabled( $country ) ) {
 			return false;
 		}
 
@@ -405,7 +428,7 @@ class AMP_Consent {
 		}
 
 		// Guard 2 — per-banner ruleSet (matches Frontend::is_geo_blocked()).
-		if ( $this->is_banner_geo_blocked( $banner, $country ) ) {
+		if ( ! $cache_compatibility && $this->is_banner_geo_blocked( $banner, $country ) ) {
 			return false;
 		}
 		return $banner;
