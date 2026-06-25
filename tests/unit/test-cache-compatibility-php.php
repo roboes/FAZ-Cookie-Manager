@@ -380,10 +380,32 @@ namespace {
 		true,
 		'cache_compatibility OFF → REST country-dependent cache-bust is unchanged'
 	);
+	Controller::$countryDependent = false;
+	$GLOBALS['faz_test_filters']  = array(
+		'faz_use_country_language_fallback' => array(
+			function () {
+				return true;
+			},
+		),
+	);
+	assert_eq(
+		$amp_method->invoke( $amp ),
+		true,
+		'cache_compatibility OFF → AMP cache-busts for country language fallback'
+	);
+	$GLOBALS['faz_test_filters'] = array();
+	$GLOBALS['faz_test_options']['faz_settings'] = array(
+		'banner_control' => array( 'cache_compatibility' => false ),
+		'geolocation'    => array( 'geo_targeting' => true, 'default_behavior' => 'no_banner' ),
+	);
+	assert_eq(
+		$amp_method->invoke( $amp ),
+		true,
+		'cache_compatibility OFF → AMP cache-busts for global geo no_banner'
+	);
 
 	// OFF (or absent) → unchanged behaviour: country-dependent only when a
 	// real trigger is active. Controller + Geo_Runtime stubs report "no".
-	\FazCookie\Admin\Modules\Banners\Includes\Controller::$countryDependent = false;
 	\FazCookie\Frontend\Includes\Geo_Runtime::$enabled                              = false;
 	assert_eq(
 		faz_is_dependent( array( 'banner_control' => array( 'cache_compatibility' => false ) ) ),
@@ -432,6 +454,19 @@ namespace {
 		faz_current_language(),
 		'en',
 		'cache_compatibility ON → TranslatePress language is gated; render stays default-stable (#158)'
+	);
+	$GLOBALS['faz_test_filters'] = array(
+		'wpml_current_language' => array(
+			function () {
+				return 'it';
+			},
+		),
+	);
+	faz_current_language( true );
+	assert_eq(
+		faz_current_language(),
+		'en',
+		'cache_compatibility ON → WPML cookie-mode fallback is gated; render stays default-stable (#160)'
 	);
 
 	echo "\n";

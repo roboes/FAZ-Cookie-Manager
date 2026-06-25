@@ -114,16 +114,15 @@ if ( ! function_exists( 'faz_current_language' ) ) {
 		$current_language = null;
 
 		// Cache Compatibility Mode: the rendered HTML must be identical for
-		// every anonymous visitor on a given URL. Polylang/WPML encode the
-		// language in the URL (a URL-keyed full-page cache distinguishes them
-		// correctly), but cookie/session-mode TranslatePress ($TRP_LANGUAGE)
-		// and Weglot resolve the language from request state, so reading them
-		// here would vary the cached banner store (language, category names,
-		// GVL/TCF) across visitors sharing the same cached URL. Under
-		// cache-compat we therefore consult only the URL-based sources and
-		// otherwise fall back to the site default; script.js + the banner-rest
-		// swap correct the language client-side (issue #67). Read the option
-		// directly — this is a procedural helper with no access to
+		// every anonymous visitor on a given URL. Polylang encodes the language
+		// in the URL (a URL-keyed full-page cache distinguishes it correctly),
+		// but TranslatePress ($TRP_LANGUAGE), Weglot, and WPML "No language in
+		// URLs" mode can resolve language from request state. Reading those
+		// values here would vary the cached banner store (language, category
+		// names, GVL/TCF) across visitors sharing the same cached URL. Under
+		// cache-compat we therefore consult only URL-stable sources and
+		// otherwise fall back to the site default. Read the option directly —
+		// this is a procedural helper with no access to
 		// Frontend::is_cache_compatibility_enabled().
 		$faz_settings        = get_option( 'faz_settings', array() );
 		$cache_compatibility = is_array( $faz_settings ) && ! empty( $faz_settings['banner_control']['cache_compatibility'] );
@@ -149,8 +148,9 @@ if ( ! function_exists( 'faz_current_language' ) ) {
 				// Weglot: use the helper function. Skipped under cache-compat
 				// for the same per-visitor-variation reason as TranslatePress.
 				$current_language = weglot_get_current_language();
-			} else {
-				// If the plugin used is WPML.
+			} elseif ( ! $cache_compatibility ) {
+				// WPML: skip under cache-compat because "No language in URLs"
+				// mode can resolve from the visitor cookie.
 				$current_language = apply_filters( 'wpml_current_language', null );
 			}
 

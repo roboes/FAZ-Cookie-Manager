@@ -107,6 +107,23 @@ class AMP_Consent {
 		if ( ! empty( $settings['banner_control']['cache_compatibility'] ) ) {
 			return (bool) apply_filters( 'faz_country_dependent_banner_output', false, $settings );
 		}
+
+		if (
+			function_exists( 'faz_i18n_is_multilingual' )
+			&& ! faz_i18n_is_multilingual()
+			&& apply_filters( 'faz_use_country_language_fallback', false )
+		) {
+			return true;
+		}
+
+		if (
+			! empty( $settings['geolocation']['geo_targeting'] )
+			&& isset( $settings['geolocation']['default_behavior'] )
+			&& 'no_banner' === $settings['geolocation']['default_behavior']
+		) {
+			return true;
+		}
+
 		return Controller::get_instance()->has_country_dependent_banners();
 	}
 
