@@ -2,6 +2,12 @@
 
 All notable changes to FAZ Cookie Manager are documented in this file.
 
+## [1.21.1] — 2026-06-25
+
+### Fixed
+- **Cache Compatibility Mode visitor-invariance (#158).** On full-page-cached sites with Cache Compatibility Mode enabled, the cookie banner could fail to appear on the first visit (and trackers could fire), because the rendered page still varied per visitor and a single cached copy is shared between everyone. A search-engine bot or the cache-warming crawler generated a banner-less copy (the banner-script enqueue still applied the `hide_from_bots` and geo skips), and the IAB TCF `gdprApplies` signal, the AMP banner selection and the banner language could likewise vary per visitor — so a banner-less / wrong-jurisdiction / wrong-language copy could be cached and served to everyone. Under Cache Compatibility Mode the render is now fully visitor-invariant: the banner script is always enqueued, `gdprApplies` is conservative, AMP selection is country-neutral, and the banner language ignores cookie/session state from TranslatePress, Weglot and WPML "No language in URLs" mode (URL-based Polylang/WPML stay correct; the visitor's real language is still corrected client-side via the REST language swap). Reported on gooloo.de.
+- **WordPress Interactivity API / optimiser compatibility (#158).** The consent script-blocker's `document.createElement` override and `MutationObserver` no longer break native WP 6.5+ Interactivity API modules (`type="module"` / `importmap`) or optimiser-deferred placeholders (LiteSpeed Cache / WP Rocket "Delay JS"). The exemption is now gated on the tracker decision rather than the script type, so a genuine first-party module is left intact while a tracker shipped as `type="module"` — or a placeholder flipped back to a runnable type in place — is still blocked. The observer also watches in-place `type` flips so an optimiser-restored tracker is re-blocked.
+
 ## [1.21.0] — 2026-06-24
 
 ### Added
