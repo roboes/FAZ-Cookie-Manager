@@ -102,6 +102,39 @@ class Cookies_API extends API_Controller {
 			)
 		);
 
+		// Manual service registration (#161): list the built-in provider
+		// catalogue, and register a chosen service's cookies into wp_faz_cookies
+		// so they are declared domain-wide without relying on the scanner.
+		register_rest_route(
+			$this->namespace,
+			'/' . $this->rest_base . '/catalogue-services',
+			array(
+				'methods'             => WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'get_catalogue_services' ),
+				// Read endpoint → use the read permission (manage_options),
+				// matching the other READABLE routes here. create_item_* also
+				// demands the plugin write-nonce, which a read needn't. (#162 review)
+				'permission_callback' => array( $this, 'get_items_permissions_check' ),
+			)
+		);
+
+		register_rest_route(
+			$this->namespace,
+			'/' . $this->rest_base . '/register-service',
+			array(
+				'methods'             => WP_REST_Server::CREATABLE,
+				'callback'            => array( $this, 'register_service' ),
+				'permission_callback' => array( $this, 'create_item_permissions_check' ),
+				'args'                => array(
+					'service_id' => array(
+						'required'          => true,
+						'type'              => 'string',
+						'sanitize_callback' => 'sanitize_key',
+					),
+				),
+			)
+		);
+
 		register_rest_route(
 			$this->namespace,
 			'/' . $this->rest_base . '/(?P<id>[\d]+)',
@@ -135,6 +168,207 @@ class Cookies_API extends API_Controller {
 			)
 		);
 
+	}
+
+	/**
+	 * Active non-necessary category slugs that exist on this install.
+	 *
+	 * @return array
+	 */
+	private function active_category_slugs() {
+		$slugs = array();
+		$cats  = \FazCookie\Admin\Modules\Cookies\Includes\Category_Controller::get_instance()->get_items();
+		foreach ( (array) $cats as $cat ) {
+			$slug = is_object( $cat ) ? ( $cat->slug ?? '' ) : ( $cat['slug'] ?? '' );
+			if ( '' !== $slug && 'necessary' !== $slug && 'wordpress-internal' !== $slug ) {
+				$slugs[] = $slug;
+			}
+		}
+		return $slugs;
+	}
+
+	/**
+	 * Existing cookie names already in wp_faz_cookies (lower-cased map).
+	 *
+	 * @return array
+	 */
+	private function existing_cookie_names() {
+		$names = array();
+		$rows  = Cookie_Controller::get_instance()->get_item_from_db();
+		if ( is_array( $rows ) ) {
+			foreach ( $rows as $row ) {
+				$n = is_object( $row ) ? ( $row->name ?? '' ) : ( $row['name'] ?? '' );
+				if ( '' !== $n ) {
+					$names[ strtolower( $n ) ] = true;
+				}
+			}
+		}
+		return $names;
+	}
+
+	/**
+	 * Best-effort cookie domain derived from a provider's first host-like pattern.
+	 *
+	 * @param array $patterns Provider URL/inline patterns.
+	 * @return string
+	 */
+	private function provider_domain_from_patterns( $patterns ) {
+		foreach ( (array) $patterns as $pattern ) {
+			$pattern = is_string( $pattern ) ? trim( $pattern ) : '';
+			if ( '' === $pattern ) {
+				continue;
+			}
+			// Take the token before the first slash, drop scheme if present.
+			$host = preg_replace( '#^https?://#i', '', $pattern );
+			$host = explode( '/', $host )[0];
+			if ( false !== strpos( $host, '.' ) && false === strpos( $host, ' ' ) ) {
+				return sanitize_text_field( $host );
+			}
+		}
+		return '';
+	}
+
+	/**
+	 * Concrete (non-wildcard) cookie names declared by a provider.
+	 *
+	 * Some catalogue entries list wildcard patterns (e.g. "_hjSession_*").
+	 * Those can't be created as a literal wp_faz_cookies row and never match a
+	 * real scanned cookie name, so they are excluded from both the registration
+	 * payload and the "registered" calculation — mirroring the scanner's own
+	 * inference path, which already drops them. (#161)
+	 *
+	 * @param array $svc Provider entry from Known_Providers.
+	 * @return array
+	 */
+	private function provider_concrete_cookies( $svc ) {
+		$cookies = isset( $svc['cookies'] ) && is_array( $svc['cookies'] ) ? $svc['cookies'] : array();
+		$out     = array();
+		foreach ( $cookies as $name ) {
+			$name = is_string( $name ) ? trim( $name ) : '';
+			if ( '' !== $name && false === strpos( $name, '*' ) ) {
+				$out[] = $name;
+			}
+		}
+		return array_values( $out );
+	}
+
+	/**
+	 * GET catalogue-services — the built-in provider catalogue for the manual
+	 * registration UI (#161). Lists non-necessary providers whose category is
+	 * active on this install, flagging which are already fully registered.
+	 *
+	 * @return WP_REST_Response
+	 */
+	public function get_catalogue_services() {
+		$active   = $this->active_category_slugs();
+		$existing = $this->existing_cookie_names();
+		$out      = array();
+		foreach ( \FazCookie\Includes\Known_Providers::get_all() as $id => $svc ) {
+			$category = isset( $svc['category'] ) ? $svc['category'] : '';
+			if ( '' === $category || ! in_array( $category, $active, true ) ) {
+				continue;
+			}
+			$cookies = $this->provider_concrete_cookies( $svc );
+			// Skip providers that declare no concrete cookie names — nothing to
+			// register as a transparency row (they are still blocked by URL
+			// pattern, and wildcard-only entries can't be persisted).
+			if ( empty( $cookies ) ) {
+				continue;
+			}
+			$missing = 0;
+			foreach ( $cookies as $name ) {
+				if ( empty( $existing[ strtolower( (string) $name ) ] ) ) {
+					$missing++;
+				}
+			}
+			$out[] = array(
+				'id'           => sanitize_key( $id ),
+				'label'        => isset( $svc['label'] ) ? sanitize_text_field( $svc['label'] ) : sanitize_key( $id ),
+				'category'     => sanitize_key( $category ),
+				'cookie_count' => count( $cookies ),
+				'registered'   => ( 0 === $missing ),
+			);
+		}
+		usort(
+			$out,
+			static function ( $a, $b ) {
+				return strcasecmp( $a['label'], $b['label'] );
+			}
+		);
+		return new WP_REST_Response( array( 'services' => $out ), 200 );
+	}
+
+	/**
+	 * POST register-service — register a catalogue service's cookies into
+	 * wp_faz_cookies (discovered=1) so they are declared domain-wide on every
+	 * page without relying on the scanner, and feed the Cookie Policy generator.
+	 * Reuses the scanner's save_cookies() enrichment (Cookie_Database → Known
+	 * Providers → Open Cookie Database). (#161)
+	 *
+	 * @param WP_REST_Request $request Request.
+	 * @return WP_REST_Response|WP_Error
+	 */
+	public function register_service( $request ) {
+		$service_id = sanitize_key( (string) $request->get_param( 'service_id' ) );
+		if ( '' === $service_id ) {
+			return new WP_Error( 'faz_invalid_service', __( 'A service id is required.', 'faz-cookie-manager' ), array( 'status' => 400 ) );
+		}
+		$providers = \FazCookie\Includes\Known_Providers::get_all();
+		if ( ! isset( $providers[ $service_id ] ) ) {
+			return new WP_Error( 'faz_unknown_service', __( 'Unknown service.', 'faz-cookie-manager' ), array( 'status' => 404 ) );
+		}
+		$svc      = $providers[ $service_id ];
+		$category = isset( $svc['category'] ) ? sanitize_key( $svc['category'] ) : '';
+		if ( '' === $category || 'necessary' === $category || ! in_array( $category, $this->active_category_slugs(), true ) ) {
+			return new WP_Error( 'faz_invalid_category', __( 'This service maps to a category that is not active.', 'faz-cookie-manager' ), array( 'status' => 400 ) );
+		}
+		$cookie_names = $this->provider_concrete_cookies( $svc );
+		if ( empty( $cookie_names ) ) {
+			return new WP_Error( 'faz_no_cookies', __( 'This service declares no registrable cookies.', 'faz-cookie-manager' ), array( 'status' => 400 ) );
+		}
+		$domain  = $this->provider_domain_from_patterns( isset( $svc['patterns'] ) ? $svc['patterns'] : array() );
+		$before  = $this->existing_cookie_names();
+		$payload = array();
+		foreach ( $cookie_names as $name ) {
+			$name = sanitize_text_field( (string) $name );
+			if ( '' === $name ) {
+				continue;
+			}
+			$payload[] = array(
+				'name'     => $name,
+				'category' => $category,
+				'domain'   => $domain,
+			);
+		}
+
+		// Reuse the scanner's enrichment + persistence (sets discovered=1, skips
+		// existing names, flushes caches). Guarded so a missing scanner module
+		// never fatals the endpoint.
+		$scanner = '\\FazCookie\\Admin\\Modules\\Scanner\\Includes\\Controller';
+		if ( ! class_exists( $scanner ) ) {
+			return new WP_Error( 'faz_scanner_unavailable', __( 'The registration engine is unavailable.', 'faz-cookie-manager' ), array( 'status' => 500 ) );
+		}
+		\call_user_func( array( $scanner, 'get_instance' ) )->save_cookies( $payload );
+
+		// Invalidate the runtime cookie-scripts map so the new rows surface on
+		// the next render, and fire the standard write action (cache purge etc.).
+		delete_transient( 'faz_cookie_scripts_map' );
+		do_action( 'faz_after_update_cookie' );
+
+		$after = $this->existing_cookie_names();
+		$added = max( 0, count( $after ) - count( $before ) );
+		return new WP_REST_Response(
+			array(
+				'service'   => array(
+					'id'    => $service_id,
+					'label' => isset( $svc['label'] ) ? sanitize_text_field( $svc['label'] ) : $service_id,
+				),
+				'requested' => count( $payload ),
+				'added'     => $added,
+				'category'  => $category,
+			),
+			200
+		);
 	}
 
 	/**
