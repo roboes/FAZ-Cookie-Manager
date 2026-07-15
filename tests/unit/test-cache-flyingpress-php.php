@@ -76,6 +76,22 @@ namespace {
 			return 1; // plugins_loaded already ran — the module loads services inline.
 		}
 	}
+	// add_filter recorder: filter => list of callbacks (mirrors add_action).
+	$GLOBALS['faz_filters'] = array();
+	if ( ! function_exists( 'add_filter' ) ) {
+		function add_filter( $hook, $callback, $priority = 10, $accepted_args = 1 ) { // phpcs:ignore
+			$GLOBALS['faz_filters'][ $hook ][] = $callback;
+			return true;
+		}
+	}
+	if ( ! function_exists( 'apply_filters' ) ) {
+		function apply_filters( $hook, $value ) { // phpcs:ignore
+			foreach ( $GLOBALS['faz_filters'][ $hook ] ?? array() as $cb ) {
+				$value = call_user_func( $cb, $value );
+			}
+			return $value;
+		}
+	}
 
 	$faz_root = dirname( __DIR__, 2 );
 	require_once $faz_root . '/admin/modules/cache/services/class-services.php';
@@ -120,6 +136,7 @@ namespace {
 	// Hook wiring on construction (FlyingPress present → is_active() true).
 	// ---------------------------------------------------------------------
 	$GLOBALS['faz_actions'] = array();
+	$GLOBALS['faz_filters'] = array();
 	$adapter                = new Flying_Press();
 	faz_ok( $adapter->is_active(), '04 is_active() detects FlyingPress\\Purge' );
 
@@ -136,6 +153,38 @@ namespace {
 	);
 	$missing = array_diff( $expected_hooks, array_keys( $GLOBALS['faz_actions'] ) );
 	faz_ok( array() === $missing, '05 clear_cache subscribed to every faz CRUD/purge hook' );
+
+	// ---------------------------------------------------------------------
+	// FlyingPress JS delay / defer / minify exclusion (banner must not be
+	// held back by "Delay all JavaScript"). Filters registered on run().
+	// ---------------------------------------------------------------------
+	$expected_filters = array(
+		'flying_press_exclude_from_delay:js',
+		'flying_press_exclude_from_defer:js',
+		'flying_press_exclude_from_minify:js',
+	);
+	$missing_filters = array_diff( $expected_filters, array_keys( $GLOBALS['faz_filters'] ) );
+	faz_ok( array() === $missing_filters, '05a consent scripts registered on every FlyingPress delay/defer/minify:js filter' );
+
+	// Each filter must ADD our keywords without dropping FlyingPress's existing
+	// exclusions (the merge is additive).
+	$excl_ok = true;
+	foreach ( $expected_filters as $filter ) {
+		$result = apply_filters( $filter, array( 'existing-exclusion' ) );
+		if ( ! in_array( 'faz-cookie-manager', $result, true )
+			|| ! in_array( 'faz-fw', $result, true )
+			|| ! in_array( 'existing-exclusion', $result, true ) ) {
+			$excl_ok = false;
+		}
+	}
+	faz_ok( $excl_ok, '05b filters add faz-cookie-manager + faz-fw and preserve prior exclusions' );
+
+	// A non-array input (older FlyingPress builds seed null) must not fatal.
+	$null_seed = apply_filters( 'flying_press_exclude_from_delay:js', null );
+	faz_ok(
+		is_array( $null_seed ) && in_array( 'faz-cookie-manager', $null_seed, true ),
+		'05c non-array filter seed is handled (returns our keywords, no fatal)'
+	);
 
 	// ---------------------------------------------------------------------
 	// Purge behaviour when a banner is saved.
@@ -165,12 +214,16 @@ namespace {
 	// Inactive service (FlyingPress absent) must not register hooks.
 	// ---------------------------------------------------------------------
 	$GLOBALS['faz_actions'] = array();
+	$GLOBALS['faz_filters'] = array();
 	$inactive               = new class() extends Flying_Press {
 		public function is_active() {
 			return false; // Simulates class_exists('\FlyingPress\Purge') === false.
 		}
 	};
-	faz_ok( array() === $GLOBALS['faz_actions'], '11 inactive adapter registers no hooks (Services base-class gate)' );
+	faz_ok(
+		array() === $GLOBALS['faz_actions'] && array() === $GLOBALS['faz_filters'],
+		'11 inactive adapter registers no hooks or exclusion filters (Services base-class gate)'
+	);
 	unset( $inactive );
 
 	// ---------------------------------------------------------------------
