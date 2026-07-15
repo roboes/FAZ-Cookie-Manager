@@ -469,6 +469,116 @@ namespace {
 		'cache_compatibility ON → WPML cookie-mode fallback is gated; render stays default-stable (#160)'
 	);
 
+	// ---------------------------------------------------------------------
+	// FlyingPress bridge (issue #125): flying_press_is_cacheable() vetoes
+	// page caching exactly where the other page caches get DONOTCACHEPAGE.
+	// FlyingPress honours neither DONOTCACHEPAGE nor Cache-Control:no-store;
+	// its documented flying_press_is_cacheable filter is the only channel.
+	// ---------------------------------------------------------------------
+	echo "\nFrontend::flying_press_is_cacheable() (issue #125)\n";
+
+	if ( ! function_exists( 'is_admin' ) ) {
+		function is_admin() {
+			return ! empty( $GLOBALS['faz_test_is_admin'] );
+		}
+	}
+	if ( ! function_exists( 'wp_doing_ajax' ) ) {
+		function wp_doing_ajax() {
+			return false;
+		}
+	}
+	if ( ! function_exists( 'wp_doing_cron' ) ) {
+		function wp_doing_cron() {
+			return false;
+		}
+	}
+	if ( ! function_exists( 'faz_disable_banner' ) ) {
+		function faz_disable_banner() {
+			return false;
+		}
+	}
+	if ( ! function_exists( 'faz_is_front_end_request' ) ) {
+		function faz_is_front_end_request() {
+			return empty( $GLOBALS['faz_test_not_frontend'] );
+		}
+	}
+
+	/**
+	 * Frontend double: is_banner_disabled_by_settings() reads the real
+	 * Store-backed settings object (unavailable here), so surface it as a
+	 * seedable flag; everything else runs the real code paths.
+	 */
+	class Faz_FP_Frontend extends Frontend {
+		public $banner_disabled = false;
+		protected function is_banner_disabled_by_settings() {
+			return $this->banner_disabled;
+		}
+	}
+
+	/** Faz_FP_Frontend with a reflection-seeded settings cache. */
+	function faz_fp_frontend( array $settings, $banner_disabled = false ) {
+		$fe = ( new ReflectionClass( Faz_FP_Frontend::class ) )->newInstanceWithoutConstructor();
+		$p  = new ReflectionProperty( Frontend::class, 'settings_option_cache' );
+		$p->setAccessible( true );
+		$p->setValue( $fe, $settings );
+		$fe->banner_disabled = $banner_disabled;
+		return $fe;
+	}
+
+	$GLOBALS['faz_test_filters']     = array();
+	$GLOBALS['faz_test_is_admin']    = false;
+	$GLOBALS['faz_test_not_frontend'] = false;
+	Controller::$countryDependent    = false;
+	\FazCookie\Frontend\Includes\Geo_Runtime::$enabled = false;
+
+	$dependent_settings = array(
+		'banner_control' => array( 'cache_compatibility' => false ),
+		'iab'            => array( 'enabled' => true ),
+	);
+
+	assert_eq(
+		faz_fp_frontend( $dependent_settings )->flying_press_is_cacheable( true ),
+		false,
+		'country-dependent output → FlyingPress caching vetoed'
+	);
+	assert_eq(
+		faz_fp_frontend( array( 'banner_control' => array( 'cache_compatibility' => false ) ) )->flying_press_is_cacheable( true ),
+		true,
+		'no country-dependence → FlyingPress verdict untouched'
+	);
+	assert_eq(
+		faz_fp_frontend( array(
+			'banner_control' => array( 'cache_compatibility' => true ),
+			'iab'            => array( 'enabled' => true ),
+		) )->flying_press_is_cacheable( true ),
+		true,
+		'Cache Compatibility Mode ON → page stays cacheable by FlyingPress'
+	);
+	assert_eq(
+		faz_fp_frontend( $dependent_settings )->flying_press_is_cacheable( false ),
+		false,
+		'an exclusion decided elsewhere (false in) is never overturned'
+	);
+	assert_eq(
+		faz_fp_frontend( $dependent_settings, true )->flying_press_is_cacheable( true ),
+		true,
+		'banner disabled by settings → no veto (page never renders the banner)'
+	);
+	$GLOBALS['faz_test_not_frontend'] = true;
+	assert_eq(
+		faz_fp_frontend( $dependent_settings )->flying_press_is_cacheable( true ),
+		true,
+		'non-frontend request (REST/AJAX scope guard) → no veto'
+	);
+	$GLOBALS['faz_test_not_frontend'] = false;
+	$GLOBALS['faz_test_is_admin']     = true;
+	assert_eq(
+		faz_fp_frontend( $dependent_settings )->flying_press_is_cacheable( true ),
+		true,
+		'admin request → no veto'
+	);
+	$GLOBALS['faz_test_is_admin'] = false;
+
 	echo "\n";
 	if ( $tests_failed > 0 ) {
 		echo "\033[31m✗ {$tests_failed} failed\033[0m, {$tests_passed} passed ({$tests_run} total)\n";

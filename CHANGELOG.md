@@ -9,6 +9,7 @@ All notable changes to FAZ Cookie Manager are documented in this file.
 
 ### Added
 - **FlyingPress cache purge integration — issue #125.** FlyingPress joins the supported cache services (WP Rocket, LiteSpeed, W3TC, …): saving a banner, cookie, category or setting now automatically purges the FlyingPress page cache via its documented API (`FlyingPress\Purge::purge_everything()`) and queues a re-warm (`FlyingPress\Preload::preload_cache()`), so a stale cached page can no longer keep serving the old banner markup after a save.
+- **FlyingPress country-dependent cache bypass — issue #125.** FlyingPress honours neither the `DONOTCACHEPAGE` constant nor the `Cache-Control: no-store` header the plugin emits when the rendered output varies by visitor country (IAB TCF `gdprApplies`, geo-targeted banners, runtime geo-routing, country language fallback) — a FlyingPress-cached page would freeze one visitor's country variant for everyone. The plugin now hooks FlyingPress's documented `flying_press_is_cacheable` filter with the same gating as the existing header/constant bypass; under Cache Compatibility Mode the page stays fully cacheable, unchanged.
 
 ## [1.23.0] — 2026-07-11
 

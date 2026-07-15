@@ -222,6 +222,17 @@ class Frontend {
 		add_action( 'send_headers', array( $this, 'shred_non_consented_cookies' ) );
 		add_action( 'send_headers', array( $this, 'send_vary_header' ) );
 
+		// FlyingPress honours neither the DONOTCACHEPAGE constant nor the
+		// Cache-Control: no-store header that send_geo_cache_headers() emits
+		// for country-dependent output — it decides cacheability solely via
+		// its documented flying_press_is_cacheable filter
+		// (https://docs.flyingpress.com/en/articles/11406011-conditionally-control-page-caching).
+		// Without this bridge a FlyingPress-cached page freezes ONE visitor's
+		// country variant (wrong banner / gdprApplies for everyone else) —
+		// part of the FlyingPress reports in issue #125. Registered
+		// unconditionally: with FlyingPress absent the filter never runs.
+		add_filter( 'flying_press_is_cacheable', array( $this, 'flying_press_is_cacheable' ) );
+
 		// Content-level blocking (defense-in-depth — runs before output buffer).
 		add_filter( 'the_content', array( $this, 'filter_content_blocking' ), 1000 );
 		add_filter( 'widget_text', array( $this, 'filter_content_blocking' ), 1000 );
@@ -1013,6 +1024,39 @@ class Frontend {
 		if ( ! defined( 'DONOTCACHEDB' ) ) {
 			define( 'DONOTCACHEDB', true );
 		}
+	}
+
+	/**
+	 * FlyingPress `flying_press_is_cacheable` bridge: veto page caching when
+	 * the rendered output varies by visitor country.
+	 *
+	 * Mirrors send_geo_cache_headers()' gating exactly, so FlyingPress skips
+	 * caching precisely the requests every other supported page cache already
+	 * bypasses via DONOTCACHEPAGE / no-store (which FlyingPress ignores).
+	 * Under Cache Compatibility Mode is_country_dependent_output() is false,
+	 * so the page stays cacheable — same behaviour as the other caches.
+	 *
+	 * @param bool $is_cacheable FlyingPress's current verdict for the request.
+	 * @return bool
+	 */
+	public function flying_press_is_cacheable( $is_cacheable ) {
+		// Never overturn an exclusion someone else already decided.
+		if ( false === $is_cacheable ) {
+			return $is_cacheable;
+		}
+		if ( is_admin() || wp_doing_ajax() || wp_doing_cron() || true === faz_disable_banner() ) {
+			return $is_cacheable;
+		}
+		if ( ! faz_is_front_end_request() ) {
+			return $is_cacheable;
+		}
+		if ( $this->is_banner_disabled_by_settings() ) {
+			return $is_cacheable;
+		}
+		if ( $this->is_country_dependent_output() ) {
+			return false;
+		}
+		return $is_cacheable;
 	}
 
 	/**
