@@ -12,10 +12,13 @@
  *   - hook wiring: an active adapter subscribes clear_cache() to every
  *     faz_after_* CRUD hook (banner, cookie, category, settings, activate,
  *     faz_clear_cache);
- *   - purge behaviour: firing faz_after_update_banner purges the whole
- *     FlyingPress cache (Purge::purge_everything) and queues a re-warm
- *     (Preload::preload_cache), per the API documented at
+ *   - purge behaviour: firing faz_after_update_banner purges only the
+ *     cached HTML pages (Purge::purge_pages — the rendered HTML is all that
+ *     changes on a save) and triggers NO full-site preload crawl, per the
+ *     API documented at
  *     https://docs.flyingpress.com/en/articles/11406092-programmatically-purge-and-preload-cache
+ *   - fail-closed: a throw from FlyingPress inside clear_cache() does not
+ *     propagate (it runs inside do_action(), which has no per-callback guard);
  *   - the $clear === false passthrough is a no-op;
  *   - an inactive service (FlyingPress absent) registers no hooks.
  *
@@ -41,10 +44,18 @@ namespace FlyingPress {
 	class Purge {
 		public static $everything = 0;
 		public static $pages      = 0;
+		/** When true, the purge methods throw — exercises the fail-closed try/catch. */
+		public static $throw = false;
 		public static function purge_everything() {
+			if ( self::$throw ) {
+				throw new \RuntimeException( 'simulated FlyingPress failure' );
+			}
 			++self::$everything;
 		}
 		public static function purge_pages() {
+			if ( self::$throw ) {
+				throw new \RuntimeException( 'simulated FlyingPress failure' );
+			}
 			++self::$pages;
 		}
 	}
@@ -160,28 +171,52 @@ namespace {
 	faz_ok( array() === $GLOBALS['faz_filters'], '05a purge adapter does not own frontend optimisation filters' );
 
 	// ---------------------------------------------------------------------
-	// Purge behaviour when a banner is saved.
+	// Purge behaviour when a banner is saved. Only the rendered HTML
+	// changes on a banner/cookie/settings save, so the adapter purges the
+	// cached HTML pages (purge_pages) and does NOT trigger a full-site
+	// preload crawl (Preload::preload_cache enumerates every post/term/author
+	// URL of the whole site inline on the save request).
 	// ---------------------------------------------------------------------
 	foreach ( $GLOBALS['faz_actions']['faz_after_update_banner'] as $cb ) {
 		call_user_func( $cb );
 	}
-	faz_ok( 1 === \FlyingPress\Purge::$everything, '06 banner save fires exactly one full FlyingPress purge' );
-	faz_ok( 0 === \FlyingPress\Purge::$pages, '07 purge_pages() fallback not used when purge_everything() exists' );
-	faz_ok( 1 === \FlyingPress\Preload::$preloads, '08 purged cache is queued for re-warm (preload_cache)' );
+	faz_ok( 1 === \FlyingPress\Purge::$pages, '06 banner save purges the cached HTML pages (purge_pages)' );
+	faz_ok( 0 === \FlyingPress\Purge::$everything, '07 purge_everything() not used when purge_pages() exists (HTML-only invalidation)' );
+	faz_ok( 0 === \FlyingPress\Preload::$preloads, '08 no full-site preload crawl is triggered on save' );
 
 	// $clear === false passthrough (hook arg) must be a no-op.
 	$adapter->clear_cache( false );
 	faz_ok(
-		1 === \FlyingPress\Purge::$everything && 1 === \FlyingPress\Preload::$preloads,
+		1 === \FlyingPress\Purge::$pages && 0 === \FlyingPress\Preload::$preloads,
 		'09 clear_cache(false) is a no-op (no purge, no preload)'
 	);
 
 	// Explicit call purges again (idempotent counters advance by one).
 	$adapter->clear_cache();
 	faz_ok(
-		2 === \FlyingPress\Purge::$everything && 2 === \FlyingPress\Preload::$preloads,
-		'10 clear_cache() purges and re-warms once per invocation'
+		2 === \FlyingPress\Purge::$pages && 0 === \FlyingPress\Preload::$preloads,
+		'10 clear_cache() purges HTML pages once per invocation, still no preload'
 	);
+
+	// ---------------------------------------------------------------------
+	// Fail-closed: a throw from FlyingPress inside clear_cache() must NOT
+	// propagate. clear_cache() runs inside do_action('faz_after_update_*'),
+	// which has no per-callback try/catch, so an uncaught throw would abort
+	// every other cache adapter still queued on the same hook and surface a
+	// raw fatal on the admin save.
+	// ---------------------------------------------------------------------
+	\FlyingPress\Purge::$throw = true;
+	$threw                     = false;
+	$ret                       = null;
+	try {
+		$ret = $adapter->clear_cache();
+	} catch ( \Throwable $e ) {
+		$threw = true;
+	}
+	\FlyingPress\Purge::$throw = false;
+	faz_ok( false === $threw, '14 a FlyingPress purge exception does not propagate out of clear_cache()' );
+	faz_ok( false === $ret, '15 clear_cache() returns false when the purge fails (fail-closed)' );
+	faz_ok( 2 === \FlyingPress\Purge::$pages, '16 a failed purge does not advance the success counter' );
 
 	// ---------------------------------------------------------------------
 	// Inactive service (FlyingPress absent) must not register hooks.

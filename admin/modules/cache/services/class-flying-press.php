@@ -26,11 +26,27 @@ if ( ! defined( 'ABSPATH' ) ) {
  *
  * Uses the API documented at
  * https://docs.flyingpress.com/en/articles/11406092-programmatically-purge-and-preload-cache
- * — FlyingPress\Purge::purge_everything() (full purge; purge_pages() as a
- * fallback for older builds) and FlyingPress\Preload::preload_cache() to
- * re-warm the cache. Both are documented as non-blocking and safe to call
- * from hooks. Calls are guarded with is_callable() so a future FlyingPress
- * refactor degrades to a no-op instead of a fatal.
+ * — FlyingPress\Purge::purge_pages() clears only the cached HTML
+ * (*.html.gz), which is all that changes when a banner / cookie / setting
+ * is saved. purge_everything() is kept as a fallback for older builds that
+ * predate purge_pages(); it additionally wipes FlyingPress's generated
+ * minified CSS/JS, forcing a full site-wide re-minify on the next visit —
+ * disproportionate for an HTML-only invalidation.
+ *
+ * No preload/re-warm is triggered. FlyingPress\Preload::preload_cache()
+ * is NOT the lightweight non-blocking call the docs imply: it enumerates
+ * every published post of every public post type, plus every taxonomy term
+ * and author URL, inline on the save request before queueing the HTTP
+ * warms. Running a full-site crawl on every banner/cookie/settings save is
+ * disproportionate and out of step with the other purge-only adapters
+ * (WP Rocket, LiteSpeed, W3TC) — the purge alone already resolves #125.
+ *
+ * The purge is wrapped in try/catch: clear_cache() runs inside
+ * do_action( 'faz_after_update_*' ), which has no per-callback try/catch,
+ * so an uncaught throw would abort every other cache adapter still queued
+ * on the same hook AND surface a raw fatal on the admin save. Fail closed —
+ * degrade to a no-op, matching the reflection bridge in
+ * frontend/class-frontend.php.
  */
 class Flying_Press extends Services {
 
@@ -62,16 +78,25 @@ class Flying_Press extends Services {
 		if ( false === $clear ) {
 			return;
 		}
-		if ( is_callable( array( '\FlyingPress\Purge', 'purge_everything' ) ) ) {
-			\FlyingPress\Purge::purge_everything();
-		} elseif ( is_callable( array( '\FlyingPress\Purge', 'purge_pages' ) ) ) {
-			\FlyingPress\Purge::purge_pages();
-		} else {
+		try {
+			// Only the rendered HTML changes on a banner/cookie/settings
+			// save, so purge just the cached HTML pages. purge_everything()
+			// is the fallback for older builds that predate purge_pages().
+			if ( is_callable( array( '\FlyingPress\Purge', 'purge_pages' ) ) ) {
+				\FlyingPress\Purge::purge_pages();
+			} elseif ( is_callable( array( '\FlyingPress\Purge', 'purge_everything' ) ) ) {
+				\FlyingPress\Purge::purge_everything();
+			} else {
+				return false;
+			}
+		} catch ( \Throwable $error ) {
+			// Fail closed — see the class docblock: an uncaught throw here
+			// would abort the remaining cache adapters on the same
+			// do_action() hook and fatal the admin save.
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				error_log( 'FAZ Cookie Manager: FlyingPress purge failed — ' . $error->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+			}
 			return false;
-		}
-		// Re-warm the purged cache; queued/non-blocking per FlyingPress docs.
-		if ( is_callable( array( '\FlyingPress\Preload', 'preload_cache' ) ) ) {
-			\FlyingPress\Preload::preload_cache();
 		}
 		return true;
 	}
