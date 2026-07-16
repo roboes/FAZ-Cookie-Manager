@@ -109,6 +109,14 @@ namespace {
 		return isset( $GLOBALS['faz_test_is_frontend'] ) ? (bool) $GLOBALS['faz_test_is_frontend'] : true;
 	}
 
+	// wp_doing_cron() — faz_is_front_end_request() returns true on cron, so the v5
+	// bridge guards on wp_doing_cron() separately (FlyingPress preload runs on
+	// cron and reads Config). Controllable so the cron-bail path is testable.
+	$GLOBALS['faz_test_is_cron'] = false;
+	function wp_doing_cron() { // phpcs:ignore
+		return isset( $GLOBALS['faz_test_is_cron'] ) ? (bool) $GLOBALS['faz_test_is_cron'] : false;
+	}
+
 	$faz_pass = 0;
 	$faz_fail = 0;
 	function faz_fp_ok( $condition, $label ) { // phpcs:ignore
@@ -290,6 +298,42 @@ namespace {
 	);
 	$GLOBALS['faz_test_is_frontend'] = true;
 	unset( $admin_frontend );
+
+	// WP-Cron path: faz_is_front_end_request() returns true on cron, but the
+	// bridge must still bail — FlyingPress preload runs on cron and reads Config,
+	// so mutating it there could leak the keywords into a cron-persisted config.
+	$GLOBALS['faz_test_filters'] = array();
+	$GLOBALS['faz_test_actions'] = array();
+	$GLOBALS['faz_test_is_cron'] = true;
+	\FlyingPress\Config::$config = array(
+		'js_delay'          => true,
+		'js_delay_excludes' => array( 'cron-request-rule' ),
+	);
+	$cron_frontend = new Frontend( 'faz-cookie-manager', 'test' );
+	$cron_frontend->flying_press_apply_runtime_delay_exclusions();
+	faz_fp_ok(
+		array( 'cron-request-rule' ) === \FlyingPress\Config::$config['js_delay_excludes'],
+		'23 v5 runtime bridge does not mutate FlyingPress config on WP-Cron requests'
+	);
+	$GLOBALS['faz_test_is_cron'] = false;
+	unset( $cron_frontend );
+
+	// A non-array js_delay_excludes (null / delimited string) must be left
+	// untouched, not coerced to an empty array and overwritten with only the FAZ
+	// keywords — that would drop the administrator's existing exclusions.
+	$GLOBALS['faz_test_is_frontend'] = true;
+	$string_config = new Frontend( 'faz-cookie-manager', 'test' );
+	faz_fp_ok(
+		array( 'js_delay_excludes' => 'user,rules,string' )
+			=== $string_config->flying_press_add_delay_exclusions_to_config( array( 'js_delay_excludes' => 'user,rules,string' ) ),
+		'24 non-array js_delay_excludes is left untouched (no clobber)'
+	);
+	faz_fp_ok(
+		array( 'js_delay_excludes' => null )
+			=== $string_config->flying_press_add_delay_exclusions_to_config( array( 'js_delay_excludes' => null ) ),
+		'25 null js_delay_excludes is left untouched (no clobber)'
+	);
+	unset( $string_config );
 
 	echo "\n" . ( 0 === $faz_fail ? "ALL PASS ({$faz_pass})\n" : "FAILED: {$faz_fail}, passed: {$faz_pass}\n" );
 	exit( 0 === $faz_fail ? 0 : 1 );

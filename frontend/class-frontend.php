@@ -219,6 +219,13 @@ class Frontend {
 			add_filter( 'flying_press_exclude_from_defer:js', array( $this, 'flying_press_exclude_own_scripts' ) );
 			add_filter( 'flying_press_exclude_from_minify:js', array( $this, 'flying_press_exclude_own_scripts' ) );
 			add_action( 'plugins_loaded', array( $this, 'flying_press_apply_runtime_delay_exclusions' ), PHP_INT_MAX, 0 );
+			// Re-apply on `wp` too (front-end page loads, after `init`): if
+			// FlyingPress populates its static config later than plugins_loaded,
+			// the early pass finds no key and no-ops; `wp` fires before FlyingPress
+			// optimises the output buffer, so this catch-all lands the exclusion on
+			// late-config load orders. Idempotent ($updated !== $config guard) and
+			// front-end-gated, so the extra call is a no-op when nothing changed.
+			add_action( 'wp', array( $this, 'flying_press_apply_runtime_delay_exclusions' ), PHP_INT_MAX, 0 );
 			add_action( 'flying_press_update_config:after', array( $this, 'flying_press_apply_runtime_delay_exclusions' ), PHP_INT_MAX, 0 );
 			// Covers non-standard/late bootstrap paths where plugins_loaded has
 			// already fired before this object is constructed.
@@ -5200,7 +5207,12 @@ class Frontend {
 	 * @return mixed
 	 */
 	public function flying_press_add_delay_exclusions_to_config( $config ) {
-		if ( ! is_array( $config ) || ! array_key_exists( 'js_delay_excludes', $config ) ) {
+		// Require an ARRAY value, not just the key: array_key_exists() alone would
+		// let a non-array js_delay_excludes (null, or a delimited string as some
+		// cache plugins use) reach flying_press_exclude_own_scripts(), which
+		// coerces non-arrays to array() and would silently drop the administrator's
+		// original value. Leave any unexpected shape untouched.
+		if ( ! is_array( $config ) || ! isset( $config['js_delay_excludes'] ) || ! is_array( $config['js_delay_excludes'] ) ) {
 			return $config;
 		}
 		$config['js_delay_excludes'] = $this->flying_press_exclude_own_scripts( $config['js_delay_excludes'] );
@@ -5228,7 +5240,12 @@ class Frontend {
 		// overwrites the administrator's saved config" guarantee below. The
 		// runtime exclusion is only needed while FlyingPress is serving/optimising
 		// a public page anyway, so restrict the in-memory patch to those requests.
-		if ( ! faz_is_front_end_request() ) {
+		// wp_doing_cron() is excluded explicitly: faz_is_front_end_request() does
+		// NOT treat cron as non-frontend, and FlyingPress's own preload runs on
+		// cron and reads Config::$config — mutating it there could leak the FAZ
+		// keywords into the persisted option if a cron pass re-saves the config
+		// (mirrors the wp_doing_cron() guard on flying_press_is_cacheable()).
+		if ( ! faz_is_front_end_request() || wp_doing_cron() ) {
 			return;
 		}
 		if ( ! class_exists( '\\FlyingPress\\Config' ) || ! property_exists( '\\FlyingPress\\Config', 'config' ) ) {
