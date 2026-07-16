@@ -298,9 +298,14 @@ class Cache {
 		// to also call delete_cache()) makes a standalone delete_transient()
 		// call safe; delete_cache() alone remains available for object-cache-only
 		// invalidation, and delete() now delegates here so nothing rotates twice.
-		self::delete_cache( $group );
-
+		//
+		// Read the prefix BEFORE delete_cache(): delete_cache() → reset_prefix_cache()
+		// drops the memoized transient prefix, so reading it afterwards would force a
+		// redundant get_transient() round-trip. delete_cache() rotates only the
+		// object-cache prefix (not the transient seed), so the value is identical
+		// either way — this just reuses the in-memory copy.
 		$prefix     = self::get_transient_prefix( $group );
+		self::delete_cache( $group );
 		$transients = self::get_transient_keys_with_prefix( $prefix );
 		foreach ( $transients as $key ) {
 			delete_transient( $key );
