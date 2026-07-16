@@ -209,12 +209,24 @@ class Frontend {
 			// Autoptimize exclude helper.
 			add_filter( 'autoptimize_filter_js_exclude', array( $this, 'autoptimize_exclude_own_scripts' ) );
 
-			// FlyingPress v4 exposes delay/defer filters; v5 retains the minify
-			// filter but reads Delay All JavaScript exclusions directly from its
-			// runtime config. Register the public filters here, in the always-run
-			// frontend composition root (the admin cache adapter is not loaded on
-			// ordinary public requests), and inject the same keywords into the v5
-			// in-memory config without persisting or overwriting the user's option.
+			// Cross-version FlyingPress compatibility — DO NOT remove any of these
+			// as "dead code", each covers a different FlyingPress line (verified
+			// against FlyingPress 5.5.0 source):
+			//   * flying_press_exclude_from_delay:js / :defer:js — the exclusion
+			//     mechanism on FlyingPress 4.16–4.x. These hooks were REMOVED in
+			//     FlyingPress 5, where JavaScript::delay_scripts() reads the
+			//     exclusion list straight from Config::$config['js_delay_excludes']
+			//     with no filter, so on 5.x these two add_filter() calls are inert
+			//     but must stay for 4.x installs.
+			//   * flying_press_exclude_from_minify:js — still present in 5.x and 4.x.
+			//   * flying_press_apply_runtime_delay_exclusions() (below) — the 5.x
+			//     path: it injects the same keywords into the in-memory
+			//     Config::$config['js_delay_excludes'] (front-end renders only, never
+			//     persisting/overwriting the saved option).
+			// FlyingPress older than 4.16 (no delay/defer filter) falls back to the
+			// manual "Delay JavaScript" keyword exclusion documented in readme.txt.
+			// Registered in the always-run frontend composition root — the admin
+			// cache adapter is not loaded on ordinary public requests.
 			add_filter( 'flying_press_exclude_from_delay:js', array( $this, 'flying_press_exclude_own_scripts' ) );
 			add_filter( 'flying_press_exclude_from_defer:js', array( $this, 'flying_press_exclude_own_scripts' ) );
 			add_filter( 'flying_press_exclude_from_minify:js', array( $this, 'flying_press_exclude_own_scripts' ) );
