@@ -490,6 +490,19 @@ class Activator {
 					do_action( 'litespeed_purge_all', 'FAZ Cookie Manager upgrade' );
 				}
 			} ),
+			array( 'FlyingPress', function () {
+				// The admin cache-service module is intentionally deferred on
+				// ordinary frontend/Dashboard requests, so its faz_after_activate
+				// listener is not guaranteed to exist during the first request
+				// after an upgrade. Purge FlyingPress directly in this always-run
+				// upgrade matrix so cached HTML cannot keep serving the previous
+				// plugin version's banner/config payload.
+				if ( is_callable( array( '\FlyingPress\Purge', 'purge_pages' ) ) ) {
+					\FlyingPress\Purge::purge_pages();
+				} elseif ( is_callable( array( '\FlyingPress\Purge', 'purge_everything' ) ) ) {
+					\FlyingPress\Purge::purge_everything();
+				}
+			} ),
 			array( 'WP Rocket', function () {
 				if ( function_exists( 'rocket_clean_domain' ) ) {
 					rocket_clean_domain();

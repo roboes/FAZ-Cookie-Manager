@@ -43,10 +43,11 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 // ---------- Backend simulation ----------
 
-$GLOBALS['faz_obj_cache']      = array(); // group|key => value.
-$GLOBALS['faz_transients']     = array(); // key => value.
-$GLOBALS['faz_transient_ttls'] = array(); // key => ttl passed to set_transient.
-$GLOBALS['faz_db_transients']  = false;   // false = Redis mode, true = DB mode.
+$GLOBALS['faz_obj_cache']         = array(); // group|key => value.
+$GLOBALS['faz_transients']        = array(); // key => value.
+$GLOBALS['faz_transient_ttls']    = array(); // key => ttl passed to set_transient.
+$GLOBALS['faz_db_transients']     = false;   // false = Redis mode, true = DB mode.
+$GLOBALS['faz_on_transient_scan'] = null; // Optional concurrency interleaving hook.
 
 function wp_cache_get( $key, $group = '' ) { // phpcs:ignore
 	$k = $group . '|' . $key;
@@ -89,6 +90,15 @@ class FazTest_WPDB { // phpcs:ignore
 		return $query;
 	}
 	public function get_results( $query, $output = OBJECT ) { // phpcs:ignore
+		// Allow the regression test to interleave a fresh Cache::get() at the
+		// exact boundary where delete_transient() performs its old-epoch scan.
+		// With the unsafe order this was after the object epoch rotated but
+		// before the transient epoch rotated, which resurrected stale data.
+		if ( is_callable( $GLOBALS['faz_on_transient_scan'] ) ) {
+			$callback                         = $GLOBALS['faz_on_transient_scan'];
+			$GLOBALS['faz_on_transient_scan'] = null;
+			$callback();
+		}
 		if ( ! $GLOBALS['faz_db_transients'] ) {
 			return array(); // Redis mode: nothing in wp_options.
 		}
@@ -172,28 +182,38 @@ $GLOBALS['faz_obj_cache'] = array();
 faz_new_request();
 faz_ok( Cache::get( 'all', 'banner' ) === $v1, '04 object-cache eviction → payload re-promoted from the transient copy' );
 
-// THE regression: save + invalidate, then read from a fresh request.
-// Pre-fix: the wp_options scan found nothing (Redis mode), the prefix seed
-// stayed put, and get() resurrected $v1 from the external store.
+// THE regression: save + invalidate, with a concurrent fresh request landing
+// while the old transient rows are being scanned. Pre-fix order rotated the
+// object epoch first, so this request missed there, read $v1 through the still
+// current old transient epoch, and promoted it into the NEW object epoch.
+$concurrent_read = null;
+$GLOBALS['faz_on_transient_scan'] = static function () use ( &$concurrent_read ) {
+	Cache::reset_prefix_cache();
+	$concurrent_read = Cache::get( 'all', 'banner' );
+};
 Cache::delete( 'banner' );
+faz_ok(
+	false === $concurrent_read,
+	'05 concurrent read during invalidation cannot promote the old transient into the new object epoch'
+);
 faz_new_request();
-faz_ok( false === Cache::get( 'all', 'banner' ), '05 REGRESSION #125: after Cache::delete() a fresh request must NOT see the stale payload' );
+faz_ok( false === Cache::get( 'all', 'banner' ), '06 REGRESSION #125: after Cache::delete() a fresh request must NOT see the stale payload' );
 
 $seed_after = get_transient( 'faz_banner_transient_prefix' );
 faz_ok(
 	false !== $seed_after && $seed_after !== $seed_before,
-	'06 delete_transient() rotates the transient prefix seed (epoch bump reaches Redis)'
+	'07 delete_transient() rotates the transient prefix seed (epoch bump reaches Redis)'
 );
 
 // The new payload is stored and served under the fresh epoch.
 Cache::set( 'all', 'banner', $v2 );
 faz_new_request();
-faz_ok( Cache::get( 'all', 'banner' ) === $v2, '07 post-save payload is served after invalidation' );
+faz_ok( Cache::get( 'all', 'banner' ) === $v2, '08 post-save payload is served after invalidation' );
 
 // Same-request coherence: delete + set + get without a request boundary.
 Cache::delete( 'banner' );
 Cache::set( 'all', 'banner', $v2 );
-faz_ok( Cache::get( 'all', 'banner' ) === $v2, '08 delete/set/get inside one request stays coherent (memoization reset)' );
+faz_ok( Cache::get( 'all', 'banner' ) === $v2, '09 delete/set/get inside one request stays coherent (memoization reset)' );
 
 // ---------------------------------------------------------------------
 // DB mode: plain install, transients ARE wp_options rows. The LIKE-scan
@@ -212,15 +232,15 @@ foreach ( array_keys( $GLOBALS['faz_transients'] ) as $key ) {
 		$old_keys[] = $key;
 	}
 }
-faz_ok( 1 === count( $old_keys ), '09 DB mode: payload stored as one faz_transient_* row' );
+faz_ok( 1 === count( $old_keys ), '10 DB mode: payload stored as one faz_transient_* row' );
 
 Cache::delete( 'banner' );
 faz_ok(
 	! array_key_exists( $old_keys[0], $GLOBALS['faz_transients'] ),
-	'10 DB mode: the LIKE-scan cleanup still deletes the old epoch row (no wp_options litter)'
+	'11 DB mode: the LIKE-scan cleanup still deletes the old epoch row (no wp_options litter)'
 );
 faz_new_request();
-faz_ok( false === Cache::get( 'all', 'banner' ), '11 DB mode: fresh request after delete does not see the stale payload' );
+faz_ok( false === Cache::get( 'all', 'banner' ), '12 DB mode: fresh request after delete does not see the stale payload' );
 
 // ---------- Result ----------
 echo "\n" . ( 0 === $faz_fail ? "ALL PASS ($faz_pass)\n" : "FAILED: $faz_fail, passed: $faz_pass\n" );

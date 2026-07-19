@@ -217,6 +217,15 @@ export function listActivePlugins(): string[] {
     .filter(Boolean);
 }
 
+export function isPluginActive(slug: string): boolean {
+  try {
+    wp(['plugin', 'is-active', slug]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function listActivePluginFiles(): string[] {
   const raw = wpEval(`echo wp_json_encode( array_values( (array) get_option( 'active_plugins', array() ) ) );`);
   const parsed = JSON.parse(raw) as unknown;

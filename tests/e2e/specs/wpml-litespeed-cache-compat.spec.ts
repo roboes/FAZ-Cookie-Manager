@@ -28,12 +28,18 @@
  */
 import { test, expect } from '../fixtures/wp-fixture';
 import { type APIRequestContext } from '@playwright/test';
-import { wp, wpEval, setOption, ensureFixturePlugin } from '../utils/wp-env';
+import { wp, wpEval, setOption, ensureFixturePlugin, isPluginActive } from '../utils/wp-env';
+import { acquireSharedWordPressLock, releaseSharedWordPressLock } from '../utils/shared-wordpress-lock';
 
 const WP_BASE = process.env.WP_BASE_URL ?? 'http://127.0.0.1:9998';
 
 let ready = false;
 let savedSettings = '';
+let lockHeld = false;
+let litespeedWasActive = false;
+let fixtureWasActive = false;
+
+test.describe.configure({ mode: 'serial' });
 
 function litespeedInstalled(): boolean {
   try {
@@ -85,7 +91,13 @@ async function langProbe(
   };
 }
 
-test.beforeAll(() => {
+test.beforeAll(async ({}, testInfo) => {
+  testInfo.setTimeout(21 * 60_000);
+  await acquireSharedWordPressLock();
+  lockHeld = true;
+  litespeedWasActive = isPluginActive('litespeed-cache');
+  fixtureWasActive = isPluginActive('faz-e2e-wpml-litespeed-lab');
+
   if (!litespeedInstalled()) {
     ready = false;
     return;
@@ -96,7 +108,9 @@ test.beforeAll(() => {
   // The lab's WPML emulation is opt-in (specs exercising a REAL multilingual
   // plugin activate the same fixture purely for its probe headers).
   setOption('faz_e2e_wpml_emulate', 'yes');
-  wp(['plugin', 'activate', 'litespeed-cache']);
+  if (!litespeedWasActive) {
+    wp(['plugin', 'activate', 'litespeed-cache']);
+  }
   ensureFixturePlugin('faz-e2e-wpml-litespeed-lab');
 
   // A bilingual EN+IT install, mirroring the reporter's setup.
@@ -110,31 +124,44 @@ test.beforeAll(() => {
 });
 
 test.afterAll(() => {
-  if (!ready) {
-    return;
-  }
-  // Restore the shared env to baseline: original settings, no test options,
-  // fixture + LiteSpeed deactivated (LiteSpeed was installed-but-inactive).
-  if (savedSettings) {
-    const b64 = Buffer.from(savedSettings, 'utf8').toString('base64');
-    wpEval(`
-      $s = json_decode( base64_decode( '${b64}' ), true );
-      if ( is_array( $s ) ) { update_option( 'faz_settings', $s ); }
-    `);
-  }
   try {
-    wpEval(`
-      delete_option( 'faz_e2e_wpml_negotiation' );
-      delete_option( 'faz_e2e_ls_purge_count' );
-      delete_option( 'faz_e2e_wpml_emulate' );
-    `);
-  } catch {
-    /* best-effort */
-  }
-  try {
-    wp(['plugin', 'deactivate', 'faz-e2e-wpml-litespeed-lab', 'litespeed-cache']);
-  } catch {
-    /* best-effort */
+    // Restore the shared env verbatim and undo only activations performed by
+    // this spec. Pre-existing active plugins must remain active.
+    if (savedSettings) {
+      const b64 = Buffer.from(savedSettings, 'utf8').toString('base64');
+      wpEval(`
+        $s = json_decode( base64_decode( '${b64}' ), true );
+        if ( is_array( $s ) ) { update_option( 'faz_settings', $s ); }
+      `);
+    }
+    try {
+      wpEval(`
+        delete_option( 'faz_e2e_wpml_negotiation' );
+        delete_option( 'faz_e2e_ls_purge_count' );
+        delete_option( 'faz_e2e_wpml_emulate' );
+      `);
+    } catch {
+      /* best-effort */
+    }
+    const deactivate: string[] = [];
+    if (!fixtureWasActive && isPluginActive('faz-e2e-wpml-litespeed-lab')) {
+      deactivate.push('faz-e2e-wpml-litespeed-lab');
+    }
+    if (!litespeedWasActive && isPluginActive('litespeed-cache')) {
+      deactivate.push('litespeed-cache');
+    }
+    if (deactivate.length > 0) {
+      try {
+        wp(['plugin', 'deactivate', ...deactivate]);
+      } catch {
+        /* best-effort */
+      }
+    }
+  } finally {
+    if (lockHeld) {
+      releaseSharedWordPressLock();
+      lockHeld = false;
+    }
   }
 });
 

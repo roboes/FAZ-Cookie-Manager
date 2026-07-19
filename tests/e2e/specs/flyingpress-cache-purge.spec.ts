@@ -24,6 +24,8 @@
  *   9  [F3]            the runtime injection never leaks into FlyingPress's
  *                      persisted config (the stored option stays empty).
  *   10 [is_cacheable]  country-dependent output vetoes FlyingPress page caching.
+ *   11 [upgrade]       the always-run Activator purge clears FlyingPress even
+ *                      when the deferred admin cache module is not loaded.
  *
  * The `X-Faz-Fp-*` headers used by tests 8/9 are emitted by the test-only
  * fixture plugin tests/e2e/fixtures/plugins/faz-e2e-fp-probe, which exposes
@@ -32,8 +34,9 @@
  */
 import { test, expect } from '../fixtures/wp-fixture';
 import { type APIRequestContext } from '@playwright/test';
-import { wp, wpEval, upsertPage, ensureFixturePlugin } from '../utils/wp-env';
+import { wp, wpEval, upsertPage, ensureFixturePlugin, isPluginActive } from '../utils/wp-env';
 import { resetDefaultBannerState } from '../utils/seed-defaults';
+import { acquireSharedWordPressLock, releaseSharedWordPressLock } from '../utils/shared-wordpress-lock';
 
 const WP_BASE = process.env.WP_BASE_URL ?? 'http://127.0.0.1:9998';
 const UA = { 'User-Agent': 'Mozilla/5.0 (FAZ-E2E FlyingPress)' };
@@ -44,8 +47,12 @@ const MARKER_BETA = 'FAZ-FP-MARKER-BETA';
 
 let flyingPressActive = false;
 let weActivatedFlyingPress = false;
+let probeWasActive = false;
+let lockHeld = false;
 let testPageId = 0;
 let testPageUrl = '';
+
+test.describe.configure({ mode: 'serial' });
 
 /** Is the (commercial) FlyingPress plugin present on disk? False on CI / clean machines. */
 function fpInstalled(): boolean {
@@ -140,7 +147,12 @@ async function primeCache(request: APIRequestContext, url: string): Promise<void
   throw new Error(`FlyingPress never reported a cache HIT for ${url}`);
 }
 
-test.beforeAll(() => {
+test.beforeAll(async ({}, testInfo) => {
+  testInfo.setTimeout(21 * 60_000);
+  await acquireSharedWordPressLock();
+  lockHeld = true;
+  probeWasActive = isPluginActive('faz-e2e-fp-probe');
+
   // Self-provision FlyingPress for the duration of THIS spec file only. When
   // the plugin is installed (dev box) the tests run as part of the suite;
   // when it's absent (CI / other machines) they auto-skip. afterAll tears it
@@ -171,27 +183,34 @@ test.beforeAll(() => {
 });
 
 test.afterAll(() => {
-  if (!flyingPressActive) {
-    return;
-  }
-  // Restore the shared env to its FlyingPress-off baseline: purge the cache,
-  // drop the probe, and deactivate FlyingPress if this file activated it.
-  // An active FlyingPress page cache would serve stale HTML to later specs.
   try {
-    wpEval(`if ( class_exists( '\\\\FlyingPress\\\\Purge' ) ) { \\FlyingPress\\Purge::purge_everything(); }`);
-  } catch {
-    /* best-effort */
-  }
-  try {
-    wp(['plugin', 'deactivate', 'faz-e2e-fp-probe']);
-  } catch {
-    /* best-effort */
-  }
-  if (weActivatedFlyingPress) {
-    try {
-      wp(['plugin', 'deactivate', 'flying-press']);
-    } catch {
-      /* best-effort */
+    // Restore only the plugin state this spec changed. A developer who started
+    // with FlyingPress or the probe active must get the same state back.
+    if (flyingPressActive) {
+      try {
+        wpEval(`if ( class_exists( '\\\\FlyingPress\\\\Purge' ) ) { \\FlyingPress\\Purge::purge_everything(); }`);
+      } catch {
+        /* best-effort */
+      }
+    }
+    if (!probeWasActive && isPluginActive('faz-e2e-fp-probe')) {
+      try {
+        wp(['plugin', 'deactivate', 'faz-e2e-fp-probe']);
+      } catch {
+        /* best-effort */
+      }
+    }
+    if (weActivatedFlyingPress && isPluginActive('flying-press')) {
+      try {
+        wp(['plugin', 'deactivate', 'flying-press']);
+      } catch {
+        /* best-effort */
+      }
+    }
+  } finally {
+    if (lockHeld) {
+      releaseSharedWordPressLock();
+      lockHeld = false;
     }
   }
 });
@@ -347,5 +366,16 @@ test.describe('FlyingPress cache purge (#125 / PR #186)', () => {
       echo apply_filters( 'flying_press_is_cacheable', true ) ? '1' : '0';
     `).trim();
     expect(whenCountryDependent).toBe('0');
+  });
+
+  test('11 [upgrade] the Activator purge matrix invalidates FlyingPress HTML', async ({ request }) => {
+    await primeCache(request, testPageUrl);
+    expect(await cacheState(request, testPageUrl)).toBe('HIT');
+
+    // Version upgrades can run on a frontend/Dashboard request before the
+    // deferred admin cache-service module registers faz_after_activate.
+    wpEval(`\\FazCookie\\Includes\\Activator::purge_page_caches();`);
+
+    expect(await cacheState(request, testPageUrl)).toBe('MISS');
   });
 });

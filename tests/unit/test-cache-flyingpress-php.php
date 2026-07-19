@@ -103,14 +103,21 @@ namespace {
 			return $value;
 		}
 	}
+	if ( ! function_exists( 'has_action' ) ) {
+		function has_action( $hook ) { // phpcs:ignore
+			return ! empty( $GLOBALS['faz_actions'][ $hook ] );
+		}
+	}
 
 	$faz_root = dirname( __DIR__, 2 );
 	require_once $faz_root . '/admin/modules/cache/services/class-services.php';
 	require_once $faz_root . '/admin/modules/cache/services/class-flying-press.php';
 	require_once $faz_root . '/admin/modules/cache/class-cache.php';
+	require_once $faz_root . '/includes/class-activator.php';
 
 	use FazCookie\Admin\Modules\Cache\Cache as Cache_Module;
 	use FazCookie\Admin\Modules\Cache\Services\Flying_Press;
+	use FazCookie\Includes\Activator;
 
 	// ---------- Assertion harness ----------
 
@@ -198,6 +205,15 @@ namespace {
 		'10 clear_cache() purges HTML pages once per invocation, still no preload'
 	);
 
+	// Version upgrades run before the deferred admin cache module is guaranteed
+	// to be loaded. The Activator therefore needs its own direct FlyingPress
+	// entry rather than relying only on the adapter's faz_after_activate hook.
+	Activator::purge_page_caches();
+	faz_ok(
+		3 === \FlyingPress\Purge::$pages && 0 === \FlyingPress\Purge::$everything,
+		'10a plugin upgrade purge matrix clears FlyingPress HTML directly'
+	);
+
 	// ---------------------------------------------------------------------
 	// Fail-closed: a throw from FlyingPress inside clear_cache() must NOT
 	// propagate. clear_cache() runs inside do_action('faz_after_update_*'),
@@ -216,7 +232,7 @@ namespace {
 	\FlyingPress\Purge::$throw = false;
 	faz_ok( false === $threw, '14 a FlyingPress purge exception does not propagate out of clear_cache()' );
 	faz_ok( false === $ret, '15 clear_cache() returns false when the purge fails (fail-closed)' );
-	faz_ok( 2 === \FlyingPress\Purge::$pages, '16 a failed purge does not advance the success counter' );
+	faz_ok( 3 === \FlyingPress\Purge::$pages, '16 a failed purge does not advance the success counter' );
 
 	// ---------------------------------------------------------------------
 	// Inactive service (FlyingPress absent) must not register hooks.

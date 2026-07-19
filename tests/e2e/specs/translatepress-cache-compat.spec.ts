@@ -24,7 +24,8 @@
  */
 import { test, expect } from '../fixtures/wp-fixture';
 import { type APIRequestContext } from '@playwright/test';
-import { wp, wpEval, ensureFixturePlugin } from '../utils/wp-env';
+import { wp, wpEval, ensureFixturePlugin, isPluginActive } from '../utils/wp-env';
+import { acquireSharedWordPressLock, releaseSharedWordPressLock } from '../utils/shared-wordpress-lock';
 
 const WP_BASE = process.env.WP_BASE_URL ?? 'http://127.0.0.1:9998';
 const UA = { 'User-Agent': 'Mozilla/5.0 (FAZ-E2E TRP)' };
@@ -32,6 +33,11 @@ const UA = { 'User-Agent': 'Mozilla/5.0 (FAZ-E2E TRP)' };
 let ready = false;
 let savedFazSettings = '';
 let savedTrpSettings = '';
+let lockHeld = false;
+let translatePressWasActive = false;
+let fixtureWasActive = false;
+
+test.describe.configure({ mode: 'serial' });
 
 function trpInstalled(): boolean {
   try {
@@ -60,7 +66,13 @@ async function probe(request: APIRequestContext, path: string): Promise<{ lang: 
   };
 }
 
-test.beforeAll(() => {
+test.beforeAll(async ({}, testInfo) => {
+  testInfo.setTimeout(21 * 60_000);
+  await acquireSharedWordPressLock();
+  lockHeld = true;
+  translatePressWasActive = isPluginActive('translatepress-multilingual');
+  fixtureWasActive = isPluginActive('faz-e2e-wpml-litespeed-lab');
+
   if (!trpInstalled()) {
     ready = false;
     return;
@@ -68,7 +80,9 @@ test.beforeAll(() => {
   savedFazSettings = wpEval(`echo wp_json_encode( get_option( 'faz_settings', array() ) );`).trim();
   savedTrpSettings = wpEval(`echo wp_json_encode( get_option( 'trp_settings', array() ) );`).trim();
 
-  wp(['plugin', 'activate', 'translatepress-multilingual']);
+  if (!translatePressWasActive) {
+    wp(['plugin', 'activate', 'translatepress-multilingual']);
+  }
   // Probe only — the lab's WPML emulation is opt-in and deliberately left off
   // so TranslatePress is the sole multilingual plugin under test.
   ensureFixturePlugin('faz-e2e-wpml-litespeed-lab');
@@ -94,28 +108,42 @@ test.beforeAll(() => {
 });
 
 test.afterAll(() => {
-  if (!ready) {
-    return;
-  }
-  const restore = (json: string, option: string) => {
-    if (!json) return;
-    const b64 = Buffer.from(json, 'utf8').toString('base64');
-    wpEval(`
-      $v = json_decode( base64_decode( '${b64}' ), true );
-      if ( is_array( $v ) ) { update_option( '${option}', $v ); }
-    `);
-  };
-  restore(savedFazSettings, 'faz_settings');
-  restore(savedTrpSettings, 'trp_settings');
   try {
-    wp(['plugin', 'deactivate', 'faz-e2e-wpml-litespeed-lab', 'translatepress-multilingual']);
-  } catch {
-    /* best-effort */
-  }
-  try {
-    wp(['rewrite', 'flush']);
-  } catch {
-    /* best-effort */
+    const restore = (json: string, option: string) => {
+      if (!json) return;
+      const b64 = Buffer.from(json, 'utf8').toString('base64');
+      wpEval(`
+        $v = json_decode( base64_decode( '${b64}' ), true );
+        if ( is_array( $v ) ) { update_option( '${option}', $v ); }
+      `);
+    };
+    restore(savedFazSettings, 'faz_settings');
+    restore(savedTrpSettings, 'trp_settings');
+
+    const deactivate: string[] = [];
+    if (!fixtureWasActive && isPluginActive('faz-e2e-wpml-litespeed-lab')) {
+      deactivate.push('faz-e2e-wpml-litespeed-lab');
+    }
+    if (!translatePressWasActive && isPluginActive('translatepress-multilingual')) {
+      deactivate.push('translatepress-multilingual');
+    }
+    if (deactivate.length > 0) {
+      try {
+        wp(['plugin', 'deactivate', ...deactivate]);
+      } catch {
+        /* best-effort */
+      }
+    }
+    try {
+      wp(['rewrite', 'flush']);
+    } catch {
+      /* best-effort */
+    }
+  } finally {
+    if (lockHeld) {
+      releaseSharedWordPressLock();
+      lockHeld = false;
+    }
   }
 });
 
