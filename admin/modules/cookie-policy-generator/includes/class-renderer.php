@@ -8,11 +8,12 @@
  *   1. Resolve lang  (request override > admin default > get_locale)
  *   2. Resolve jurisdiction  (request override > admin default > gdpr-strict)
  *   3. Load scaffold via Generator::resolve_template_path()
- *   4. Build data array (admin settings + cookie list + jurisdiction-specific refs)
- *   5. Substitute placeholders via Generator::substitute()
- *   6. Convert markdown → HTML via Generator::markdown_to_html()
- *   7. Append the non-removable disclaimer (FR-04 — hardcoded, NOT override-able)
- *   8. wp_kses_post the whole thing for output safety
+ *   4. Apply safe, section-level gettext overrides for the active locale
+ *   5. Build data array (admin settings + cookie list + jurisdiction-specific refs)
+ *   6. Substitute placeholders via Generator::substitute()
+ *   7. Convert markdown → HTML via Generator::markdown_to_html()
+ *   8. Append the configured/localized disclaimer
+ *   9. wp_kses_post the whole thing for output safety
  *
  * @package FazCookie\Admin\Modules\Cookie_Policy_Generator\Includes
  * @since   1.16.0
@@ -86,11 +87,12 @@ class Renderer {
 		if ( '' === $scaffold ) {
 			return self::no_template_notice( $jurisdiction, $lang );
 		}
+		$scaffold = Template_Translations::apply( $jurisdiction, $lang, $scaffold );
 
-		// FR-03 step 4: build data.
+		// FR-03 step 5: build data.
 		$data = self::build_data( $settings, $jurisdiction, $lang );
 
-		// FR-03 step 5+6: substitute + convert.
+		// FR-03 step 6+7: substitute + convert.
 		//
 		// HTML-valued tokens (COOKIE_CATEGORIES, THIRD_PARTY_SERVICES) MUST NOT
 		// flow through markdown_to_html(): the line-based parser only preserves
@@ -165,7 +167,7 @@ class Renderer {
 		// FR-07: compute the policy version hash. Exposed in <head> (if
 		// wp_head hasn't fired) AND as a data-faz-policy-version attribute
 		// on the article wrapper (HTML5-clean, always survives).
-		$policy_version = self::register_version_meta( $template_path, $data );
+		$policy_version = self::register_version_meta( $template_path, $data, $scaffold );
 
 		// Wrap in <article> per NFR-02-X accessibility.
 		$wrapper_open  = '<article class="faz-cookie-policy" lang="' . esc_attr( $lang )
@@ -847,14 +849,15 @@ class Renderer {
 	 * so browsers and Playwright's DOM dropped it. The data-attribute is a
 	 * standards-clean alternative.
 	 *
-	 * @param string $template_path
-	 * @param array  $data
+	 * @param string $template_path      Bundled template path.
+	 * @param array  $data               Effective substitution data.
+	 * @param string $effective_scaffold Bundled/gettext-composed Markdown.
 	 * @return string Policy version hash (also used as data-attribute value).
 	 */
-	private static function register_version_meta( $template_path, array $data ) {
+	private static function register_version_meta( $template_path, array $data, $effective_scaffold = '' ) {
 		static $registered = false;
 		static $static_hash = '';
-		$hash = Generator::policy_version_hash( $template_path, $data );
+		$hash = Generator::policy_version_hash( $template_path, $data, $effective_scaffold );
 		// Multiple shortcodes on the same page must not register multiple
 		// add_action callbacks (would emit duplicate <meta> tags). Guard
 		// with a static flag; the first call stashes its hash, the closure

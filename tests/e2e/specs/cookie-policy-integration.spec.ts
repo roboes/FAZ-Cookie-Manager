@@ -11,7 +11,7 @@
  *     hardcoded disclaimer.
  *  5. Shortcode renders the saved policy on a public page (GDPR-strict /
  *     CCPA / LGPD switching).
- *  6. Six languages × jurisdictions matrix renders without {{...}}
+ *  6. Eight languages × jurisdictions matrix renders without {{...}}
  *     leftovers.
  */
 
@@ -392,9 +392,9 @@ test.describe('Cookie Policy Generator — admin integration (Spec 002)', () => 
     expect(completeOut, 'complete emits disclaimer').toContain('faz-cookie-policy-disclaimer');
   });
 
-  test('6. 6 languages × 3 jurisdictions matrix renders without leftover tokens', async ({ page }) => {
-    // We exercise the shortcode directly via WP eval (avoids creating 18 pages).
-    const langs = ['en', 'it', 'fr', 'de', 'es', 'pt-BR'];
+  test('6. 8 languages × 3 jurisdictions matrix renders without leftover tokens', async ({ page }) => {
+    // We exercise the shortcode directly via WP eval (avoids creating 24 pages).
+    const langs = ['en', 'it', 'fr', 'de', 'es', 'pt-BR', 'bg', 'cs'];
     const jurisdictions = ['gdpr-strict', 'ccpa-california', 'lgpd-brazil'];
 
     for (const j of jurisdictions) {
@@ -426,6 +426,27 @@ test.describe('Cookie Policy Generator — admin integration (Spec 002)', () => 
         }
       }
     }
+  });
+
+  test('6c. Czech gettext policy override is applied only with all required placeholders', () => {
+    const out = wpEval(`
+      add_filter( 'locale', function () { return 'cs_CZ'; } );
+      add_filter( 'gettext_with_context', function ( $translation, $text, $context, $domain ) {
+        if ( 'faz-cookie-manager' === $domain && 'Cookie policy template: gdpr-strict / section-9' === $context ) {
+          return "## KONTAKT Z PO\\n\\nNapište na **{{COMPANY_EMAIL}}**.";
+        }
+        if ( 'faz-cookie-manager' === $domain && 'Cookie policy template: gdpr-strict / introduction' === $context ) {
+          return '# INVALID WITHOUT REQUIRED PLACEHOLDERS';
+        }
+        return $translation;
+      }, 10, 4 );
+      echo do_shortcode( '[faz_cookie_policy_complete lang="cs" jurisdiction="gdpr-strict" show_title="true"]' );
+    `);
+
+    expect(out, 'valid section-level PO override was not applied').toContain('KONTAKT Z PO');
+    expect(out, 'invalid PO entry that dropped placeholders was accepted').not.toContain('INVALID WITHOUT REQUIRED PLACEHOLDERS');
+    expect(out, 'reviewed Czech introduction fallback was not retained').toContain('Zásady používání cookies');
+    expect(out, 'placeholder survived final rendering').not.toMatch(/\{\{[A-Z_][A-Z0-9_]*\}\}/);
   });
 
   test('7. P2-A regression: COOKIE_CATEGORIES HTML survives markdown_to_html() without nested <p>', () => {

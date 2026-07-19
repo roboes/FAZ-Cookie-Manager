@@ -6,7 +6,7 @@ msgstr ""
 "Project-Id-Version: FAZ Cookie Manager 1.5.2\n"
 "Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/faz-cookie-"
 "manager\n"
-"POT-Creation-Date: 2026-07-10T11:50:53+00:00\n"
+"POT-Creation-Date: 2026-07-17T13:17:40+00:00\n"
 "PO-Revision-Date: 2026-03-14\n"
 "Last-Translator: Fabio D'Alessandro\n"
 "Language-Team: Italian\n"
@@ -59,7 +59,7 @@ msgid "Cookie Banner"
 msgstr "Banner cookie"
 
 #: admin/class-admin.php:227 admin/views/base.php:21
-#: frontend/class-frontend.php:1716
+#: frontend/class-frontend.php:1806
 msgid "Cookies"
 msgstr "Cookie"
 
@@ -144,13 +144,13 @@ msgid "Cookie Name"
 msgstr "Nome cookie"
 
 #: admin/class-admin.php:513
-#: admin/modules/cookie-policy-generator/includes/class-renderer.php:431
+#: admin/modules/cookie-policy-generator/includes/class-renderer.php:433
 #: admin/views/cookies.php:114 includes/class-cookie-table-shortcode.php:175
 msgid "Domain"
 msgstr "Dominio"
 
 #: admin/class-admin.php:514
-#: admin/modules/cookie-policy-generator/includes/class-renderer.php:432
+#: admin/modules/cookie-policy-generator/includes/class-renderer.php:434
 #: admin/views/cookies.php:115
 #: frontend/modules/shortcodes/class-shortcodes.php:248
 #: includes/class-cookie-table-shortcode.php:176
@@ -162,7 +162,7 @@ msgid "e.g. 1 year"
 msgstr "es. 1 anno"
 
 #: admin/class-admin.php:516
-#: admin/modules/cookie-policy-generator/includes/class-renderer.php:433
+#: admin/modules/cookie-policy-generator/includes/class-renderer.php:435
 #: admin/views/banner.php:654 admin/views/cookies.php:38
 #: admin/views/cookies.php:116 admin/views/cookies.php:208
 #: frontend/modules/shortcodes/class-shortcodes.php:250
@@ -1873,23 +1873,23 @@ msgstr "URL della pagina in cui è stato prestato il consenso."
 msgid "Date the consent was logged."
 msgstr "Data in cui il consenso è stato registrato."
 
-#: admin/modules/cookie-policy-generator/includes/class-renderer.php:430
+#: admin/modules/cookie-policy-generator/includes/class-renderer.php:432
 #: frontend/modules/shortcodes/class-shortcodes.php:246
 #: includes/class-cookie-table-shortcode.php:174
 msgid "Cookie"
 msgstr "Cookie"
 
-#: admin/modules/cookie-policy-generator/includes/class-renderer.php:434
+#: admin/modules/cookie-policy-generator/includes/class-renderer.php:436
 msgid "cookies"
 msgstr "cookie"
 
-#: admin/modules/cookie-policy-generator/includes/class-renderer.php:645
-#: admin/modules/cookie-policy-generator/includes/class-renderer.php:761
+#: admin/modules/cookie-policy-generator/includes/class-renderer.php:647
+#: admin/modules/cookie-policy-generator/includes/class-renderer.php:763
 msgid "None declared."
 msgstr "Nessuna dichiarata."
 
 #. translators: 1: jurisdiction, 2: lang
-#: admin/modules/cookie-policy-generator/includes/class-renderer.php:826
+#: admin/modules/cookie-policy-generator/includes/class-renderer.php:828
 #, php-format
 msgid ""
 "FAZ Cookie Policy: no template scaffold found for jurisdiction \"%1$s\" and "
@@ -1899,6 +1899,431 @@ msgstr ""
 "FAZ Cookie Policy: nessun modello trovato per la giurisdizione \"%1$s\" e la "
 "lingua \"%2$s\". Configura il generatore in FAZ Cookie Manager → Cookie "
 "Policy."
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:16
+msgctxt "Cookie policy template: gdpr-strict / introduction"
+msgid ""
+"# Cookie Policy\n"
+"\n"
+"**Last updated:** {{LAST_UPDATED_DATE}}\n"
+"\n"
+"This Cookie Policy explains how **{{COMPANY_NAME}}** (\"we\", \"us\", "
+"\"our\") uses cookies and similar technologies on this website, in "
+"compliance with the EU General Data Protection Regulation (GDPR, Reg. "
+"2016/679) and the ePrivacy Directive (2002/58/EC, Art. 5(3))."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:25
+msgctxt "Cookie policy template: gdpr-strict / section-1"
+msgid ""
+"## Who we are\n"
+"\n"
+"The data controller for the processing of your personal data through cookies "
+"is:\n"
+"\n"
+"- **Data controller:** {{COMPANY_NAME}}\n"
+"- **Address:** {{COMPANY_ADDRESS}}\n"
+"- **Email:** {{COMPANY_EMAIL}}\n"
+"- **Registry / VAT:** {{COMPANY_REGISTRY}}\n"
+"- **Data Protection Officer (DPO):** {{DPO_NAME}} — {{DPO_EMAIL}}"
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:38
+msgctxt "Cookie policy template: gdpr-strict / section-2"
+msgid ""
+"## What are cookies\n"
+"\n"
+"Cookies are small text files placed on your device when you visit our "
+"website. They allow us to recognize your device on subsequent visits, "
+"remember your preferences, measure how the site is used, and (with your "
+"consent) deliver personalized advertising.\n"
+"\n"
+"We also use similar technologies such as **localStorage**, "
+"**sessionStorage**, and **pixel tags**. Where this policy refers to "
+"\"cookies\", it covers these technologies as well."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:47
+msgctxt "Cookie policy template: gdpr-strict / section-3"
+msgid ""
+"## Legal basis\n"
+"\n"
+"For **strictly necessary** cookies, the legal basis is our legitimate "
+"interest under GDPR Art. 6(1)(f) and the technical exemption under ePrivacy "
+"Art. 5(3).\n"
+"\n"
+"For **all other** cookie categories, the legal basis is your **explicit "
+"consent** under GDPR Art. 6(1)(a) and Art. 7, collected via the cookie "
+"banner before any non-essential cookie is set.\n"
+"\n"
+"You can withdraw consent at any time using the \"Cookie settings\" link or "
+"by clearing your cookies; withdrawal does not affect the lawfulness of "
+"processing before withdrawal (GDPR Art. 7(3))."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:58
+msgctxt "Cookie policy template: gdpr-strict / section-4"
+msgid ""
+"## Cookies used on this site\n"
+"\n"
+"{{COOKIE_CATEGORIES}}"
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:65
+msgctxt "Cookie policy template: gdpr-strict / section-5"
+msgid ""
+"## Third-party services\n"
+"\n"
+"Where you give consent, this site may load resources from the following "
+"third-party services, which set their own cookies:\n"
+"\n"
+"{{THIRD_PARTY_SERVICES}}\n"
+"\n"
+"Each third party is an independent data controller for the cookies it sets; "
+"please consult their respective privacy policies."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:76
+msgctxt "Cookie policy template: gdpr-strict / section-6"
+msgid ""
+"## How long we keep data\n"
+"\n"
+"Consent records and analytics data are retained for {{RETENTION_PERIOD}} "
+"from collection. Strictly necessary cookies are retained only for the "
+"duration of the session or as required for the technical function they "
+"serve. See the table above for the specific lifetime of each cookie."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:83
+msgctxt "Cookie policy template: gdpr-strict / section-7"
+msgid ""
+"## Your rights\n"
+"\n"
+"Under GDPR Art. 12-22 you have the right to:\n"
+"\n"
+"- access the personal data we hold about you (Art. 15)\n"
+"- request rectification of inaccurate data (Art. 16)\n"
+"- request erasure (\"right to be forgotten\", Art. 17)\n"
+"- restrict processing (Art. 18)\n"
+"- data portability (Art. 20)\n"
+"- object to processing based on legitimate interest (Art. 21)\n"
+"- withdraw consent at any time (Art. 7(3))\n"
+"- lodge a complaint with your national supervisory authority\n"
+"\n"
+"To exercise these rights contact us at **{{COMPANY_EMAIL}}**. We will "
+"respond within one month of receipt (GDPR Art. 12(3))."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:101
+msgctxt "Cookie policy template: gdpr-strict / section-8"
+msgid ""
+"## Changes to this policy\n"
+"\n"
+"We may update this Cookie Policy from time to time. The \"Last updated\" "
+"date at the top reflects the most recent revision. Material changes will "
+"trigger a re-consent prompt on your next visit."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:108
+msgctxt "Cookie policy template: gdpr-strict / section-9"
+msgid ""
+"## Contact\n"
+"\n"
+"For any question about this Cookie Policy, contact us at **{{COMPANY_EMAIL}}"
+"**."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:117
+msgctxt "Cookie policy template: ccpa-california / introduction"
+msgid ""
+"# Notice at Collection & Cookie Policy\n"
+"\n"
+"**Last updated:** {{LAST_UPDATED_DATE}}\n"
+"\n"
+"This Notice at Collection and Cookie Policy explains how **{{COMPANY_NAME}}"
+"** (\"we\", \"us\", \"our\") collects, uses, and shares Personal Information "
+"through this website, in compliance with the California Consumer Privacy Act "
+"of 2018 as amended by the California Privacy Rights Act (CCPA/CPRA, Cal. "
+"Civ. Code §§ 1798.100 et seq.) and the implementing regulations issued by "
+"the California Privacy Protection Agency (CPPA)."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:126
+msgctxt "Cookie policy template: ccpa-california / section-1"
+msgid ""
+"## Business contact\n"
+"\n"
+"- **Business name:** {{COMPANY_NAME}}\n"
+"- **Address:** {{COMPANY_ADDRESS}}\n"
+"- **Privacy contact email:** {{COMPANY_EMAIL}}\n"
+"- **Registration:** {{COMPANY_REGISTRY}}"
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:136
+msgctxt "Cookie policy template: ccpa-california / section-2"
+msgid ""
+"## Categories of Personal Information collected\n"
+"\n"
+"We collect the following categories of Personal Information as defined under "
+"CCPA § 1798.140(v):\n"
+"\n"
+"- **Identifiers** — IP address (hashed), device identifiers, online "
+"identifiers (cookies, beacons)\n"
+"- **Internet or other electronic network activity information** — browsing "
+"history, search history, interactions with our website\n"
+"- **Geolocation data** — approximate location derived from IP (country/"
+"region only; not precise GPS)\n"
+"- **Inferences** — preferences and characteristics inferred from your "
+"interactions, used for site analytics\n"
+"\n"
+"We do **not** knowingly collect:\n"
+"- Sensitive Personal Information (Cal. Civ. Code § 1798.140(ae)) without "
+"your explicit opt-in\n"
+"- Personal Information of consumers under 16 without affirmative opt-in "
+"(children under 13 require parental consent)"
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:152
+msgctxt "Cookie policy template: ccpa-california / section-3"
+msgid ""
+"## Sources of Personal Information\n"
+"\n"
+"- Directly from you when you interact with the site (forms, banner choices, "
+"account creation)\n"
+"- Automatically via cookies and tracking technologies\n"
+"- From third-party services where you have authorized data sharing"
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:161
+msgctxt "Cookie policy template: ccpa-california / section-4"
+msgid ""
+"## Purposes for collecting Personal Information\n"
+"\n"
+"- Operate and secure the website (necessary business purpose, § "
+"1798.140(e))\n"
+"- Audit interactions with the website\n"
+"- Short-term, transient use of Personal Information\n"
+"- Maintain and improve quality and safety of our service\n"
+"- Conduct analytics with your consent\n"
+"- Personalize advertising **only with your opt-in consent**"
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:173
+msgctxt "Cookie policy template: ccpa-california / section-5"
+msgid ""
+"## Cookies used\n"
+"\n"
+"{{COOKIE_CATEGORIES}}"
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:180
+msgctxt "Cookie policy template: ccpa-california / section-6"
+msgid ""
+"## Third-party recipients\n"
+"\n"
+"Where you have not opted out, we share Personal Information with the "
+"following service providers and contractors (CCPA § 1798.140(j) & (ag)):\n"
+"\n"
+"{{THIRD_PARTY_SERVICES}}\n"
+"\n"
+"We **do not sell or share Personal Information** for cross-context "
+"behavioral advertising unless you have opted in. To opt out at any time, "
+"click the \"Do Not Sell or Share My Personal Information\" link in the "
+"website footer."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:191
+msgctxt "Cookie policy template: ccpa-california / section-7"
+msgid ""
+"## Retention\n"
+"\n"
+"Personal Information is retained for {{RETENTION_PERIOD}} from collection, "
+"unless a longer period is required by law or for legitimate business "
+"purposes (CCPA § 1798.100(a)(3))."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:198
+msgctxt "Cookie policy template: ccpa-california / section-8"
+msgid ""
+"## Your CCPA/CPRA rights\n"
+"\n"
+"As a California resident, you have the right to:\n"
+"\n"
+"- **Right to Know** (§ 1798.100, .110, .115) — request what Personal "
+"Information we collect, use, disclose, or sell\n"
+"- **Right to Delete** (§ 1798.105) — request deletion of your Personal "
+"Information\n"
+"- **Right to Correct** (§ 1798.106) — request correction of inaccurate "
+"Personal Information\n"
+"- **Right to Opt Out of Sale or Sharing** (§ 1798.120) — direct us not to "
+"sell or share your Personal Information\n"
+"- **Right to Limit Use of Sensitive Personal Information** (§ 1798.121) — "
+"limit our use of Sensitive Personal Information to disclosed purposes\n"
+"- **Right to Non-Discrimination** (§ 1798.125) — we will not discriminate "
+"against you for exercising any of these rights\n"
+"- **Right to Data Portability** (§ 1798.130(a)(2)) — receive Personal "
+"Information in a readily usable format\n"
+"\n"
+"To submit a request, email **{{COMPANY_EMAIL}}** or use the \"Do Not Sell or "
+"Share\" and \"Manage Preferences\" links in the website footer. We will "
+"verify your identity (CCPA § 1798.130(a)(2)) and respond within **45 days** "
+"(extendable to 90 with notice, § 1798.130(a)(2)(B)).\n"
+"\n"
+"You may also designate an authorized agent to submit a request on your "
+"behalf (Cal. Civ. Code § 1798.135(c))."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:217
+msgctxt "Cookie policy template: ccpa-california / section-9"
+msgid ""
+"## Global Privacy Control (GPC)\n"
+"\n"
+"We honor the [Global Privacy Control](https://globalprivacycontrol.org/) "
+"signal as a valid opt-out of sale/sharing per California AG enforcement "
+"guidance."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:224
+msgctxt "Cookie policy template: ccpa-california / section-10"
+msgid ""
+"## Supervisory authority\n"
+"\n"
+"Complaints may be filed with the California Privacy Protection Agency: "
+"{{CA_PIPC_CONTACT}}, or at [{{OFFICIAL_RESOURCES_URL}}]"
+"({{OFFICIAL_RESOURCES_URL}})."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:231
+msgctxt "Cookie policy template: ccpa-california / section-11"
+msgid ""
+"## Changes\n"
+"\n"
+"We may update this Notice. Material changes will be announced 30 days in "
+"advance via a banner on the homepage. The \"Last updated\" date above is "
+"authoritative."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:238
+msgctxt "Cookie policy template: ccpa-california / section-12"
+msgid ""
+"## Contact\n"
+"\n"
+"Email **{{COMPANY_EMAIL}}** with any privacy question."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:247
+msgctxt "Cookie policy template: lgpd-brazil / introduction"
+msgid ""
+"# Cookie Policy (LGPD — Brazil)\n"
+"\n"
+"**Last updated:** {{LAST_UPDATED_DATE}}\n"
+"\n"
+"This Cookie Policy describes how **{{COMPANY_NAME}}** (\"we\") uses cookies "
+"and similar technologies on this website, in compliance with the Brazilian "
+"General Data Protection Law (Lei Geral de Proteção de Dados Pessoais — LGPD, "
+"Lei nº 13.709/2018) and the Marco Civil da Internet (Lei nº 12.965/2014)."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:256
+msgctxt "Cookie policy template: lgpd-brazil / section-1"
+msgid ""
+"## Controller\n"
+"\n"
+"- **Data controller:** {{COMPANY_NAME}}\n"
+"- **Address:** {{COMPANY_ADDRESS}}\n"
+"- **Privacy contact:** {{COMPANY_EMAIL}}\n"
+"- **CNPJ:** {{COMPANY_REGISTRY}}\n"
+"- **Encarregado de Dados (DPO) — mandatory under Art. 41 LGPD:** "
+"{{DPO_NAME}} — {{DPO_EMAIL}}"
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:267
+msgctxt "Cookie policy template: lgpd-brazil / section-2"
+msgid ""
+"## Legal bases (Art. 7 LGPD)\n"
+"\n"
+"For **strictly necessary** cookies: legitimate interest (Art. 7, IX) and "
+"contractual/technical obligation (Art. 7, V).\n"
+"\n"
+"For **all other** categories: **explicit consent** of the data subject (Art. "
+"7, I), collected via the cookie banner before any non-essential cookie is "
+"set.\n"
+"\n"
+"You may withdraw consent at any time (Art. 8, § 5) via the \"Cookie "
+"settings\" link."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:278
+msgctxt "Cookie policy template: lgpd-brazil / section-3"
+msgid ""
+"## Categories of personal data processed (Art. 5, I)\n"
+"\n"
+"- **Online identifiers** — IP (hashed with monthly salt), device IDs, "
+"session IDs\n"
+"- **Browsing data** — pages visited, dwell time, interactions\n"
+"- **Approximate location** — country/region from IP (not precise GPS)\n"
+"- **Preferences** — consent categories, language\n"
+"\n"
+"We do **not** process sensitive personal data (Art. 5, II) via cookies "
+"without specific and highlighted consent (Art. 11 LGPD)."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:290
+msgctxt "Cookie policy template: lgpd-brazil / section-4"
+msgid ""
+"## Cookies used\n"
+"\n"
+"{{COOKIE_CATEGORIES}}"
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:297
+msgctxt "Cookie policy template: lgpd-brazil / section-5"
+msgid ""
+"## Third-party recipients\n"
+"\n"
+"{{THIRD_PARTY_SERVICES}}\n"
+"\n"
+"International transfers (Art. 33-36 LGPD) are subject to adequate-protection "
+"countries / standard contractual clauses / specific consent."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:306
+msgctxt "Cookie policy template: lgpd-brazil / section-6"
+msgid ""
+"## Retention (Art. 15-16 LGPD)\n"
+"\n"
+"{{RETENTION_PERIOD}} from collection."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:313
+msgctxt "Cookie policy template: lgpd-brazil / section-7"
+msgid ""
+"## Data subject rights (Art. 18 LGPD)\n"
+"\n"
+"I — confirmation, II — access, III — correction, IV — anonymization/blocking/"
+"deletion, V — portability, VI — deletion, VII — info on sharing, VIII — info "
+"on non-consent consequences, IX — withdraw consent.\n"
+"\n"
+"Exercise these rights with the **DPO** at **{{DPO_EMAIL}}** or controller at "
+"**{{COMPANY_EMAIL}}**."
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:322
+msgctxt "Cookie policy template: lgpd-brazil / section-8"
+msgid ""
+"## Supervisory authority\n"
+"\n"
+"ANPD — Autoridade Nacional de Proteção de Dados: {{ANPD_CONTACT}}, "
+"[{{OFFICIAL_RESOURCES_URL}}]({{OFFICIAL_RESOURCES_URL}})"
+msgstr ""
+
+#: admin/modules/cookie-policy-generator/includes/cookie-policy-gettext-catalog.php:329
+msgctxt "Cookie policy template: lgpd-brazil / section-9"
+msgid ""
+"## Contact\n"
+"\n"
+"**{{COMPANY_EMAIL}}** or **{{DPO_EMAIL}}**."
+msgstr ""
 
 #. translators: %s: Class method name.
 #: admin/modules/cookies/api/class-api-controller.php:44
@@ -2578,7 +3003,7 @@ msgstr "Lingua:"
 msgid "Notice Title"
 msgstr "Titolo dell'avviso"
 
-#: admin/views/banner.php:277 frontend/class-frontend.php:1711
+#: admin/views/banner.php:277 frontend/class-frontend.php:1801
 #: frontend/modules/banner-rest/class-banner-rest.php:492
 msgid "We value your privacy"
 msgstr "La tua privacy è importante"
@@ -5340,45 +5765,45 @@ msgid "Manage cookie preferences"
 msgstr "Gestisci le preferenze sui cookie"
 
 #. translators: {name} is replaced with the cookie category name (appears twice, do not translate {name})
-#: frontend/class-frontend.php:598
+#: frontend/class-frontend.php:655
 msgid "{name} enabled, disable {name}"
 msgstr "{name} abilitato, disabilita {name}"
 
 #. translators: {name} is replaced with the cookie category name (appears twice, do not translate {name})
-#: frontend/class-frontend.php:600
+#: frontend/class-frontend.php:657
 msgid "{name} disabled, enable {name}"
 msgstr "{name} disabilitato, abilita {name}"
 
-#: frontend/class-frontend.php:1712
+#: frontend/class-frontend.php:1802
 #: frontend/modules/banner-rest/class-banner-rest.php:493
 msgid "Your cookie preferences have been saved."
 msgstr "Le tue preferenze sui cookie sono state salvate."
 
-#: frontend/class-frontend.php:1713
+#: frontend/class-frontend.php:1803
 #: frontend/modules/banner-rest/class-banner-rest.php:494
 msgid "Opt-out Preferences"
 msgstr "Preferenze di opt-out"
 
-#: frontend/class-frontend.php:1714
+#: frontend/class-frontend.php:1804
 #: frontend/modules/banner-rest/class-banner-rest.php:495
 msgid "Customise Consent Preferences"
 msgstr "Personalizza le preferenze di consenso"
 
-#: frontend/class-frontend.php:1715
+#: frontend/class-frontend.php:1805
 #: frontend/modules/banner-rest/class-banner-rest.php:496
 msgid "Service consent"
 msgstr "Consenso al servizio"
 
-#: frontend/class-frontend.php:1717
+#: frontend/class-frontend.php:1807
 msgid "Cookie consent"
 msgstr "Consenso ai cookie"
 
-#: frontend/class-frontend.php:1718
+#: frontend/class-frontend.php:1808
 #: frontend/modules/banner-rest/class-banner-rest.php:497
 msgid "Vendor consent"
 msgstr "Consenso fornitore"
 
-#: frontend/class-frontend.php:1719
+#: frontend/class-frontend.php:1809
 msgid ""
 "These cookies are set by the embedded service on its own domain and are "
 "controlled by allowing or blocking the embed above — they cannot be removed "

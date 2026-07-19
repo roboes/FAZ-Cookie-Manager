@@ -216,11 +216,11 @@ Integrates the [Open Cookie Database](https://github.com/fabiodalez-dev/Open-Coo
 Generate a jurisdiction-aware Cookie Policy page directly from your admin — no copy-pasting templates from a privacy-lawyer blog, no paying $10/month for "policy creation" as a premium feature.
 
 - **Jurisdiction-aware templates**: GDPR (EU/EEA/UK), CCPA/CPRA (California), LGPD (Brazil). Each shipped with its own template scaffold, legal references, and required sections for that framework.
-- **Multilingual out of the box**: en, it, fr, de, es, pt-BR, bg. Override per render with `[faz_cookie_policy_complete lang="it"]` or let the visitor's browser language drive the choice. 21 scaffolds total (3 jurisdictions × 7 languages).
+- **Multilingual out of the box**: en, it, fr, de, es, pt-BR, bg, cs. Override per render with `[faz_cookie_policy_complete lang="it"]` or let the visitor's browser language drive the choice. All 24 scaffolds (3 jurisdictions × 8 languages) are also exposed section-by-section through the plugin POT/PO catalogues; a safe bundled translation remains the fallback when an entry is missing or drops a required placeholder.
 - **Auto-populated cookie inventory**: pulls live from `wp_faz_cookies`, so anything the scanner adds is reflected at the next render with its category, duration, and description.
 - **Filled with your company data**: name, address, DPO email, third-party services, retention period. Configured once via the admin form, stored in `faz_cookie_policy_data`. Never seeded from `admin_email` or `blogname` (PII protection — operator must explicitly fill the form).
-- **Non-removable disclaimer**: every generated policy ends with a footer making explicit that the templates are starting points, not legal advice. The disclaimer is hardcoded in the renderer, not in the template files, so admin section overrides cannot suppress it.
-- **Versioning hash** for material-change detection: `data-faz-policy-version` attribute on the rendered article tracks drift across template + data changes. Display-only fields (`LAST_UPDATED_DATE`) are excluded so the hash doesn't drift on the calendar.
+- **Legal disclaimer**: generated policies show a localized warning by default that the templates are starting points, not legal advice. The administrator can hide it or replace it with reviewed custom text from the Cookie Policy settings.
+- **Versioning hash** for material-change detection: `data-faz-policy-version` tracks drift across the effective template, gettext policy overrides, and saved data. Display-only fields (`LAST_UPDATED_DATE`) are excluded so the hash doesn't drift on the calendar.
 - **REST API** under `faz/v1/cookie-policy/*` (settings GET/POST, preview POST) — `manage_options` + nonce.
 - **Live preview** from the admin form via a sandboxed iframe modal — iterate without persisting.
 - **`faz_cookie_policy_data` filter** for site builders who want to inject custom placeholders before template substitution.
