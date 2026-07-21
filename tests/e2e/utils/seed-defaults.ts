@@ -71,6 +71,13 @@ export function resetBaseline(): void {
 
     delete_option( 'faz_banner_template' );
     if ( function_exists( 'faz_clear_banner_template_cache' ) ) { faz_clear_banner_template_cache(); }
+
+    // resetBaseline() runs through WP-CLI, where admin modules are normally
+    // deferred. Bootstrap their REST hook and mirror the production settings
+    // save event so active page caches cannot keep serving the pre-reset GCM
+    // or geo configuration to the next spec.
+    do_action( 'rest_api_init' );
+    do_action( 'faz_after_update_settings', $faz_settings );
   ` );
 }
 
