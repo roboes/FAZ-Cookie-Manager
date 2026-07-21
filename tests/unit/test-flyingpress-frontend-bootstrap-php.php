@@ -318,10 +318,33 @@ namespace {
 	$GLOBALS['faz_test_is_cron'] = false;
 	unset( $cron_frontend );
 
-	// WP-CLI path: faz_is_front_end_request() also returns true for CLI commands.
-	// FlyingPress commands can call Config::update_config(), which persists the
-	// whole shared static config. The runtime-only FAZ keywords must therefore
-	// never be injected into a CLI process where a later command could save them.
+	// A non-array js_delay_excludes (null / delimited string) must be left
+	// untouched, not coerced to an empty array and overwritten with only the FAZ
+	// keywords — that would drop the administrator's existing exclusions.
+	$GLOBALS['faz_test_is_frontend'] = true;
+	$string_config = new Frontend( 'faz-cookie-manager', 'test' );
+	faz_fp_ok(
+		array( 'js_delay_excludes' => 'user,rules,string' )
+			=== $string_config->flying_press_add_delay_exclusions_to_config( array( 'js_delay_excludes' => 'user,rules,string' ) ),
+		'24 non-array js_delay_excludes is left untouched (no clobber)'
+	);
+	faz_fp_ok(
+		array( 'js_delay_excludes' => null )
+			=== $string_config->flying_press_add_delay_exclusions_to_config( array( 'js_delay_excludes' => null ) ),
+		'25 null js_delay_excludes is left untouched (no clobber)'
+	);
+	unset( $string_config );
+
+	// WP-CLI path — MUST BE THE LAST CASE. faz_is_front_end_request() also returns
+	// true for CLI commands, but FlyingPress commands can call
+	// Config::update_config(), which persists the whole shared static config, so
+	// the runtime-only FAZ keywords must never be injected into a CLI process where
+	// a later command could save them. This runs last on purpose: define( 'WP_CLI' )
+	// is a process-wide constant with no un-define, so any case appended after it
+	// that calls flying_press_apply_runtime_delay_exclusions() would silently take
+	// this same WP-CLI short-circuit instead of the path it means to exercise. At
+	// this point is_frontend=true (line ~299) and is_cron=false (line ~318), so the
+	// bail is attributable to the WP_CLI clause alone.
 	define( 'WP_CLI', true );
 	$GLOBALS['faz_test_filters'] = array();
 	$GLOBALS['faz_test_actions'] = array();
@@ -333,26 +356,9 @@ namespace {
 	$cli_frontend->flying_press_apply_runtime_delay_exclusions();
 	faz_fp_ok(
 		array( 'cli-request-rule' ) === \FlyingPress\Config::$config['js_delay_excludes'],
-		'24 v5 runtime bridge does not mutate FlyingPress config on WP-CLI requests'
+		'26 v5 runtime bridge does not mutate FlyingPress config on WP-CLI requests'
 	);
 	unset( $cli_frontend );
-
-	// A non-array js_delay_excludes (null / delimited string) must be left
-	// untouched, not coerced to an empty array and overwritten with only the FAZ
-	// keywords — that would drop the administrator's existing exclusions.
-	$GLOBALS['faz_test_is_frontend'] = true;
-	$string_config = new Frontend( 'faz-cookie-manager', 'test' );
-	faz_fp_ok(
-		array( 'js_delay_excludes' => 'user,rules,string' )
-			=== $string_config->flying_press_add_delay_exclusions_to_config( array( 'js_delay_excludes' => 'user,rules,string' ) ),
-		'25 non-array js_delay_excludes is left untouched (no clobber)'
-	);
-	faz_fp_ok(
-		array( 'js_delay_excludes' => null )
-			=== $string_config->flying_press_add_delay_exclusions_to_config( array( 'js_delay_excludes' => null ) ),
-		'26 null js_delay_excludes is left untouched (no clobber)'
-	);
-	unset( $string_config );
 
 	echo "\n" . ( 0 === $faz_fail ? "ALL PASS ({$faz_pass})\n" : "FAILED: {$faz_fail}, passed: {$faz_pass}\n" );
 	exit( 0 === $faz_fail ? 0 : 1 );
