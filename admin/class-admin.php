@@ -101,6 +101,7 @@ class Admin {
 		// is a WP 2.x action, no WP 6.x-only API used).
 		add_action( 'admin_print_footer_scripts', array( $this, 'ensure_wp_auth_check_wrap' ), 1 );
 		add_action( 'admin_notices', array( $this, 'woocommerce_compat_notice' ) );
+		add_action( 'admin_notices', array( $this, 'payment_gateway_notice' ) );
 		add_action( 'admin_notices', array( $this, 'cookie_definitions_notice' ) );
 		add_action( 'admin_notices', array( $this, 'scheduled_scan_notice' ) );
 		add_action( 'admin_notices', array( $this, 'unmatched_vendors_notice' ) );
@@ -1632,8 +1633,98 @@ class Admin {
 		echo ' <code>faz_whitelisted_scripts</code> ' . esc_html__( 'and', 'faz-cookie-manager' );
 		echo ' <code>faz_payment_gateway_whitelist</code> ' . esc_html__( 'filters.', 'faz-cookie-manager' );
 		echo '</p>';
-		echo '<a href="' . esc_url( $dismiss_url ) . '" style="position:absolute;top:0;right:0;padding:9px;text-decoration:none;color:#787c82">';
-		echo '<span class="dashicons dashicons-dismiss"></span></a>';
+		echo '<a href="' . esc_url( $dismiss_url ) . '" aria-label="' . esc_attr__( 'Dismiss this notice', 'faz-cookie-manager' ) . '" style="position:absolute;top:0;right:0;padding:9px;text-decoration:none;color:#787c82">';
+		echo '<span class="dashicons dashicons-dismiss" aria-hidden="true"></span></a>';
+		echo '</div>';
+	}
+
+	/**
+	 * Active non-WooCommerce payment plugins that commonly load a PayPal / Stripe
+	 * SDK on their own form/checkout pages (where the WooCommerce-checkout auto
+	 * exemption never applies).
+	 *
+	 * @return string[] Human-readable plugin names (possibly empty).
+	 */
+	private function detect_non_wc_payment_plugins() {
+		$found = array();
+		if ( defined( 'FORMINATOR_VERSION' ) || class_exists( 'Forminator', false ) ) {
+			$found[] = 'Forminator';
+		}
+		if ( defined( 'PMPRO_VERSION' ) || function_exists( 'pmpro_getLevel' ) ) {
+			$found[] = 'Paid Memberships Pro';
+		}
+		if ( defined( 'EDD_VERSION' ) || class_exists( 'Easy_Digital_Downloads', false ) ) {
+			$found[] = 'Easy Digital Downloads';
+		}
+		if ( defined( 'GIVE_VERSION' ) ) {
+			$found[] = 'Give';
+		}
+		return $found;
+	}
+
+	/**
+	 * Whether the site owner has authorised at least one payment gateway under
+	 * Settings → Script Blocking → Payment gateways.
+	 *
+	 * @return bool
+	 */
+	private function has_enabled_payment_gateway() {
+		$settings = get_option( 'faz_settings', array() );
+		$gateways = ( is_array( $settings ) && isset( $settings['script_blocking']['payment_gateways'] ) && is_array( $settings['script_blocking']['payment_gateways'] ) )
+			? $settings['script_blocking']['payment_gateways']
+			: array();
+		foreach ( $gateways as $enabled ) {
+			if ( ! empty( $enabled ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Dismissible notice on FAZ admin pages when a non-WooCommerce payment plugin
+	 * is active but no payment gateway has been authorised yet.
+	 *
+	 * A payment SDK (PayPal, Stripe, …) is blocked until consent by default, so a
+	 * payment form built with Forminator / Paid Memberships Pro / Easy Digital
+	 * Downloads / Give can log "paypal is not defined" until the site owner
+	 * consciously authorises that gateway. This nudges them to the toggle without
+	 * the plugin ever auto-loading a tracker. (#125 thread.)
+	 *
+	 * @return void
+	 */
+	public function payment_gateway_notice() {
+		if ( ! faz_is_admin_page() || ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		$user_id = get_current_user_id();
+		if ( get_user_meta( $user_id, 'faz_payment_gateway_notice_dismissed', true ) ) {
+			return;
+		}
+		if ( isset( $_GET['faz_dismiss_gateway_notice'] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_GET['_faz_nonce'] ?? '' ) ), 'faz_dismiss_gateway_notice' ) ) {
+			update_user_meta( $user_id, 'faz_payment_gateway_notice_dismissed', 1 );
+			return;
+		}
+		// Only nudge when a non-WooCommerce payment plugin is active AND the site
+		// owner has not authorised any gateway yet (once they have, they've made
+		// their choice — stay quiet).
+		$payment_plugins = $this->detect_non_wc_payment_plugins();
+		if ( empty( $payment_plugins ) || $this->has_enabled_payment_gateway() ) {
+			return;
+		}
+		$settings_url = admin_url( 'admin.php?page=faz-cookie-manager-settings' );
+		$dismiss_url  = wp_nonce_url( add_query_arg( 'faz_dismiss_gateway_notice', '1' ), 'faz_dismiss_gateway_notice', '_faz_nonce' );
+		echo '<div class="notice notice-info" style="position:relative">';
+		echo '<p><strong>' . esc_html__( 'Payment plugin detected', 'faz-cookie-manager' ) . '</strong> — ';
+		printf(
+			/* translators: %s: comma-separated list of detected payment plugin names. */
+			esc_html__( 'FAZ Cookie Manager blocks payment provider scripts (PayPal, Stripe, …) until consent, so a payment form in %s can fail with an error like "paypal is not defined" until you authorise the provider. If your payment forms are broken, enable the specific gateway under Settings → Script Blocking → Payment gateways (it loads that provider\'s scripts before consent — your decision and responsibility).', 'faz-cookie-manager' ),
+			esc_html( implode( ', ', $payment_plugins ) )
+		);
+		echo ' <a href="' . esc_url( $settings_url ) . '">' . esc_html__( 'Open settings', 'faz-cookie-manager' ) . '</a>.';
+		echo '</p>';
+		echo '<a href="' . esc_url( $dismiss_url ) . '" aria-label="' . esc_attr__( 'Dismiss this notice', 'faz-cookie-manager' ) . '" style="position:absolute;top:0;right:0;padding:9px;text-decoration:none;color:#787c82">';
+		echo '<span class="dashicons dashicons-dismiss" aria-hidden="true"></span></a>';
 		echo '</div>';
 	}
 

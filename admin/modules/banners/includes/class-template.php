@@ -239,6 +239,15 @@ class Template {
 			if ( isset( $this->properties['config']['categoryPreview'] ) ) {
 				$this->properties['config']['categoryPreview']['status'] = true;
 			}
+		} elseif ( $this->type === 'popup' ) {
+			// The centred popup reuses the Box HTML (a modal — no preference-wrapper
+			// for pushdown expansion, and no sidebar variant), so it only supports
+			// the popup preference center. Normalise any pushdown / sidebar ptype that
+			// reached this far via REST or import to popup, mirroring the admin UI's
+			// fallback, so the cached config never bakes an impossible combination.
+			if ( $this->ptype === 'pushdown' || strpos( $this->ptype, 'sidebar' ) !== false ) {
+				$this->ptype = 'popup';
+			}
 		}
 		$this->theme = isset( $settings['theme'] ) ? $settings['theme'] : 'light';
 
@@ -332,14 +341,14 @@ class Template {
 	/**
 	 * Get presets by template version
 	 *
-	 * @param integer $id Template version.
+	 * @param integer|null $id Template version.
 	 * @return array
 	 */
 	public function get_presets( $id ) {
-		$this->id = isset( $id ) ? $id : 0;
-		$key      = '_preset_' . $id;
+		$this->id = null !== $id ? $id : 0;
+		$key      = '_preset_' . $this->id;
 		$presets  = Cache::get( $key, $this->cache_group );
-		$presets  = ( isset( $presets ) && is_array( $presets ) ) ? $presets : array();
+		$presets  = is_array( $presets ) ? $presets : array();
 		if ( empty( $presets ) ) {
 			$presets = $this->load_presets();
 			Cache::set( $key, $this->cache_group, $presets, false );
@@ -350,14 +359,14 @@ class Template {
 	/**
 	 * Get templates by template version
 	 *
-	 * @param integer $id Template version.
+	 * @param integer|null $id Template version.
 	 * @return array
 	 */
 	public function get_templates( $id ) {
-		$this->id  = isset( $id ) ? $id : 0;
+		$this->id  = null !== $id ? $id : 0;
 		$key       = '_template_' . $this->id;
 		$templates = Cache::get( $key, $this->cache_group );
-		$templates = ( isset( $templates ) && is_array( $templates ) ) ? $templates : array();
+		$templates = is_array( $templates ) ? $templates : array();
 
 		if ( empty( $templates ) ) {
 			$templates = $this->load_templates();

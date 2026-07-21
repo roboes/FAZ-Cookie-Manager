@@ -167,7 +167,7 @@
 		//  - content lost entirely (iframe content gone) → restore from bannerData
 		var tabEditors = {
 			content: ['faz-b-notice-desc'],
-			preferences: ['faz-b-pref-desc']
+			preferences: ['faz-b-pref-desc', 'faz-b-optout-desc']
 		};
 		document.querySelectorAll('#faz-banner .faz-tab').forEach(function (btn) {
 			btn.addEventListener('click', function () {
@@ -180,7 +180,8 @@
 				var pref = (c.preferenceCenter && c.preferenceCenter.elements) || {};
 				var stored = {
 					'faz-b-notice-desc': notice.description || '',
-					'faz-b-pref-desc': pref.description || ''
+					'faz-b-pref-desc': pref.description || '',
+					'faz-b-optout-desc': ((c.optoutPopup && c.optoutPopup.elements) || {}).description || ''
 				};
 				ids.forEach(function (id) {
 					var editor = tinyMCE.get(id);
@@ -607,7 +608,10 @@
 	function updatePositionOptions() {
 		var type = getVal('faz-b-type') || 'box';
 		var posEl = document.getElementById('faz-b-position');
+		var posGroup = posEl && posEl.closest('.faz-form-group');
 		if (!posEl) return;
+		// Centered popup has no position choice — hide the whole group
+		if (posGroup) posGroup.style.display = (type === 'popup') ? 'none' : '';
 		var opts = posEl.options;
 		for (var i = 0; i < opts.length; i++) {
 			var v = opts[i].value;
@@ -638,8 +642,35 @@
 				prefEl.disabled = true;
 			} else {
 				prefEl.disabled = false;
-				if (type === 'box' && prefEl.value === 'pushdown') {
+				if ((type === 'box' || type === 'popup') && prefEl.value === 'pushdown') {
 					prefEl.value = 'popup';
+				}
+				// Popup has no sidebar template — disable the option and fall back
+				// to popup if it was previously selected.
+				var sidebarOpt = prefEl.querySelector('option[value="sidebar"]');
+				if (sidebarOpt) {
+					sidebarOpt.disabled = (type === 'popup');
+				}
+				if (type === 'popup' && prefEl.value === 'sidebar') {
+					prefEl.value = 'popup';
+				}
+			}
+		}
+
+		// Soft cookie wall toggle: only relevant for box/popup/banner types
+		var wallGroup = document.getElementById('faz-soft-cookie-wall-group');
+		var wallEl = document.getElementById('faz-b-soft-cookie-wall');
+		if (wallGroup) {
+			if (type === 'classic') {
+				wallGroup.style.display = 'none';
+				if (wallEl) {
+					wallEl.checked = false;
+					wallEl.disabled = true;
+				}
+			} else {
+				wallGroup.style.display = '';
+				if (wallEl) {
+					wallEl.disabled = false;
 				}
 			}
 		}
@@ -1338,6 +1369,8 @@
 		setVal('faz-b-position', s.position || 'bottom-right');
 		setVal('faz-b-theme', s.theme || 'light');
 		setVal('faz-b-pref-type', s.preferenceCenterType || 'popup');
+		var wallEl = document.getElementById('faz-b-soft-cookie-wall');
+		if (wallEl) wallEl.checked = !!s.softCookieWall;
 		// Fallback expiry when the banner has no stored consentExpiry.value
 		// (newly cloned/migrated banners). Law-aware to match the JSON config
 		// defaults: opt-in (GDPR-family) banners default to 180 days — the
@@ -1497,7 +1530,21 @@
 
 	function toggleDoNotSellColorRow(law) {
 		var row = document.getElementById('faz-donotsell-color-row');
-		if (row) row.style.display = (law === 'ccpa' || law === 'gdpr_ccpa') ? '' : 'none';
+		var shows = (law === 'ccpa' || law === 'gdpr_ccpa');
+		if (row) row.style.display = shows ? '' : 'none';
+		// The opt-out (Do Not Sell) modal only exists on CCPA / US State Laws
+		// banners, so its text card is only relevant there. #187
+		var optoutCard = document.getElementById('faz-optout-text-card');
+		if (optoutCard) {
+			optoutCard.style.display = shows ? '' : 'none';
+			// A TinyMCE editor initialised inside a hidden card paints into a
+			// zero-size iframe; re-set its content once the card is revealed so
+			// the description is visible (mirrors the tab-switch re-render).
+			if (shows && typeof tinyMCE !== 'undefined') {
+				var ed = tinyMCE.get('faz-b-optout-desc');
+				if (ed) ed.setContent(ed.getContent() || '');
+			}
+		}
 	}
 
 	function populateButtonColors(name, btnData) {
@@ -1565,6 +1612,14 @@
 		setVal('faz-b-pref-accept', prefBtns.accept || '');
 		setVal('faz-b-pref-save', prefBtns.save || '');
 		setVal('faz-b-pref-reject', prefBtns.reject || '');
+
+		// Opt-out (Do Not Sell) popup text — CCPA / US State Laws only. The card
+		// itself is shown/hidden by toggleDoNotSellColorRow(). #187
+		var optout = (c.optoutPopup && c.optoutPopup.elements) || {};
+		setVal('faz-b-optout-title', optout.title || '');
+		setVal('faz-b-optout-desc', optout.description || '');
+		var optOption = (optout.optOption && optout.optOption.elements) || {};
+		setVal('faz-b-optout-option-title', optOption.title || '');
 	}
 
 	// Helper: only overwrite field if the value is readable (not undefined).
@@ -1614,6 +1669,17 @@
 		storeField(c.preferenceCenter.elements.buttons.elements, 'accept', 'faz-b-pref-accept');
 		storeField(c.preferenceCenter.elements.buttons.elements, 'save', 'faz-b-pref-save');
 		storeField(c.preferenceCenter.elements.buttons.elements, 'reject', 'faz-b-pref-reject');
+
+		// Opt-out (Do Not Sell) popup text — persisted for every language even
+		// when the card is hidden (a GDPR-only banner keeps any copy the admin
+		// entered before switching law). storeField() no-ops on hidden TinyMCE. #187
+		if (!c.optoutPopup) c.optoutPopup = { elements: {} };
+		if (!c.optoutPopup.elements) c.optoutPopup.elements = {};
+		storeField(c.optoutPopup.elements, 'title', 'faz-b-optout-title');
+		storeField(c.optoutPopup.elements, 'description', 'faz-b-optout-desc');
+		if (!c.optoutPopup.elements.optOption) c.optoutPopup.elements.optOption = { elements: {} };
+		if (!c.optoutPopup.elements.optOption.elements) c.optoutPopup.elements.optOption.elements = {};
+		storeField(c.optoutPopup.elements.optOption.elements, 'title', 'faz-b-optout-option-title');
 
 		bannerData.contents = contents;
 	}
@@ -1968,6 +2034,8 @@
 		}
 		props.settings.position = getVal('faz-b-position');
 		props.settings.theme = getVal('faz-b-theme');
+		var wallEl = document.getElementById('faz-b-soft-cookie-wall');
+		props.settings.softCookieWall = wallEl ? wallEl.checked : false;
 		if (!props.settings.consentExpiry) props.settings.consentExpiry = {};
 		props.settings.consentExpiry.status = true;
 		props.settings.consentExpiry.value = getVal('faz-b-expiry');
@@ -2470,9 +2538,13 @@
 		var position = getVal('faz-b-position') || 'bottom-right';
 		var ptype = getVal('faz-b-pref-type') || 'popup';
 		var positionType = type;
-		if (type !== 'box' && ptype === 'pushdown') positionType = 'classic';
-		var positionForClass = position;
-		if (positionType !== 'box') {
+		if (type === 'popup') {
+			positionType = 'popup';
+		} else if (type !== 'box' && ptype === 'pushdown') {
+			positionType = 'classic';
+		}
+		var positionForClass = (positionType === 'popup') ? 'center' : position;
+		if (positionType !== 'box' && positionType !== 'popup') {
 			positionForClass = (position.indexOf('top') !== -1) ? 'top' : 'bottom';
 		}
 		var positionClass = 'faz-' + positionType + '-' + positionForClass;
@@ -2820,7 +2892,7 @@
 	// ── Helpers ──
 
 	// List of fields that use wp_editor (TinyMCE)
-	var wpEditorIds = ['faz-b-notice-desc', 'faz-b-pref-desc'];
+	var wpEditorIds = ['faz-b-notice-desc', 'faz-b-pref-desc', 'faz-b-optout-desc'];
 
 	function isWpEditorTextMode(editor) {
 		return editor && typeof editor.isHidden === 'function' && editor.isHidden();

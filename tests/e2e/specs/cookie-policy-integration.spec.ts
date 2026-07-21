@@ -8,17 +8,21 @@
  *     the admin UI — same width, same chrome as Settings/Banner).
  *  3. Admin form Save round-trip persists via REST.
  *  4. Preview button produces a non-empty rendered policy with the
- *     hardcoded disclaimer.
+ *     configured/localized disclaimer.
  *  5. Shortcode renders the saved policy on a public page (GDPR-strict /
  *     CCPA / LGPD switching).
- *  6. Six languages × jurisdictions matrix renders without {{...}}
+ *  6. Eight languages × jurisdictions matrix renders without {{...}}
  *     leftovers.
  */
 
 import { test, expect } from '../fixtures/wp-fixture';
 import { wpEval, upsertPage } from '../utils/wp-env';
+import { acquireSharedWordPressLock, releaseSharedWordPressLock } from '../utils/shared-wordpress-lock';
 
 const ADMIN_PAGE = '/wp-admin/admin.php?page=faz-cookie-manager-cookie-policy';
+
+let savedData = '';
+let lockHeld = false;
 
 /**
  * Fixture data for a fake company — used across all save / shortcode tests.
@@ -42,7 +46,20 @@ const FAKE_DATA = {
 
 test.describe('Cookie Policy Generator — admin integration (Spec 002)', () => {
 
-  test.beforeAll(async () => {
+  test.beforeAll(async ({}, testInfo) => {
+    // This suite and cookie-policy-gettext.spec.ts both rewrite the same option.
+    // Serialize them across Playwright workers before snapshotting or seeding.
+    testInfo.setTimeout(41 * 60_000);
+    await acquireSharedWordPressLock();
+    lockHeld = true;
+    savedData = wpEval(`
+      $sentinel = new stdClass();
+      $value = get_option('faz_cookie_policy_data', $sentinel);
+      echo wp_json_encode(array(
+        'exists' => $value !== $sentinel,
+        'value'  => $value !== $sentinel ? $value : array(),
+      ));
+    `).trim();
     // Seed settings via PHP eval (avoids quoting headaches with WP-CLI option update).
     const fakeJson = JSON.stringify(FAKE_DATA).replace(/'/g, "\\'");
     wpEval(`update_option('faz_cookie_policy_data', json_decode('${fakeJson}', true));`);
@@ -51,22 +68,32 @@ test.describe('Cookie Policy Generator — admin integration (Spec 002)', () => 
   });
 
   test.afterAll(async () => {
-    wpEval(`
-      $page_id = get_posts(array(
-        'name'      => 'cookie-policy-e2e',
-        'post_type' => 'page',
-        'fields'    => 'ids',
-        'numberposts' => 1,
-        'post_status' => 'any',
-      ));
-      if (!empty($page_id)) { wp_delete_post((int) $page_id[0], true); }
-      // Delete the option seeded by beforeAll so downstream specs see a
-      // clean Cookie Policy state. Without this, any later spec that
-      // renders [faz_cookie_policy_complete] or reads the option via the
-      // REST API would see ACME Privacy S.r.l. / privacy@acme-fixture.test
-      // fixture data instead of an empty/default install state.
-      delete_option('faz_cookie_policy_data');
-    `);
+    try {
+      if (!lockHeld || !savedData) return;
+      const b64 = Buffer.from(savedData, 'utf8').toString('base64');
+      wpEval(`
+        $page_id = get_posts(array(
+          'name'        => 'cookie-policy-e2e',
+          'post_type'   => 'page',
+          'fields'      => 'ids',
+          'numberposts' => 1,
+          'post_status' => 'any',
+        ));
+        if (!empty($page_id)) { wp_delete_post((int) $page_id[0], true); }
+
+        $snapshot = json_decode(base64_decode('${b64}'), true);
+        if (!empty($snapshot['exists'])) {
+          update_option('faz_cookie_policy_data', $snapshot['value']);
+        } else {
+          delete_option('faz_cookie_policy_data');
+        }
+      `);
+    } finally {
+      if (lockHeld) {
+        releaseSharedWordPressLock();
+        lockHeld = false;
+      }
+    }
   });
 
   test('1. Page is wired into faz-top-nav + appears as current item', async ({ page, loginAsAdmin }) => {
@@ -392,9 +419,9 @@ test.describe('Cookie Policy Generator — admin integration (Spec 002)', () => 
     expect(completeOut, 'complete emits disclaimer').toContain('faz-cookie-policy-disclaimer');
   });
 
-  test('6. 6 languages × 3 jurisdictions matrix renders without leftover tokens', async ({ page }) => {
-    // We exercise the shortcode directly via WP eval (avoids creating 18 pages).
-    const langs = ['en', 'it', 'fr', 'de', 'es', 'pt-BR'];
+  test('6. 8 languages × 3 jurisdictions matrix renders without leftover tokens', async ({ page }) => {
+    // We exercise the shortcode directly via WP eval (avoids creating 24 pages).
+    const langs = ['en', 'it', 'fr', 'de', 'es', 'pt-BR', 'bg', 'cs'];
     const jurisdictions = ['gdpr-strict', 'ccpa-california', 'lgpd-brazil'];
 
     for (const j of jurisdictions) {
@@ -426,6 +453,27 @@ test.describe('Cookie Policy Generator — admin integration (Spec 002)', () => 
         }
       }
     }
+  });
+
+  test('6c. Czech gettext policy override is applied only with all required placeholders', () => {
+    const out = wpEval(`
+      add_filter( 'locale', function () { return 'cs_CZ'; } );
+      add_filter( 'gettext_with_context', function ( $translation, $text, $context, $domain ) {
+        if ( 'faz-cookie-manager' === $domain && 'Cookie policy template: gdpr-strict / section-9' === $context ) {
+          return "## KONTAKT Z PO\\n\\nNapište na **{{COMPANY_EMAIL}}**.";
+        }
+        if ( 'faz-cookie-manager' === $domain && 'Cookie policy template: gdpr-strict / introduction' === $context ) {
+          return '# INVALID WITHOUT REQUIRED PLACEHOLDERS';
+        }
+        return $translation;
+      }, 10, 4 );
+      echo do_shortcode( '[faz_cookie_policy_complete lang="cs" jurisdiction="gdpr-strict" show_title="true"]' );
+    `);
+
+    expect(out, 'valid section-level PO override was not applied').toContain('KONTAKT Z PO');
+    expect(out, 'invalid PO entry that dropped placeholders was accepted').not.toContain('INVALID WITHOUT REQUIRED PLACEHOLDERS');
+    expect(out, 'reviewed Czech introduction fallback was not retained').toContain('Zásady používání cookies');
+    expect(out, 'placeholder survived final rendering').not.toMatch(/\{\{[A-Z_][A-Z0-9_]*\}\}/);
   });
 
   test('7. P2-A regression: COOKIE_CATEGORIES HTML survives markdown_to_html() without nested <p>', () => {

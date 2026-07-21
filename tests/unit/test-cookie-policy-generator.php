@@ -251,6 +251,12 @@ assert_eq( $h1 === $h2, false, 'Different data → different hash' );
 $h3 = Generator::policy_version_hash( $path, array( 'COMPANY_NAME' => 'A' ) );
 assert_eq( $h1, $h3, 'Same input → same hash (deterministic)' );
 
+$scaffold_a = (string) file_get_contents( $path );
+$scaffold_b = $scaffold_a . "\n<!-- translated policy revision -->";
+$h4 = Generator::policy_version_hash( $path, array( 'COMPANY_NAME' => 'A' ), $scaffold_a );
+$h5 = Generator::policy_version_hash( $path, array( 'COMPANY_NAME' => 'A' ), $scaffold_b );
+assert_true( $h4 !== $h5, 'Effective gettext scaffold participates in policy version hash' );
+
 // ---------- Real-world rendering smoke ----------
 
 $gdpr_path = Generator::resolve_template_path( 'gdpr-strict', 'en' );

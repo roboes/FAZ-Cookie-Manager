@@ -16,6 +16,24 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Cache {
 
 	/**
+	 * TTL for the plugin's data transients (7 days).
+	 *
+	 * Data transients are epoch-invalidated (see delete_transient()): a
+	 * rotated prefix makes the old entries unreachable rather than
+	 * physically deleting them, so on persistent object-cache backends
+	 * (Redis, Memcached) each invalidation would otherwise leave the
+	 * previous epoch's payloads behind forever. A finite expiration lets
+	 * the backend reap those orphans, and on plain-DB installs it also
+	 * keeps the rows out of the autoload set (WordPress autoloads only
+	 * transients stored without an expiration). The payloads are pure
+	 * caches rebuilt from the plugin tables on any miss, so expiry never
+	 * loses data.
+	 *
+	 * @var int
+	 */
+	const TRANSIENT_TTL = 7 * 24 * 3600;
+
+	/**
 	 * Per-request memoization of group → resolved prefix.
 	 *
 	 * Critical: without this cache, if the underlying store (`wp_cache_*`
@@ -151,7 +169,9 @@ class Cache {
 	 * @return void
 	 */
 	public static function delete( $group ) {
-		self::delete_cache( $group );
+		// delete_transient() rotates BOTH the object-cache and the transient
+		// prefix, so this one call invalidates every backend. (delete_cache()
+		// stays available on its own for object-cache-only invalidation.)
 		self::delete_transient( $group );
 	}
 
@@ -233,8 +253,7 @@ class Cache {
 	 */
 	public static function set_transient( $key, $group, $data ) {
 		$key = self::get_transient_prefix( $group ) . $key;
-		set_transient( $key, $data );
-
+		set_transient( $key, $data, self::TRANSIENT_TTL );
 	}
 
 	/**
@@ -270,13 +289,50 @@ class Cache {
 	 * @return void
 	 */
 	public static function delete_transient( $group ) {
-		$prefix     = self::get_transient_prefix( $group );
+		// Invalidate the object cache too. The two backends must be rotated
+		// together: get() falls back from the object cache to transients and
+		// re-promotes the result, so rotating only the transient prefix here
+		// would leave a stale payload live in a persistent object cache
+		// (Redis/Memcached) and every read would keep serving it — the exact
+		// #125 symptom. Coupling it in-method (rather than relying on the caller
+		// to also call delete_cache()) makes a standalone delete_transient()
+		// call safe; delete_cache() alone remains available for object-cache-only
+		// invalidation, and delete() now delegates here so nothing rotates twice.
+		//
+		// Capture the old transient prefix for the best-effort physical cleanup,
+		// then publish the NEW transient epoch BEFORE the new object-cache epoch.
+		// The order is a correctness requirement, not just an optimisation:
+		//
+		//   1. If the object-cache epoch became visible first, a concurrent request
+		//      could miss there, read a stale payload through the still-current old
+		//      transient epoch, and promote that stale payload into the NEW object
+		//      epoch. Rotating the transient seed afterwards would not reach the
+		//      promoted copy, recreating issue #125 under load.
+		//   2. Publishing the transient epoch first may let an in-flight request
+		//      finish from the old object epoch, but it can never promote old
+		//      transient data into the new object epoch. Once delete_cache() runs,
+		//      both fresh requests and all later requests see only the new epochs.
+		//
+		// delete_cache() resets both memoized prefixes after rotating the object
+		// seed, so the next lookup resolves the two freshly-published epochs.
+		$prefix = self::get_transient_prefix( $group );
+		set_transient( 'faz_' . $group . '_transient_prefix', microtime() );
+		self::delete_cache( $group );
+
 		$transients = self::get_transient_keys_with_prefix( $prefix );
 		foreach ( $transients as $key ) {
 			delete_transient( $key );
 		}
-		// Drop the memoized prefix so the next call after the underlying
-		// transient has been invalidated upstream picks up a fresh one.
-		self::reset_prefix_cache( $group );
+
+		// The wp_options scan only reaches DB-backed transients. External-cache
+		// copies (Redis, Memcached, W3TC object cache, …) cannot be deleted by
+		// this query, but the transient epoch was already rotated above, so those
+		// payloads are unreachable and expire naturally via TRANSIENT_TTL.
+		//
+		// The seed pointer itself is intentionally written WITHOUT a TTL: it is
+		// the stable current-epoch marker every read resolves against. Expiring
+		// it underneath live payloads would create an unnecessary rebuild miss.
+		// delete_cache() already reset both memoized prefixes after publishing
+		// the new object-cache epoch.
 	}
 }

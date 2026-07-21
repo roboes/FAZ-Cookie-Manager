@@ -146,6 +146,12 @@ class Frontend {
 		// Advanced mode is on.
 		add_action( 'wp_head', array( $this, 'print_gcm_default_inline' ), 0 );
 		add_action( 'template_redirect', array( $this, 'render_banner_preview_frame' ), 0 );
+		// Cookie shredding needs the resolved main query so WooCommerce checkout /
+		// cart conditionals and page exclusions are reliable. template_redirect is
+		// still before any template output, so Set-Cookie deletion headers remain
+		// safe while gateway cookies are protected only in the request where their
+		// scripts are actually allowed.
+		add_action( 'template_redirect', array( $this, 'shred_non_consented_cookies' ), 1 );
 		add_action( 'template_redirect', array( $this, 'start_output_buffer' ) );
 		add_filter( 'script_loader_tag', array( $this, 'filter_script_loader_tag' ), 10, 3 );
 		add_filter( 'style_loader_tag', array( $this, 'filter_style_loader_tag' ), 10, 4 );
@@ -208,6 +214,42 @@ class Frontend {
 
 			// Autoptimize exclude helper.
 			add_filter( 'autoptimize_filter_js_exclude', array( $this, 'autoptimize_exclude_own_scripts' ) );
+
+			// Cross-version FlyingPress compatibility — DO NOT remove any of these
+			// as "dead code", each covers a different FlyingPress line (verified
+			// against FlyingPress 5.5.0 source):
+			//   * flying_press_exclude_from_delay:js / :defer:js — the exclusion
+			//     mechanism on FlyingPress 4.16–4.x. These hooks were REMOVED in
+			//     FlyingPress 5, where JavaScript::delay_scripts() reads the
+			//     exclusion list straight from Config::$config['js_delay_excludes']
+			//     with no filter, so on 5.x these two add_filter() calls are inert
+			//     but must stay for 4.x installs.
+			//   * flying_press_exclude_from_minify:js — still present in 5.x and 4.x.
+			//   * flying_press_apply_runtime_delay_exclusions() (below) — the 5.x
+			//     path: it injects the same keywords into the in-memory
+			//     Config::$config['js_delay_excludes'] (front-end renders only, never
+			//     persisting/overwriting the saved option).
+			// FlyingPress older than 4.16 (no delay/defer filter) falls back to the
+			// manual "Delay JavaScript" keyword exclusion documented in readme.txt.
+			// Registered in the always-run frontend composition root — the admin
+			// cache adapter is not loaded on ordinary public requests.
+			add_filter( 'flying_press_exclude_from_delay:js', array( $this, 'flying_press_exclude_own_scripts' ) );
+			add_filter( 'flying_press_exclude_from_defer:js', array( $this, 'flying_press_exclude_own_scripts' ) );
+			add_filter( 'flying_press_exclude_from_minify:js', array( $this, 'flying_press_exclude_own_scripts' ) );
+			add_action( 'plugins_loaded', array( $this, 'flying_press_apply_runtime_delay_exclusions' ), PHP_INT_MAX, 0 );
+			// Re-apply on `wp` too (front-end page loads, after `init`): if
+			// FlyingPress populates its static config later than plugins_loaded,
+			// the early pass finds no key and no-ops; `wp` fires before FlyingPress
+			// optimises the output buffer, so this catch-all lands the exclusion on
+			// late-config load orders. Idempotent ($updated !== $config guard) and
+			// front-end-gated, so the extra call is a no-op when nothing changed.
+			add_action( 'wp', array( $this, 'flying_press_apply_runtime_delay_exclusions' ), PHP_INT_MAX, 0 );
+			add_action( 'flying_press_update_config:after', array( $this, 'flying_press_apply_runtime_delay_exclusions' ), PHP_INT_MAX, 0 );
+			// Covers non-standard/late bootstrap paths where plugins_loaded has
+			// already fired before this object is constructed.
+			if ( did_action( 'plugins_loaded' ) ) {
+				$this->flying_press_apply_runtime_delay_exclusions();
+			}
 		}
 
 		// WP 5.7+ exposes wp_inline_script_tag for inline scripts added via
@@ -219,8 +261,18 @@ class Frontend {
 		// and the OB handles everything.
 		add_filter( 'wp_inline_script_tag', array( $this, 'filter_inline_script_tag' ), 10, 3 );
 		add_action( 'send_headers', array( $this, 'send_geo_cache_headers' ), 0 );
-		add_action( 'send_headers', array( $this, 'shred_non_consented_cookies' ) );
 		add_action( 'send_headers', array( $this, 'send_vary_header' ) );
+
+		// FlyingPress honours neither the DONOTCACHEPAGE constant nor the
+		// Cache-Control: no-store header that send_geo_cache_headers() emits
+		// for country-dependent output — it decides cacheability solely via
+		// its documented flying_press_is_cacheable filter
+		// (https://docs.flyingpress.com/en/articles/11406011-conditionally-control-page-caching).
+		// Without this bridge a FlyingPress-cached page freezes ONE visitor's
+		// country variant (wrong banner / gdprApplies for everyone else) —
+		// part of the FlyingPress reports in issue #125. Registered
+		// unconditionally: with FlyingPress absent the filter never runs.
+		add_filter( 'flying_press_is_cacheable', array( $this, 'flying_press_is_cacheable' ) );
 
 		// Content-level blocking (defense-in-depth — runs before output buffer).
 		add_filter( 'the_content', array( $this, 'filter_content_blocking' ), 1000 );
@@ -352,6 +404,16 @@ class Frontend {
 			// rules never reach them. Without this floor, placeholders for lazy-loaded
 			// iframes (Bricks/Elementor/Divi Video) collapse to 0×0. The 4-ancestor
 			// probe in _fazAddPlaceholder (issue #87) expected this CSS floor.
+			// Neutralise WordPress core's block-border support rule
+			// `html :where([style*="border-color"]){border-style:solid}`
+			// (wp-includes, WP 5.9+). The banner container carries the
+			// per-button colour CSS variables (…-border-color) in its inline
+			// style, so that substring selector matches it and paints an
+			// unintended medium/solid currentColor (black) border around the
+			// whole banner — the intended border lives on .faz-consent-bar, not
+			// the container. The id selector outranks WP's zero-specificity
+			// :where(), and border-radius is unaffected.
+			$css .= '#faz-consent{border-style:none}';
 			$css .= '.faz-hidden{display:none!important;visibility:hidden!important}'
 				. '.faz-consent-bridge{width:0;height:0;border:0}'
 				. '.faz-age-gate-overlay{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6)}'
@@ -1003,6 +1065,39 @@ class Frontend {
 		if ( ! defined( 'DONOTCACHEDB' ) ) {
 			define( 'DONOTCACHEDB', true );
 		}
+	}
+
+	/**
+	 * FlyingPress `flying_press_is_cacheable` bridge: veto page caching when
+	 * the rendered output varies by visitor country.
+	 *
+	 * Mirrors send_geo_cache_headers()' gating exactly, so FlyingPress skips
+	 * caching precisely the requests every other supported page cache already
+	 * bypasses via DONOTCACHEPAGE / no-store (which FlyingPress ignores).
+	 * Under Cache Compatibility Mode is_country_dependent_output() is false,
+	 * so the page stays cacheable — same behaviour as the other caches.
+	 *
+	 * @param bool $is_cacheable FlyingPress's current verdict for the request.
+	 * @return bool
+	 */
+	public function flying_press_is_cacheable( $is_cacheable ) {
+		// Never overturn an exclusion someone else already decided.
+		if ( false === $is_cacheable ) {
+			return $is_cacheable;
+		}
+		if ( is_admin() || wp_doing_ajax() || wp_doing_cron() || true === faz_disable_banner() ) {
+			return $is_cacheable;
+		}
+		if ( ! faz_is_front_end_request() ) {
+			return $is_cacheable;
+		}
+		if ( $this->is_banner_disabled_by_settings() ) {
+			return $is_cacheable;
+		}
+		if ( $this->is_country_dependent_output() ) {
+			return false;
+		}
+		return $is_cacheable;
 	}
 
 	/**
@@ -3379,24 +3474,73 @@ class Frontend {
 	}
 
 	/**
-	 * Return payment SDK patterns that must never be blocked on the storefront.
+	 * Catalogue of supported payment gateways and the script patterns that make
+	 * each one functional (the SDK loader that defines its JS global plus the
+	 * gateway plugin's own script handles). Single source of truth shared with
+	 * the admin settings (the per-gateway opt-in checkboxes) and the sanitiser.
 	 *
-	 * Stripe can appear on product/cart/account flows outside checkout (express
-	 * buttons, saved cards, payment-request widgets), so keep it globally allowed.
+	 * Deliberately excludes a gateway's MARKETING pixel (e.g. PayPal's
+	 * paypal.com/tagmanager/pptm.js): enabling a gateway must not unblock its
+	 * tracking pixel, only the payment machinery.
+	 *
+	 * @return array<string,array{label:string,patterns:string[]}>
+	 */
+	public static function payment_gateway_catalog() {
+		return array(
+			'paypal'     => array( 'label' => 'PayPal',     'patterns' => array( 'paypal.com/sdk/js', 'paypalobjects.com/api/checkout.js', 'ppcp-gateway', 'ppcp-webhooks', 'PayPalCommerceGateway' ) ),
+			'stripe'     => array( 'label' => 'Stripe',     'patterns' => array( 'js.stripe.com', 'm.stripe.network', 'wc-stripe-', 'stripe-payment', 'stripe-upe' ) ),
+			'square'     => array( 'label' => 'Square',     'patterns' => array( 'squareup.com', 'square-credit-card' ) ),
+			'braintree'  => array( 'label' => 'Braintree',  'patterns' => array( 'braintreegateway.com', 'braintree-web/', 'wc-braintree' ) ),
+			'klarna'     => array( 'label' => 'Klarna',     'patterns' => array( 'x.klarnacdn.net', 'klarna-payments', 'klarna-checkout' ) ),
+			'mollie'     => array( 'label' => 'Mollie',     'patterns' => array( 'js.mollie.com', 'mollie-payments', 'plugins/mollie-payments-for-woocommerce/' ) ),
+			'amazon_pay' => array( 'label' => 'Amazon Pay', 'patterns' => array( 'static-na.payments-amazon.com', 'amazonpay', 'amazon-payments-advanced' ) ),
+		);
+	}
+
+	/**
+	 * Payment gateway script patterns that are exempt from consent blocking on
+	 * the current request.
+	 *
+	 * Payment SDKs can set cookies and fingerprint, so they are NOT globally
+	 * allowed by default (that would load a tracker before consent — a GDPR /
+	 * ePrivacy violation). They are exempt only when:
+	 *
+	 *   1. the request is a WooCommerce checkout/cart page — the SDK is then
+	 *      strictly necessary for the transaction the visitor initiated (the
+	 *      ePrivacy Art. 5(3) "strictly necessary" exemption), OR
+	 *   2. the site owner explicitly enabled that gateway under Settings →
+	 *      Script Blocking → Payment gateways — an informed, per-gateway,
+	 *      admin-responsibility opt-in for stores whose payment forms live
+	 *      outside a WooCommerce checkout (Forminator, Paid Memberships Pro,
+	 *      Easy Digital Downloads, Give, …).
+	 *
+	 * This is also the source the cookie shredder consults
+	 * (is_always_allowed_gateway_pattern → compute_whitelisted_cookie_patterns),
+	 * so a gateway's cookies are exempted exactly when its scripts are — never
+	 * for a gateway that is neither on-checkout nor opted-in. The shredder runs
+	 * on template_redirect, after the main query is resolved, so the WooCommerce
+	 * conditional is reliable there too.
 	 *
 	 * @return string[]
 	 */
 	private function get_always_allowed_gateway_patterns() {
-		$patterns = apply_filters(
-			'faz_always_allowed_gateway_patterns',
-			array(
-				'js.stripe.com',
-				'm.stripe.network',
-				'wc-stripe-',
-				'stripe-payment',
-				'stripe-upe',
-			)
-		);
+		$catalog     = self::payment_gateway_catalog();
+		$settings    = $this->get_faz_settings();
+		$enabled     = ( isset( $settings['script_blocking']['payment_gateways'] ) && is_array( $settings['script_blocking']['payment_gateways'] ) )
+			? $settings['script_blocking']['payment_gateways']
+			: array();
+		$on_checkout = $this->is_wc_checkout_or_cart();
+
+		$patterns = array();
+		foreach ( $catalog as $key => $gateway ) {
+			// Strictly necessary on WooCommerce checkout/cart; otherwise only when
+			// the admin opted this gateway in.
+			if ( $on_checkout || ! empty( $enabled[ $key ] ) ) {
+				$patterns = array_merge( $patterns, $gateway['patterns'] );
+			}
+		}
+
+		$patterns = apply_filters( 'faz_always_allowed_gateway_patterns', $patterns );
 		if ( ! is_array( $patterns ) ) {
 			$patterns = array( $patterns );
 		}
@@ -3417,17 +3561,12 @@ class Frontend {
 	 * @param string $pattern Provider pattern to check.
 	 * @return bool
 	 */
-	private function is_always_allowed_gateway_pattern( $pattern ) {
+	private function gateway_pattern_matches( $pattern, $list ) {
 		$pattern = trim( (string) $pattern );
 		if ( '' === $pattern ) {
 			return false;
 		}
-
-		if ( null === $this->always_allowed_cache ) {
-			$this->always_allowed_cache = $this->get_always_allowed_gateway_patterns();
-		}
-
-		foreach ( $this->always_allowed_cache as $allowed_pattern ) {
+		foreach ( $list as $allowed_pattern ) {
 			// Forward: the provider pattern contains a gateway token.
 			if ( false !== stripos( $pattern, $allowed_pattern ) ) {
 				return true;
@@ -3440,8 +3579,23 @@ class Frontend {
 				return true;
 			}
 		}
-
 		return false;
+	}
+
+	/**
+	 * Whether a script pattern is exempt from consent BLOCKING on this request —
+	 * i.e. the gateway is opted-in OR this is a WooCommerce checkout/cart page.
+	 * Drives the script whitelist and the client-side block map, both resolved at
+	 * `wp_enqueue_scripts` where the request context is ready. Context-dependent.
+	 *
+	 * @param string $pattern
+	 * @return bool
+	 */
+	private function is_always_allowed_gateway_pattern( $pattern ) {
+		if ( null === $this->always_allowed_cache ) {
+			$this->always_allowed_cache = $this->get_always_allowed_gateway_patterns();
+		}
+		return $this->gateway_pattern_matches( $pattern, $this->always_allowed_cache );
 	}
 
 	/**
@@ -3990,14 +4144,15 @@ class Frontend {
 	/**
 	 * Build the set of cookie patterns that must be exempt from shredding —
 	 * the cookies of services the user has whitelisted (Settings → Script
-	 * Blocking → whitelist_patterns) AND of always-allowed payment gateways
-	 * (Stripe etc.), whose scripts run pre-consent so their cookies must
-	 * persist too. The gateway exemption applies even with no user whitelist.
+	 * Blocking → whitelist_patterns) AND of payment gateways allowed on the
+	 * current request (explicit admin opt-in or a real WooCommerce checkout/cart),
+	 * whose scripts run pre-consent so their cookies may persist too. A gateway
+	 * that is neither opted in nor needed on this request is never exempted.
 	 *
 	 * Used both by `get_store_data()` to populate
 	 * `_whitelistedCookiePatterns` for the frontend network interceptors,
 	 * AND by `shred_non_consented_cookies()` so the server-side shredder
-	 * on `send_headers` doesn't delete cookies that the frontend whitelist
+	 * on `template_redirect` doesn't delete cookies that the frontend whitelist
 	 * intentionally allows to persist. Keeping a single helper prevents
 	 * the two layers from drifting out of sync.
 	 *
@@ -4029,11 +4184,11 @@ class Frontend {
 
 			$service_whitelisted = false;
 
-			// Always-allowed payment gateways (Stripe, etc.): their scripts run
-			// pre-consent regardless of category, so the cookies they set must
-			// also be exempt from the cookie shredder — otherwise the startup
-			// cleanup deletes a live gateway cookie (e.g. __stripe_mid) the
-			// moment it is written. This applies even with no user whitelist.
+			// Payment-gateway cookies (Stripe __stripe_mid, etc.) are exempt only
+			// when the same gateway scripts are allowed on this request: an explicit
+			// per-gateway admin opt-in or a resolved WooCommerce checkout/cart. This
+			// keeps script blocking, server shredding, client cleanup and developer
+			// filter extensions on the same context-aware source of truth.
 			foreach ( $service['patterns'] as $pattern ) {
 				if ( $this->is_always_allowed_gateway_pattern( $pattern ) ) {
 					$service_whitelisted = true;
@@ -4470,6 +4625,7 @@ class Frontend {
 		$data['settings']['preferenceCenterType']     = ( $settings['type'] ?? '' ) === 'classic' ? 'pushdown' : ( $settings['preferenceCenterType'] ?? 'popup' );
 		$data['settings']['position']                 = $settings['position'] ?? 'bottom-right';
 		$data['settings']['applicableLaw']            = $settings['applicableLaw'] ?? 'gdpr';
+		$data['settings']['softCookieWall']           = 'classic' !== ( $settings['type'] ?? '' ) && ! empty( $settings['softCookieWall'] );
 		$data['behaviours']['reloadBannerOnAccept']   = $behaviours['reloadBannerOnAccept']['status'] ?? false;
 		$data['behaviours']['loadAnalyticsByDefault'] = $behaviours['loadAnalyticsByDefault']['status'] ?? false;
 		// Global Privacy Control: surfaced to the frontend so script.js can read
@@ -4750,6 +4906,7 @@ class Frontend {
 			'.faz-box-bottom-right',
 			'.faz-box-top-left',
 			'.faz-box-top-right',
+			'.faz-popup-center',
 		);
 
 		// Classes on sibling elements (outside #faz-consent in the DOM).
@@ -4762,6 +4919,7 @@ class Frontend {
 			'.faz-modal',
 			'.faz-age-gate',
 			'.faz-consent-bridge',
+			'#faz-cookie-wall',
 		);
 
 		// Classes inside .faz-modal (popup/sidebar) OR inside #faz-consent (classic).
@@ -5092,6 +5250,117 @@ class Frontend {
 			$attributes['data-ao-skip']     = '1';
 		}
 		return $attributes;
+	}
+
+	/**
+	 * FlyingPress v4/v5 filter callback: add every FAZ asset marker without
+	 * dropping or duplicating exclusions registered by the site or another
+	 * integration.
+	 *
+	 * @param mixed $excludes Existing FlyingPress exclusion keywords.
+	 * @return array
+	 */
+	public function flying_press_exclude_own_scripts( $excludes ) {
+		$excludes = is_array( $excludes ) ? $excludes : array();
+		foreach ( array( 'faz-cookie-manager', 'faz-fw' ) as $keyword ) {
+			if ( ! in_array( $keyword, $excludes, true ) ) {
+				$excludes[] = $keyword;
+			}
+		}
+		return $excludes;
+	}
+
+	/**
+	 * Add FAZ to FlyingPress v5's Delay All JavaScript runtime config.
+	 *
+	 * FlyingPress v5 no longer consumes the v4 delay/defer filters while
+	 * optimizing HTML; it reads `js_delay_excludes` from Config::$config.
+	 * The helper only receives FlyingPress's already-loaded static value; FAZ
+	 * deliberately does not filter or write the `FLYING_PRESS_CONFIG` option,
+	 * so disabling FAZ restores the administrator's exact configuration.
+	 * Empty/unmigrated or older config shapes are left untouched.
+	 *
+	 * @param mixed $config FlyingPress configuration option.
+	 * @return mixed
+	 */
+	public function flying_press_add_delay_exclusions_to_config( $config ) {
+		// Require an ARRAY value, not just the key: array_key_exists() alone would
+		// let a non-array js_delay_excludes (null, or a delimited string as some
+		// cache plugins use) reach flying_press_exclude_own_scripts(), which
+		// coerces non-arrays to array() and would silently drop the administrator's
+		// original value. Leave any unexpected shape untouched.
+		if ( ! is_array( $config ) || ! isset( $config['js_delay_excludes'] ) || ! is_array( $config['js_delay_excludes'] ) ) {
+			return $config;
+		}
+		$config['js_delay_excludes'] = $this->flying_press_exclude_own_scripts( $config['js_delay_excludes'] );
+		return $config;
+	}
+
+	/**
+	 * Patch FlyingPress v5's already-loaded config after all normal plugins have
+	 * booted (covering either plugin load order) and after a settings update
+	 * replaces Config::$config during the current request.
+	 *
+	 * Reflection keeps this compatibility bridge fail-closed if FlyingPress
+	 * changes the property visibility or removes the current config shape: no
+	 * fatal is allowed on a public request. No persistent option is modified.
+	 *
+	 * @return void
+	 */
+	public function flying_press_apply_runtime_delay_exclusions() {
+		// Front-end page renders only. Frontend is also constructed on AJAX/REST
+		// requests (Consent_Logger's REST routes live on this class), and this
+		// method runs at plugins_loaded, i.e. BEFORE FlyingPress's own settings
+		// save would run on such a request. Mutating the shared static
+		// \FlyingPress\Config::$config there risks the injected keywords leaking
+		// into the option FlyingPress persists — the opposite of the "never
+		// overwrites the administrator's saved config" guarantee below. The
+		// runtime exclusion is only needed while FlyingPress is serving/optimising
+		// a public page anyway, so restrict the in-memory patch to those requests.
+		// wp_doing_cron() is excluded explicitly: faz_is_front_end_request() does
+		// NOT treat cron as non-frontend, and FlyingPress's own preload runs on
+		// cron and reads Config::$config — mutating it there could leak the FAZ
+		// keywords into the persisted option if a cron pass re-saves the config
+		// (mirrors the wp_doing_cron() guard on flying_press_is_cacheable()).
+		// WP-CLI is excluded for the same persistence reason: FlyingPress commands
+		// such as license activation call Config::update_config() and save the whole
+		// shared static config after plugins_loaded has fired.
+		if ( ! faz_is_front_end_request() || wp_doing_cron() || ( defined( 'WP_CLI' ) && WP_CLI ) ) {
+			return;
+		}
+		if ( ! class_exists( '\\FlyingPress\\Config' ) || ! property_exists( '\\FlyingPress\\Config', 'config' ) ) {
+			return;
+		}
+		try {
+			$property = new \ReflectionProperty( '\\FlyingPress\\Config', 'config' );
+			if ( ! $property->isStatic() ) {
+				return;
+			}
+			if ( ! $property->isPublic() ) {
+				$property->setAccessible( true );
+			}
+			$config = $property->getValue();
+			if ( ! is_array( $config ) || ! array_key_exists( 'js_delay_excludes', $config ) ) {
+				// The v5 config shape this bridge relies on has changed. Degrade
+				// quietly (the consent banner may then be delayed by "Delay all
+				// JavaScript"), but leave a WP_DEBUG breadcrumb so the regression
+				// is diagnosable and the readme's manual-exclusion fallback applies.
+				if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+					error_log( 'FAZ Cookie Manager: FlyingPress delay-exclusion bridge skipped — \\FlyingPress\\Config::$config has no js_delay_excludes key (FlyingPress internals changed). Add "faz-cookie-manager" to FlyingPress "Delay JavaScript" exclusions manually.' ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+				}
+				return;
+			}
+			$updated = $this->flying_press_add_delay_exclusions_to_config( $config );
+			if ( $updated !== $config ) {
+				$property->setValue( null, $updated );
+			}
+		} catch ( \Throwable $error ) {
+			// Compatibility code must degrade to FlyingPress's original config.
+			if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+				error_log( 'FAZ Cookie Manager: FlyingPress delay-exclusion bridge failed — ' . $error->getMessage() . '. Add "faz-cookie-manager" to FlyingPress "Delay JavaScript" exclusions manually.' ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log
+			}
+			unset( $error );
+		}
 	}
 
 	/**
@@ -5526,9 +5795,9 @@ class Frontend {
 	/**
 	 * Delete non-consented cookies before the page renders (cookie shredding).
 	 *
-	 * Runs on the send_headers hook. Compares cookies against the
-	 * Known_Providers cookie map and deletes any that belong to
-	 * categories the visitor has not consented to.
+	 * Runs on template_redirect, after the main query has resolved but before
+	 * template output. Compares cookies against the Known_Providers cookie map
+	 * and deletes any that belong to categories the visitor has not consented to.
 	 */
 	public function shred_non_consented_cookies() {
 		if ( is_admin() || wp_doing_ajax() || wp_doing_cron() ) {
@@ -5610,7 +5879,7 @@ class Frontend {
 
 		// Whitelist short-circuit: cookies belonging to services the admin
 		// has whitelisted (Settings → Script Blocking → whitelist_patterns)
-		// must survive `send_headers` shredding too, otherwise the frontend
+		// must survive `template_redirect` shredding too, otherwise the frontend
 		// whitelist is only honored on the first page load and is silently
 		// neutralized on every subsequent request.
 		$settings                    = $this->get_faz_settings();
@@ -5623,8 +5892,9 @@ class Frontend {
 		);
 
 		foreach ( array_keys( $_COOKIE ) as $name ) {
-			$should_shred   = false;
-			$service_allows = false;
+			$should_shred    = false;
+			$service_allows  = false;
+			$service_denied  = false;
 
 			foreach ( $svc_cookie_decisions as $pattern => $decisions ) {
 				if ( ! $this->cookie_name_matches( $name, $pattern ) ) {
@@ -5632,7 +5902,8 @@ class Frontend {
 				}
 				foreach ( $decisions as $decision ) {
 					if ( 'no' === $decision ) {
-						$should_shred = true;
+						$should_shred   = true;
+						$service_denied = true;
 						break 2;
 					}
 					if ( 'yes' === $decision ) {
@@ -5655,9 +5926,10 @@ class Frontend {
 				}
 			}
 
-			// Honor the frontend whitelist after category/service decisions:
-			// a whitelisted service overrides both.
-			if ( $should_shred && ! empty( $whitelisted_cookie_patterns ) ) {
+			// A whitelist can override the category fallback, but never an explicit
+			// per-service/per-cookie denial. This preserves genuine checkout/admin
+			// gateway exemptions without making consent revocation ineffective.
+			if ( $should_shred && ! $service_denied && ! empty( $whitelisted_cookie_patterns ) ) {
 				foreach ( $whitelisted_cookie_patterns as $wl_pattern ) {
 					if ( $this->cookie_name_matches( $name, $wl_pattern ) ) {
 						$should_shred = false;

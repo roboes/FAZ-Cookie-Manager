@@ -159,6 +159,18 @@ class Settings extends Store {
 					'challenges.cloudflare.com/',
 					'hcaptcha.com/',
 				),
+				// Per-gateway payment-SDK opt-in. Each toggle, when the site owner
+				// enables it, allows that gateway's payment scripts (PayPal SDK,
+				// Stripe.js, …) to load BEFORE consent site-wide — for stores whose
+				// payment forms live outside a WooCommerce checkout (Forminator,
+				// Paid Memberships Pro, Easy Digital Downloads, Give, …). All OFF
+				// by default: a payment SDK can set cookies / fingerprint, so
+				// loading it before consent is an explicit, per-gateway,
+				// admin-responsibility decision — never automatic. (A genuine
+				// WooCommerce checkout/cart page is still exempt automatically as
+				// "strictly necessary", regardless of these toggles.) Keys mirror
+				// Frontend::payment_gateway_catalog().
+				'payment_gateways' => array_fill_keys( self::payment_gateway_keys(), false ),
 			),
 			'pageview_tracking' => false,
 			'consent_forwarding' => array(
@@ -228,7 +240,23 @@ class Settings extends Store {
 			'target_domains',
 			'whitelist_patterns',
 			'exempt_levels',
+			'payment_gateways',
 		);
+	}
+
+	/**
+	 * Canonical list of payment-gateway keys. The single source of truth is
+	 * Frontend::payment_gateway_catalog(); the literal list here is only a
+	 * fallback for the rare context where that class can't be autoloaded. Used by
+	 * BOTH the defaults and the sanitiser so the two never drift.
+	 *
+	 * @return string[]
+	 */
+	private static function payment_gateway_keys() {
+		if ( class_exists( '\\FazCookie\\Frontend\\Frontend' ) ) {
+			return array_keys( \FazCookie\Frontend\Frontend::payment_gateway_catalog() );
+		}
+		return array( 'paypal', 'stripe', 'square', 'braintree', 'klarna', 'mollie', 'amazon_pay' );
 	}
 	/**
 	 * Update settings to database.
@@ -399,6 +427,17 @@ class Settings extends Store {
 				}, $value ), function ( $item ) {
 					return '' !== $item;
 				} ) );
+				break;
+			case 'payment_gateways':
+				// Map of gateway-key => bool. Only known catalogue keys survive,
+				// each coerced to a strict boolean, so a settings PUT cannot smuggle
+				// an unknown gateway or a non-bool into the whitelist decision.
+				$gateway_keys = self::payment_gateway_keys();
+				$clean = array();
+				foreach ( $gateway_keys as $gw_key ) {
+					$clean[ $gw_key ] = ( is_array( $value ) && ! empty( $value[ $gw_key ] ) );
+				}
+				$value = $clean;
 				break;
 			case 'exempt_levels':
 				// Accept either an array of IDs or a comma-separated string

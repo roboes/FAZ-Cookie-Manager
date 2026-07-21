@@ -58,16 +58,25 @@ if ( ! function_exists( 'faz_allowed_html' ) ) {
 	 * @return array
 	 */
 	function faz_allowed_html() {
-		$html = array_merge(
+		$html = wp_kses_allowed_html( 'post' );
+		// Merge our required <input> attributes INTO whatever 'input' definition
+		// wp_kses_allowed_html( 'post' ) yields, rather than letting a whole-array
+		// array_merge clobber it. Another active plugin can hook
+		// wp_kses_allowed_html and add its own 'input' entry (e.g. a forms/comments
+		// plugin allowing 'value'); with our array passed FIRST to array_merge(),
+		// that entry would fully overwrite ours and drop type=true — so wp_kses()
+		// strips type="checkbox" from the category toggle, which then defaults to
+		// type="text" and renders as an editable field. Merging the sub-array keeps
+		// both sides' attributes. #188
+		$existing_input = ( isset( $html['input'] ) && is_array( $html['input'] ) ) ? $html['input'] : array();
+		$html['input']  = array_merge(
+			$existing_input,
 			array(
-				'input' => array(
-					'type'  => true,
-					'style' => true,
-					'id'    => true,
-					'class' => true,
-				),
-			),
-			wp_kses_allowed_html( 'post' )
+				'type'  => true,
+				'style' => true,
+				'id'    => true,
+				'class' => true,
+			)
 		);
 		$html = array_map( '_faz_global_attributes', $html );
 		return apply_filters( 'faz_allowed_html', $html );

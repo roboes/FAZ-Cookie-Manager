@@ -426,48 +426,182 @@ namespace {
 		'absent cache_compatibility key + no trigger → not country-dependent'
 	);
 
-	// --- F001 (#158): the MULTILINGUAL branch of faz_current_language() is
-	// gated under cache-compat. TranslatePress ($TRP_LANGUAGE) and Weglot
-	// resolve language from cookie/session state, which would vary the cached
-	// banner store per visitor on a shared URL. Defined LAST so the multilingual
-	// flag doesn't perturb the country-dependent assertions above.
-	if ( ! defined( 'TRP_PLUGIN_VERSION' ) ) {
-		define( 'TRP_PLUGIN_VERSION', '2.0.0' );
+	// --- MULTILINGUAL under cache-compat.
+	//
+	// The WPML assertions live at the END of this file (constants like
+	// ICL_LANGUAGE_CODE can't be undefined, so they're declared last to keep the
+	// country-dependent assertions above free of the multilingual flag).
+	//
+	// TranslatePress and Weglot are covered by their own isolated harness,
+	// tests/unit/test-trp-weglot-cache-compat-php.php: both sit BEFORE WPML in
+	// faz_current_language()'s elseif chain, so activating either here (via a
+	// constant that can never be undefined) would shadow the WPML branch for the
+	// rest of the process and make the WPML assertions below untestable.
+
+	// ---------------------------------------------------------------------
+	// FlyingPress bridge (issue #125): flying_press_is_cacheable() vetoes
+	// page caching exactly where the other page caches get DONOTCACHEPAGE.
+	// FlyingPress honours neither DONOTCACHEPAGE nor Cache-Control:no-store;
+	// its documented flying_press_is_cacheable filter is the only channel.
+	// ---------------------------------------------------------------------
+	echo "\nFrontend::flying_press_is_cacheable() (issue #125)\n";
+
+	if ( ! function_exists( 'is_admin' ) ) {
+		function is_admin() {
+			return ! empty( $GLOBALS['faz_test_is_admin'] );
+		}
 	}
-	$GLOBALS['TRP_LANGUAGE']                      = 'it_IT';
-	$GLOBALS['faz_test_options']['faz_settings']  = array(
-		'languages'      => array(
-			'default'  => 'en',
-			'selected' => array( 'en', 'it' ),
-		),
+	if ( ! function_exists( 'wp_doing_ajax' ) ) {
+		function wp_doing_ajax() {
+			return false;
+		}
+	}
+	if ( ! function_exists( 'wp_doing_cron' ) ) {
+		function wp_doing_cron() {
+			return false;
+		}
+	}
+	if ( ! function_exists( 'faz_disable_banner' ) ) {
+		function faz_disable_banner() {
+			return false;
+		}
+	}
+	if ( ! function_exists( 'faz_is_front_end_request' ) ) {
+		function faz_is_front_end_request() {
+			return empty( $GLOBALS['faz_test_not_frontend'] );
+		}
+	}
+
+	/**
+	 * Frontend double: is_banner_disabled_by_settings() reads the real
+	 * Store-backed settings object (unavailable here), so surface it as a
+	 * seedable flag; everything else runs the real code paths.
+	 */
+	class Faz_FP_Frontend extends Frontend {
+		public $banner_disabled = false;
+		protected function is_banner_disabled_by_settings() {
+			return $this->banner_disabled;
+		}
+	}
+
+	/** Faz_FP_Frontend with a reflection-seeded settings cache. */
+	function faz_fp_frontend( array $settings, $banner_disabled = false ) {
+		$fe = ( new ReflectionClass( Faz_FP_Frontend::class ) )->newInstanceWithoutConstructor();
+		$p  = new ReflectionProperty( Frontend::class, 'settings_option_cache' );
+		$p->setAccessible( true );
+		$p->setValue( $fe, $settings );
+		$fe->banner_disabled = $banner_disabled;
+		return $fe;
+	}
+
+	$GLOBALS['faz_test_filters']     = array();
+	$GLOBALS['faz_test_is_admin']    = false;
+	$GLOBALS['faz_test_not_frontend'] = false;
+	Controller::$countryDependent    = false;
+	\FazCookie\Frontend\Includes\Geo_Runtime::$enabled = false;
+
+	$dependent_settings = array(
 		'banner_control' => array( 'cache_compatibility' => false ),
+		'iab'            => array( 'enabled' => true ),
 	);
-	faz_current_language( true );
+
 	assert_eq(
-		faz_current_language(),
-		'it',
-		'cache_compatibility OFF → TranslatePress cookie/session language is honoured (unchanged)'
+		faz_fp_frontend( $dependent_settings )->flying_press_is_cacheable( true ),
+		false,
+		'country-dependent output → FlyingPress caching vetoed'
 	);
-	$GLOBALS['faz_test_options']['faz_settings']['banner_control']['cache_compatibility'] = true;
-	faz_current_language( true );
 	assert_eq(
-		faz_current_language(),
-		'en',
-		'cache_compatibility ON → TranslatePress language is gated; render stays default-stable (#158)'
+		faz_fp_frontend( array( 'banner_control' => array( 'cache_compatibility' => false ) ) )->flying_press_is_cacheable( true ),
+		true,
+		'no country-dependence → FlyingPress verdict untouched'
 	);
+	assert_eq(
+		faz_fp_frontend( array(
+			'banner_control' => array( 'cache_compatibility' => true ),
+			'iab'            => array( 'enabled' => true ),
+		) )->flying_press_is_cacheable( true ),
+		true,
+		'Cache Compatibility Mode ON → page stays cacheable by FlyingPress'
+	);
+	assert_eq(
+		faz_fp_frontend( $dependent_settings )->flying_press_is_cacheable( false ),
+		false,
+		'an exclusion decided elsewhere (false in) is never overturned'
+	);
+	assert_eq(
+		faz_fp_frontend( $dependent_settings, true )->flying_press_is_cacheable( true ),
+		true,
+		'banner disabled by settings → no veto (page never renders the banner)'
+	);
+	$GLOBALS['faz_test_not_frontend'] = true;
+	assert_eq(
+		faz_fp_frontend( $dependent_settings )->flying_press_is_cacheable( true ),
+		true,
+		'non-frontend request (REST/AJAX scope guard) → no veto'
+	);
+	$GLOBALS['faz_test_not_frontend'] = false;
+	$GLOBALS['faz_test_is_admin']     = true;
+	assert_eq(
+		faz_fp_frontend( $dependent_settings )->flying_press_is_cacheable( true ),
+		true,
+		'admin request → no veto'
+	);
+	$GLOBALS['faz_test_is_admin'] = false;
+
+	// --- WPML URL-negotiation exception: resolving the WPML language IS
+	// cache-safe even under Cache Compatibility Mode when WPML encodes the
+	// language in the URL (directory or domain mode) — a URL-keyed cache then
+	// stores one entry per language, exactly like Polylang. Only WPML's
+	// parameter/cookie negotiation stays gated to the default (query strings are
+	// unreliable cache keys). faz_wpml_language_in_url() gates it.
+	echo "\nfaz_current_language() — WPML URL-mode under cache-compat\n";
+
+	// WPML defines this constant; defining it here makes the WPML branch
+	// reachable. (Can't be undefined afterwards — placed last on purpose.)
+	if ( ! defined( 'ICL_LANGUAGE_CODE' ) ) {
+		define( 'ICL_LANGUAGE_CODE', 'it' );
+	}
+	// Isolate the WPML branch from the TranslatePress stub defined earlier
+	// (TRP_PLUGIN_VERSION is a constant and outlives this file's earlier test).
+	unset( $GLOBALS['TRP_LANGUAGE'] );
+
+	$GLOBALS['faz_test_options']['faz_settings'] = array(
+		'languages'      => array( 'default' => 'en', 'selected' => array( 'en', 'it' ) ),
+		'banner_control' => array( 'cache_compatibility' => true ),
+	);
+	$wpml_negotiation            = 1;
 	$GLOBALS['faz_test_filters'] = array(
+		'wpml_setting'          => array(
+			function ( $value, $name = '' ) use ( &$wpml_negotiation ) {
+				return 'language_negotiation_type' === $name ? $wpml_negotiation : $value;
+			},
+		),
 		'wpml_current_language' => array(
 			function () {
 				return 'it';
 			},
 		),
 	);
+
+	// Directory mode (type 1) → URL-keyed → resolved under cache-compat.
+	$wpml_negotiation = 1;
+	assert_eq( faz_wpml_language_in_url(), true, 'WPML directory mode (type 1) → language is URL-keyed (cache-safe)' );
 	faz_current_language( true );
-	assert_eq(
-		faz_current_language(),
-		'en',
-		'cache_compatibility ON → WPML cookie-mode fallback is gated; render stays default-stable (#160)'
-	);
+	assert_eq( faz_current_language(), 'it', 'cache-compat ON + WPML directory mode → per-URL WPML language is honoured' );
+
+	// Domain mode (type 2) → also URL-keyed → resolved under cache-compat.
+	$wpml_negotiation = 2;
+	assert_eq( faz_wpml_language_in_url(), true, 'WPML domain mode (type 2) → language is URL-keyed (cache-safe)' );
+	faz_current_language( true );
+	assert_eq( faz_current_language(), 'it', 'cache-compat ON + WPML domain mode → per-URL WPML language is honoured' );
+
+	// Parameter mode (type 3) → query string, not a reliable cache key → gated.
+	$wpml_negotiation = 3;
+	assert_eq( faz_wpml_language_in_url(), false, 'WPML parameter mode (type 3) → not URL-keyed (query strings unreliable in caches)' );
+	faz_current_language( true );
+	assert_eq( faz_current_language(), 'en', 'cache-compat ON + WPML parameter mode → language stays gated to the site default' );
+
+	$GLOBALS['faz_test_filters'] = array();
 
 	echo "\n";
 	if ( $tests_failed > 0 ) {

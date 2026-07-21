@@ -348,17 +348,20 @@ class Generator {
 	}
 
 	/**
-	 * Compute the sha1 of a (template_path, data) tuple for FR-07 versioning.
+	 * Compute the sha1 of a (template, data) tuple for FR-07 versioning.
 	 *
 	 * Volatile display-only keys (see HASH_VOLATILE_KEYS) are stripped from
 	 * $data before hashing so the version reflects material change only.
 	 *
-	 * @param string $template_path Absolute path.
-	 * @param array  $data          Substitution data.
+	 * @param string $template_path      Absolute path.
+	 * @param array  $data               Substitution data.
+	 * @param string $effective_scaffold Optional gettext-composed Markdown.
 	 * @return string 12-char hex.
 	 */
-	public static function policy_version_hash( $template_path, array $data ) {
-		$template_sha = $template_path && file_exists( $template_path ) ? sha1_file( $template_path ) : sha1( 'no-template' );
+	public static function policy_version_hash( $template_path, array $data, $effective_scaffold = '' ) {
+		$template_sha = is_string( $effective_scaffold ) && '' !== $effective_scaffold
+			? sha1( $effective_scaffold )
+			: ( $template_path && file_exists( $template_path ) ? sha1_file( $template_path ) : sha1( 'no-template' ) );
 		$stable_data  = array_diff_key( $data, array_flip( self::HASH_VOLATILE_KEYS ) );
 		$data_sha     = sha1( wp_json_encode( $stable_data ) ?: '' );
 		return substr( $template_sha, 0, 6 ) . '.' . substr( $data_sha, 0, 6 );

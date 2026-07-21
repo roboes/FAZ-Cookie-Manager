@@ -154,6 +154,7 @@ defined( 'ABSPATH' ) || exit;
 					<label><?php esc_html_e( 'Banner Type', 'faz-cookie-manager' ); ?></label>
 					<select class="faz-select" id="faz-b-type" style="width:auto;max-width:280px;">
 						<option value="box"><?php esc_html_e( 'Box (bottom corner)', 'faz-cookie-manager' ); ?></option>
+						<option value="popup"><?php esc_html_e( 'Box (centered)', 'faz-cookie-manager' ); ?></option>
 						<option value="banner"><?php esc_html_e( 'Full-width Banner', 'faz-cookie-manager' ); ?></option>
 						<option value="classic"><?php esc_html_e( 'Classic', 'faz-cookie-manager' ); ?></option>
 					</select>
@@ -187,6 +188,16 @@ defined( 'ABSPATH' ) || exit;
 						<option value="pushdown"><?php esc_html_e( 'Pushdown', 'faz-cookie-manager' ); ?></option>
 						<option value="sidebar"><?php esc_html_e( 'Sidebar', 'faz-cookie-manager' ); ?></option>
 					</select>
+				</div>
+
+				<div class="faz-form-group" id="faz-soft-cookie-wall-group">
+					<label class="faz-toggle">
+						<input type="checkbox" id="faz-b-soft-cookie-wall">
+						<span class="faz-toggle-track"></span>
+						<span class="faz-toggle-label"><?php esc_html_e( 'Dim the page behind the banner', 'faz-cookie-manager' ); ?></span>
+					</label>
+					<div class="faz-help"><?php esc_html_e( 'Greys out the page to draw attention to the banner. The page stays fully usable — visitors can still read, scroll, and click links while the banner is shown; the overlay is a visual cue only and never blocks interaction.', 'faz-cookie-manager' ); ?></div>
+					<div class="faz-help" style="margin-top:4px;">&#9888; <?php esc_html_e( 'Keep this as a visual cue only. An overlay that blocked interaction would act as a cookie wall, which carries EU consent-validity risk under GDPR/EDPB guidance (consent must stay freely given).', 'faz-cookie-manager' ); ?></div>
 				</div>
 			</div>
 		</div>
@@ -672,6 +683,44 @@ defined( 'ABSPATH' ) || exit;
 						<label><?php esc_html_e( 'Reject All Button', 'faz-cookie-manager' ); ?></label>
 						<input type="text" class="faz-input" id="faz-b-pref-reject" placeholder="<?php esc_attr_e( 'Reject All', 'faz-cookie-manager' ); ?>">
 					</div>
+				</div>
+			</div>
+		</div>
+
+		<?php // Opt-out (Do Not Sell) modal text. Only shown for CCPA / US State Laws banners (law = ccpa or gdpr_ccpa); toggleDoNotSellColorRow() controls visibility. Writes to optoutPopup.elements.* (#187). ?>
+		<div class="faz-card" id="faz-optout-text-card" style="display:none;">
+			<div class="faz-card-header">
+				<h3><?php esc_html_e( 'Opt-out (Do Not Sell) Text', 'faz-cookie-manager' ); ?></h3>
+			</div>
+			<div class="faz-card-body">
+				<div class="faz-help" style="margin-bottom:12px;"><?php esc_html_e( 'Text for the "Opt-out Preferences" modal a visitor sees after clicking the "Do Not Sell or Share My Personal Information" link. Shown only on CCPA / US State Laws (and Both) banners. Follows the language selected above.', 'faz-cookie-manager' ); ?></div>
+				<div class="faz-form-group">
+					<label><?php esc_html_e( 'Title', 'faz-cookie-manager' ); ?></label>
+					<input type="text" class="faz-input" id="faz-b-optout-title" placeholder="<?php esc_attr_e( 'Opt-out Preferences', 'faz-cookie-manager' ); ?>">
+				</div>
+				<div class="faz-form-group">
+					<label><?php esc_html_e( 'Description', 'faz-cookie-manager' ); ?></label>
+					<?php
+					wp_editor(
+						'',
+						'faz-b-optout-desc',
+						array(
+							'textarea_rows' => 6,
+							'media_buttons' => false,
+							'quicktags'     => true,
+							'teeny'         => false,
+							'tinymce'       => array(
+								'toolbar1' => 'bold,italic,underline,link,unlink,bullist,numlist,blockquote,hr,undo,redo',
+								'toolbar2' => '',
+							),
+						)
+					);
+					?>
+					<div class="faz-help"><?php esc_html_e( 'Supports plain text or HTML. Keep it short enough to stay readable on mobile.', 'faz-cookie-manager' ); ?></div>
+				</div>
+				<div class="faz-form-group">
+					<label><?php esc_html_e( 'Opt-out Toggle Label', 'faz-cookie-manager' ); ?></label>
+					<input type="text" class="faz-input" id="faz-b-optout-option-title" placeholder="<?php esc_attr_e( 'Do Not Sell or Share My Personal Information', 'faz-cookie-manager' ); ?>">
 				</div>
 			</div>
 		</div>
