@@ -22,6 +22,7 @@ import { test, expect } from '../fixtures/wp-fixture';
 import type { Page, BrowserContext } from '@playwright/test';
 import { WP_PATH, wp, wpEval } from '../utils/wp-env';
 import { clickFirstVisible } from '../utils/ui';
+import { acquireSharedWordPressLock, releaseSharedWordPressLock } from '../utils/shared-wordpress-lock';
 
 type FazSettings = Record<string, unknown>;
 
@@ -88,6 +89,7 @@ test.describe('Per-service consent — canonical suite (25)', () => {
   let cleanId = '';
   let lightboxId = '';
   let rev = '1';
+  let lockHeld = false;
 
   const mkPage = (title: string, slug: string, content: string): { id: string; url: string } => {
     const id = wp(['post', 'create', '--post_type=page', '--post_status=publish',
@@ -96,7 +98,11 @@ test.describe('Per-service consent — canonical suite (25)', () => {
     return { id, url: wp(['post', 'get', id, '--field=url']) };
   };
 
-  test.beforeAll(async ({ browser, loginAsAdmin }) => {
+  test.beforeAll(async ({ browser, loginAsAdmin }, testInfo) => {
+    testInfo.setTimeout(41 * 60_000);
+    await acquireSharedWordPressLock();
+    lockHeld = true;
+
     const admin = await browser.newPage();
     await loginAsAdmin(admin);
     await admin.goto('/wp-admin/admin.php?page=faz-cookie-manager-settings', { waitUntil: 'domcontentloaded' });
@@ -135,16 +141,24 @@ test.describe('Per-service consent — canonical suite (25)', () => {
   });
 
   test.afterAll(async ({ browser, loginAsAdmin }) => {
-    for (const id of [staticId, cleanId, lightboxId]) {
-      if (id) wp(['post', 'delete', id, '--force'], { allowRetry: false });
+    try {
+      for (const id of [staticId, cleanId, lightboxId]) {
+        if (id) wp(['post', 'delete', id, '--force'], { allowRetry: false });
+      }
+      if (original?.banner_control) {
+        const admin = await browser.newPage();
+        await loginAsAdmin(admin);
+        await admin.goto('/wp-admin/admin.php?page=faz-cookie-manager-settings', { waitUntil: 'domcontentloaded' });
+        const nonce = await getAdminNonce(admin);
+        await postSettings(admin, nonce, { banner_control: original.banner_control as FazSettings });
+        await admin.close();
+      }
+    } finally {
+      if (lockHeld) {
+        releaseSharedWordPressLock();
+        lockHeld = false;
+      }
     }
-    if (!original?.banner_control) return;
-    const admin = await browser.newPage();
-    await loginAsAdmin(admin);
-    await admin.goto('/wp-admin/admin.php?page=faz-cookie-manager-settings', { waitUntil: 'domcontentloaded' });
-    const nonce = await getAdminNonce(admin);
-    await postSettings(admin, nonce, { banner_control: original.banner_control as FazSettings });
-    await admin.close();
   });
 
   // Helpers reading frontend state.

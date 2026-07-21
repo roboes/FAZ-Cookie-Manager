@@ -3,6 +3,7 @@ import { expect, test } from '../fixtures/wp-fixture';
 import { clickFirstVisible } from '../utils/ui';
 import { wpEval } from '../utils/wp-env';
 import { resetBaseline } from '../utils/seed-defaults';
+import { acquireSharedWordPressLock, releaseSharedWordPressLock } from '../utils/shared-wordpress-lock';
 
 type GcmLayerEntry = [string, unknown?, unknown?];
 type GcmScenario = {
@@ -12,6 +13,8 @@ type GcmScenario = {
   npa: number[];
   addtl: string;
 };
+
+let lockHeld = false;
 
 function parseCookieConsentTcString(tcString: string | undefined | null): { created: number; lastUpdated: number } | null {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
@@ -202,8 +205,18 @@ test.describe('GCM and IAB TCF behavior', () => {
   // Start from a clean banner + GCM baseline regardless of what earlier specs
   // in the serial run left behind (a prior GCM spec's enabled config, a banner
   // flipped to classic/ccpa, etc.), so these tests aren't hostage to run order.
-  test.beforeAll(() => {
+  test.beforeAll(async ({}, testInfo) => {
+    testInfo.setTimeout(41 * 60_000);
+    await acquireSharedWordPressLock();
+    lockHeld = true;
     resetBaseline();
+  });
+
+  test.afterAll(() => {
+    if (lockHeld) {
+      releaseSharedWordPressLock();
+      lockHeld = false;
+    }
   });
 
   test('GCM default consent is denied when feature is enabled', async ({ page }) => {
